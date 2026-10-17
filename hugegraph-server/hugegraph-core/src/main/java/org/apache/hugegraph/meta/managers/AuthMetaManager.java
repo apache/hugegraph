@@ -855,8 +855,18 @@ public class AuthMetaManager extends AbstractMetaManager {
     public void clearGraphAuth(String graphSpace) {
         E.checkArgument(StringUtils.isNotEmpty(graphSpace),
                         "The graphSpace is empty");
-        String prefix = this.authPrefix(graphSpace);
-        this.metaDriver.deleteWithPrefix(prefix);
+        // Graph keys sit beside AUTH under the graphspace, and a graph may be
+        // named AUTH or AUTHx. Delete each kind of auth key up to its
+        // delimiter, not the whole AUTH prefix, so the schema and task keys
+        // of such a graph are left alone
+        String[] prefixes = {this.roleListKey(graphSpace),
+                             this.targetListKey(graphSpace),
+                             this.belongListKey(graphSpace),
+                             this.accessListKey(graphSpace),
+                             this.projectListKey(graphSpace)};
+        for (String prefix : prefixes) {
+            this.metaDriver.deleteWithPrefix(prefix + META_PATH_DELIMITER);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1042,16 +1052,6 @@ public class AuthMetaManager extends AbstractMetaManager {
                            this.cluster,
                            META_PATH_AUTH,
                            META_PATH_USER);
-    }
-
-    private String authPrefix(String graphSpace) {
-        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH
-        return String.join(META_PATH_DELIMITER,
-                           META_PATH_HUGEGRAPH,
-                           this.cluster,
-                           META_PATH_GRAPHSPACE,
-                           graphSpace,
-                           META_PATH_AUTH);
     }
 
     private String groupKey(String group) {

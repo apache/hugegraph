@@ -812,9 +812,9 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
         @Override
         public void truncate() throws Exception {
+            // The schema lives in PD meta and survives a truncate, so the schema
+            // id counters in PD must survive too: a reset hands out ids again
             this.graph.truncate();
-            HstoreSessionsImpl.getDefaultPdClient()
-                              .resetIdByKey(this.getGraphName());
         }
 
         @Override

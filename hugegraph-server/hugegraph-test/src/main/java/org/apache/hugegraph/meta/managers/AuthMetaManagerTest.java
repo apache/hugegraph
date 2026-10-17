@@ -150,6 +150,35 @@ public class AuthMetaManagerTest {
         Mockito.verify(driver).delete(key);
     }
 
+    @Test
+    public void testClearGraphAuthKeepsGraphsNamedLikeAuth() {
+        String space = "HUGEGRAPH/cluster/GRAPHSPACE/SPACE_A/";
+        // Graph keys sit beside AUTH under the graphspace, so a graph may be
+        // named AUTH or AUTHx. Its keys and those of other graphspaces stay
+        Set<String> kept = new HashSet<>(Arrays.asList(
+                space + "AUTH/SCHEMA/PROPERTY_KEY/NAME/name",
+                space + "AUTH/TASK/1/TASK_LOCK",
+                space + "AUTHx/SCHEMA/PROPERTY_KEY/NAME/name",
+                space + "AUTHx/TASK/1/TASK_LOCK",
+                "HUGEGRAPH/cluster/GRAPHSPACE/SPACE_AB/AUTH/ROLE/role"));
+        Set<String> keys = new HashSet<>(kept);
+        for (String type : Arrays.asList("ROLE", "TARGET", "BELONG",
+                                         "ACCESS", "PROJECT")) {
+            keys.add(space + "AUTH/" + type + "/name");
+        }
+        MetaDriver driver = Mockito.mock(MetaDriver.class);
+        Mockito.doAnswer(invocation -> {
+            String prefix = invocation.getArgument(0);
+            keys.removeIf(key -> key.startsWith(prefix));
+            return null;
+        }).when(driver).deleteWithPrefix(Mockito.anyString());
+        AuthMetaManager manager = new AuthMetaManager(driver, "cluster");
+
+        manager.clearGraphAuth("SPACE_A");
+
+        Assert.assertEquals(kept, keys);
+    }
+
     private static HugeProject project() {
         HugeProject project = new HugeProject("project", "description");
         project.adminGroupId(IdGenerator.of("admin-group"));
