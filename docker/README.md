@@ -233,6 +233,30 @@ Open `http://localhost:8088` and sign in as `admin` with the password from `.env
 
 </details>
 
+### Store registration during restart
+
+Stores first register `Offline` to obtain their persisted identity, restore local
+partition engines, and then register `Up`. A restore failure keeps the Store
+offline and the heartbeat loop retries it. Graceful shutdown stops heartbeat
+producers before reporting `Offline` to PD; if PD is unavailable, normal heartbeat
+expiry remains the fallback. A temporary stop does not request permanent retirement.
+Offline reports retain the existing keepalive window without extending it, so a
+quick restart does not fail the cluster's initial-store-count gate. A Store that
+does not return is still removed by normal expiry. Stream reconnects after a
+successful restore register `Up` directly without restoring the engines again.
+Restoration attempts every local partition before reporting any failures.
+
+Upgrade PD before Store to enable this registration handshake. Older Stores keep
+their existing registration behavior; older PD versions ignore the restore gate.
+`Up` confirms local engine restore, not Raft catch-up or full shard-group health.
+PD's authenticated `/v1/stores` and `/v1/store/{id}` responses also expose
+`heartbeatAgeMillis`, computed with PD's clock (`-1` when no heartbeat is known).
+Compare it with the fixed 30-second Store heartbeat period to distinguish a stale `Up` record
+from a recent heartbeat without waiting for keep-alive expiry. A future timestamp
+caused by a PD clock adjustment reports zero age.
+Keep the cluster preset's manual rollout barrier and verify fresh heartbeats,
+membership and leaders before replacing another Store.
+
 ### Select image versions
 
 <details>

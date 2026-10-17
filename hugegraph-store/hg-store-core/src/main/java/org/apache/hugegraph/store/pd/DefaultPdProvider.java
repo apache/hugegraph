@@ -133,7 +133,10 @@ public class DefaultPdProvider implements PdProvider {
                  store);
 
         long storeId = 0;
-        Metapb.Store protoObj = store.getProtoObj();
+        Metapb.Store protoObj = store.getProtoObj().toBuilder()
+                                     .setState(store.getState() == Metapb.StoreState.Up ?
+                                               Metapb.StoreState.Up : Metapb.StoreState.Offline)
+                                     .build();
         try {
             storeId = pdClient.registerStore(protoObj);
             store.setId(storeId);

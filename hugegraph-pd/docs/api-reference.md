@@ -200,6 +200,15 @@ channel.shutdown();
 
 Register a new Store node with PD.
 
+Updated Stores first register `Offline` to obtain their identity, restore local
+partition engines, then register `Up`. Upgrade PD before Store: older PD versions
+ignore this restore gate, and older Stores retain their previous registration
+behavior. Pending Stores still require activation. `Up` does not guarantee Raft
+catch-up; graceful shutdown reports `Offline` without requesting permanent retirement.
+Temporary Offline reports retain the existing keepalive entry without renewing it;
+expiry still removes a Store that does not return. Once local restore succeeds,
+stream reconnects register `Up` directly without repeating recovery.
+
 **Request**:
 ```protobuf
 message RegisterStoreRequest {
@@ -913,6 +922,16 @@ curl http://localhost:8620/v1/partitions?graph_name=social_network
 ```
 
 ### Store API
+
+#### Heartbeat freshness
+
+The authenticated `/v1/stores` and `/v1/store/{id}` responses expose
+`heartbeatAgeMillis` alongside the existing `lastHeartBeat`. Age is computed with
+PD's clock, is `-1` if no heartbeat is recorded, and is clamped to zero for future
+timestamps after a clock adjustment. Compare it with the fixed 30-second Store
+heartbeat period (30000 ms) to detect stale `Up` records before keep-alive expiry.
+Read this state from the PD leader and continue to verify shard-group membership
+and leaders during rolling updates; fresh heartbeats do not prove Raft catch-up.
 
 #### List Stores
 

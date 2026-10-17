@@ -298,6 +298,7 @@ public class StoreAPI extends API {
         // For the time being, the time of the first heartbeat is taken as the registration time
         long registedTimeStamp;
         long lastHeartBeat; // Last heartbeat time
+        long heartbeatAgeMillis; // PD's elapsed time since the last heartbeat; -1 if unknown
         long capacity;
         long available;
         int partitionCount;
@@ -341,6 +342,8 @@ public class StoreAPI extends API {
                 }
                 registedTimeStamp = store.getStartTimestamp(); // Time of registration
                 lastHeartBeat = store.getLastHeartbeat();
+                heartbeatAgeMillis = lastHeartBeat > 0 ?
+                                     Math.max(0L, System.currentTimeMillis() - lastHeartBeat) : -1L;
                 capacity = store.getStats().getCapacity();
                 available = store.getStats().getAvailable();
                 partitionCount = store.getStats().getPartitionCount();

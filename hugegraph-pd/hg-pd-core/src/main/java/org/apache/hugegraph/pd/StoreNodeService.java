@@ -133,6 +133,7 @@ public class StoreNodeService {
      * @param store
      */
     public Metapb.Store register(Metapb.Store store) throws PDException {
+        boolean restoring = store.getState() == Metapb.StoreState.Offline;
         if (store.getId() == 0) {
             // Initial registration, generate a new ID, and ensure that the ID is not duplicated.
             store = newStoreNode(store);
@@ -158,15 +159,6 @@ public class StoreNodeService {
         }
 
         // offline or up, or in the initial activation list, go live automatically
-        // TODO: do not mark a re-registering Store Up before it has restored its partition engines
-        // (HgStoreEngine.restoreLocalPartitionEngine); report a restoring state, or expose
-        // restore-complete per shard group, so a rolling restart can wait on it. The Helm chart
-        // (helm/hugegraph) production preset (values-cluster.yaml) keeps Store rollouts on
-        // OnDelete with a manual /v1/shardGroups barrier between Pod deletions; the default
-        // values use RollingUpdate. Restore-complete alone does not retire the barrier: a stopped
-        // Store stays Up until its keep-alive entry expires, so keep the rollout checks until PD
-        // also exposes liveness that tells stale membership apart.
-        // https://github.com/apache/hugegraph/issues/3229
         Metapb.StoreState storeState = lastStore.getState();
         if (storeState == Metapb.StoreState.Offline || storeState == Metapb.StoreState.Up
             || inInitialStoreList(store)) {
@@ -206,12 +198,24 @@ public class StoreNodeService {
             }
         }
 
+        // Updated Stores register Offline to obtain their identity before restoring partitions.
+        // Older Stores still request Up, and Pending activation and duplicate checks stay intact.
+        if (restoring && storeState == Metapb.StoreState.Up) {
+            storeState = Metapb.StoreState.Offline;
+            store = store.toBuilder().setState(storeState).build();
+        }
+
         // Store information
         storeInfoMeta.updateStore(store);
         if (storeState == Metapb.StoreState.Up) {
             // Update the store active status
             storeInfoMeta.keepStoreAlive(store);
             onStoreStatusChanged(store, Metapb.StoreState.Offline, Metapb.StoreState.Up);
+            checkStoreStatus();
+        } else if (storeState == Metapb.StoreState.Offline &&
+                   lastStore.getState() == Metapb.StoreState.Up) {
+            // Keep the existing keepalive window during a temporary restart; do not renew it.
+            onStoreStatusChanged(store, Metapb.StoreState.Up, Metapb.StoreState.Offline);
             checkStoreStatus();
         }
 
@@ -288,6 +292,8 @@ public class StoreNodeService {
         }
 
         storeInfoMeta.updateStore(store);
+        // Temporary Offline reports retain the existing keepalive entry without renewing it.
+        // Removing it here makes a rolling restart fail the initial-store-count gate.
         if (store.getState() != Metapb.StoreState.Unknown &&
             store.getState() != lastStore.getState()) {
             // If you want to take the store offline
@@ -310,9 +316,6 @@ public class StoreNodeService {
                     storeInfoMeta.removeActiveStore(store);
                 }
                 storeTurnoff(store);
-            } else if (store.getState() == Metapb.StoreState.Offline) {
-                // Monitor that the store has gone offline and is removed from the active
-                storeInfoMeta.removeActiveStore(store);
             } else if (store.getState() == Metapb.StoreState.Tombstone) {
                 // When the status changes, the store is shut down, the shardGroup is modified,
                 // and the replica is migrated

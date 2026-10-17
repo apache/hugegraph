@@ -170,7 +170,6 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
 
         heartbeatService = new HeartbeatService(this);
         heartbeatService.setStoreMetadata(partitionManager.getStoreMetadata());
-        heartbeatService.addStateListener(this).init(options);
 
         metricService = HgMetricService.getInstance();
         metricService.setHgStoreEngine(this).init(null);
@@ -181,6 +180,8 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
             dataManager.setMetaManager(partitionManager);
             dataManager.setCmdClient(hgCmdClient);
         }
+        // Registration can restore partition engines immediately, so initialize their owners first.
+        heartbeatService.init(options);
         return true;
     }
 
@@ -277,12 +278,6 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
      * 1. Need to check the partition saved this time, delete the invalid partitions.
      */
     public void restoreLocalPartitionEngine() {
-        // TODO: surface the outcome of this restore (a per-group ready signal, or a failed state
-        // reported to PD) instead of logging only; a Store is marked Up before this runs and a
-        // failed restore leaves it Up with missing shard groups. Paired with the TODO in
-        // StoreNodeService, which also says why this signal alone does not retire the manual
-        // Store rollout barrier in the Helm chart (helm/hugegraph) cluster preset.
-        // https://github.com/apache/hugegraph/issues/3229
         try {
             if (!options.isFakePD()) {  // FakePD mode does not require synchronization
                 partitionManager.syncPartitionsFromPD(partition -> {
@@ -291,18 +286,25 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
                             "Please delete the redundant data manually,  {}", partition);
                 });
             }
+            List<Exception> failures = new ArrayList<>();
             partitionManager.getPartitions().forEach((k, g) -> {
                 g.forEach((id, p) -> {
                     try {
                         createPartitionEngine(p);
                     } catch (Exception e) {
-                        log.error("Partition {}-{} restore  exception {}", p.getGraphName(),
-                                  p.getId(), e);
+                        failures.add(new IllegalStateException("Failed to restore partition " +
+                                                               p.getGraphName() + "-" + p.getId(), e));
                     }
                 });
             });
+            if (!failures.isEmpty()) {
+                IllegalStateException failure = new IllegalStateException("Failed to restore " +
+                                                                          failures.size() + " partitions");
+                failures.forEach(failure::addSuppressed);
+                throw failure;
+            }
         } catch (PDException e) {
-            log.error("HgStoreEngine restoreLocalPartitionEngine error {}", e);
+            throw new IllegalStateException("Failed to synchronize partitions before restore", e);
         }
     }
 

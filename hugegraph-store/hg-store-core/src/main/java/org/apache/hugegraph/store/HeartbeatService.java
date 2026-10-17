@@ -70,6 +70,7 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
     // Thread sleep time
     private volatile int timerNextDelay = 1000;
     private volatile boolean terminated = false;
+    private boolean restored = false;
     private final AtomicBoolean fatalExitRequested = new AtomicBoolean();
     private Thread storeHeartbeatThread;
     private Thread partitionHeartbeatThread;
@@ -200,10 +201,44 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             this.storeInfo.setStoreAddress(IpUtil.getNearestAddress(options.getGrpcAddress()));
             this.storeInfo.setRaftAddress(IpUtil.getNearestAddress(options.getRaftAddress()));
 
-            long storeId = pdProvider.registerStore(this.storeInfo);
+            // Recovery is needed once per process, not when an established stream reconnects.
+            boolean restoring = !restored;
+            this.storeInfo.setState(restoring ? Metapb.StoreState.Offline : Metapb.StoreState.Up);
+            long storeId;
+            try {
+                storeId = pdProvider.registerStore(this.storeInfo);
+            } finally {
+                // Retry registration after a failure instead of heartbeating an unregistered Store.
+                this.storeInfo.setState(Metapb.StoreState.Offline);
+            }
             if (storeId != 0) {
                 storeInfo.setId(storeId);
                 storeMetadata.save(storeInfo);
+                if (restoring && storeEngine != null) {
+                    try {
+                        storeEngine.stateChanged(storeInfo, Metapb.StoreState.Offline, Metapb.StoreState.Up);
+                    } catch (RuntimeException e) {
+                        log.error("Store {} remains Offline after partition restore failed", storeId, e);
+                        timerNextDelay = REGISTER_RETRY_INTERVAL * 1000;
+                        return;
+                    }
+                }
+                restored = true;
+                if (terminated) {
+                    return;
+                }
+                boolean registered = false;
+                try {
+                    storeInfo.setState(Metapb.StoreState.Up);
+                    registered = !restoring || pdProvider.registerStore(storeInfo) != 0;
+                } finally {
+                    if (!registered) {
+                        storeInfo.setState(Metapb.StoreState.Offline);
+                    }
+                }
+                if (!registered) {
+                    return;
+                }
                 this.clusterStats = pdProvider.getClusterStats();
                 if (clusterStats.getState() == Metapb.ClusterState.Cluster_OK) {
                     timerNextDelay = options.getStoreHBInterval() * 1000;
@@ -407,11 +442,35 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             // Never hold this monitor while joining the producer threads.
             synchronized (stateChangeLock) {
                 // Acquiring the monitor waits for any in-flight state callback to finish.
+                reportOffline();
             }
         } finally {
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }
+        }
+    }
+
+    private void reportOffline() {
+        if (fatalExitRequested.get() || storeInfo == null) {
+            return;
+        }
+        storeInfo.setState(Metapb.StoreState.Offline);
+        if (storeInfo.getId() == 0 || pdProvider == null ||
+            pdProvider.getPDClient() == null) {
+            return;
+        }
+        try {
+            // Preserve PD's current metadata, and never use Exiting for a temporary restart.
+            var client = pdProvider.getPDClient();
+            client.getCache().removeStore(storeInfo.getId());
+            Metapb.Store current = client.getStore(storeInfo.getId());
+            if (current.getState() == Metapb.StoreState.Up) {
+                client.updateStore(current.toBuilder().setState(Metapb.StoreState.Offline).build());
+            }
+        } catch (PDException | RuntimeException e) {
+            // PD may be unavailable during cluster shutdown; heartbeat expiry remains the fallback.
+            log.warn("Failed to report Store {} offline during shutdown", storeInfo.getId(), e);
         }
     }
 

@@ -374,9 +374,10 @@ public class HeartbeatShutdownTest {
             assertStillClosing(shutdown);
             callbackRelease.countDown();
             shutdown.get(5, TimeUnit.SECONDS);
-            service.onStateChanged(Metapb.StoreState.Offline);
+            Assert.assertEquals(Metapb.StoreState.Offline, service.getStoreInfo().getState());
+            service.onStateChanged(Metapb.StoreState.Up);
             Assert.assertEquals(1, calls.get());
-            Assert.assertEquals(Metapb.StoreState.Up, service.getStoreInfo().getState());
+            Assert.assertEquals(Metapb.StoreState.Offline, service.getStoreInfo().getState());
         } finally {
             callbackRelease.countDown();
             service.shutdown();
