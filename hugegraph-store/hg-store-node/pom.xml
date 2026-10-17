@@ -120,7 +120,6 @@
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hg-store-core</artifactId>
         </dependency>
-
         <dependency>
             <groupId>com.taobao.arthas</groupId>
             <artifactId>arthas-agent-attach</artifactId>
@@ -180,5 +179,23 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          Opt-in: bundles S3 cloud storage support (hg-store-cloud-s3 + AWS SDK) directly
+          into this module's fat jar as a normal compile dependency. hg-store-cloud-s3 is
+          always built as a regular module; without `-Ps3-cloud-storage` the node fat jar
+          does not ship it or the AWS SDK.
+          -->
+        <profile>
+            <id>s3-cloud-storage</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hg-store-cloud-s3</artifactId>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 
 </project>

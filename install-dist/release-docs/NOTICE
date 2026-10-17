@@ -3237,6 +3237,37 @@ The Apache Software Foundation (https://www.apache.org/).
 
 ========================================================================
 
+AWS SDK for Java 2.0 (software.amazon.awssdk 2.33.8) NOTICE
+
+
+AWS SDK for Java 2.0
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+This product includes software developed by
+Amazon Technologies, Inc (http://www.amazon.com/).
+
+**********************
+THIRD PARTY COMPONENTS
+**********************
+This software includes third party software subject to the following copyrights:
+- XML parsing and utility functions from JetS3t - Copyright 2006-2009 James Murty.
+- PKCS#1 PEM encoded private key parsing and utility functions from oauth.googlecode.com - Copyright 1998-2010 AOL Inc.
+- Apache Commons Lang - https://github.com/apache/commons-lang
+- Netty Reactive Streams - https://github.com/playframework/netty-reactive-streams
+- Jackson-core - https://github.com/FasterXML/jackson-core
+- Jackson-dataformat-cbor - https://github.com/FasterXML/jackson-dataformats-binary
+
+The licenses for these third party components are included in LICENSE.txt
+
+- For Apache Commons Lang see also this required NOTICE:
+  Apache Commons Lang
+  Copyright 2001-2020 The Apache Software Foundation
+  
+  This product includes software developed at
+  The Apache Software Foundation (https://www.apache.org/).
+
+
+third-party-jackson-core-2.33.8 NOTICE
 Arthas 4.1.5 embedded Jackson 2.18.1 NOTICE
 
 ========================================================================
@@ -3274,11 +3305,9 @@ Copyright © 2023 Werner Randelshofer, Switzerland. MIT License.
 See FastDoubleParser-NOTICE for details of other source code included in FastDoubleParser
 and the licenses and copyrights that apply to that code.
 
-========================================================================
 
 Arthas 4.1.5 embedded FastDoubleParser NOTICE
 
-========================================================================
 
 # FastDoubleParser
 
@@ -3322,9 +3351,26 @@ https://github.com/wrandelshofer/FastDoubleParser/blob/39e123b15b71f29a38a087d16
 
 ========================================================================
 
+commons-codec-1.17.1 NOTICE
+
+
+Apache Commons Codec
+Copyright 2002-2024 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+
+httpcore-4.4.16 NOTICE
+
+
+Apache HttpCore
+Copyright 2005-2022 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
 Arthas 4.1.5 embedded Logback 1.2.13 NOTICE
 
-========================================================================
 
 Logback: the reliable, generic, fast and flexible logging framework.
 Copyright (C) 1999-2015, QOS.ch. All rights reserved.

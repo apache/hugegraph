@@ -446,12 +446,16 @@ jobs:
           echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
           echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
-      - name: Run historical Store ingress tests
+      # -Dtest scopes the run to hg-store-node's own tests; without it -am would also run the test
+      # suites of every upstream module. StoredRowIngressTest is listed by name because
+      # hg-store-core also has tests in org.apache.hugegraph.store.business.
+      - name: Run store-node tests
         run: |
           set -o pipefail
           RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-node -am \
-            -Dtest=StoredRowIngressTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtest='org/apache/hugegraph/store/node/**/*Test,StoredRowIngressTest' \
+            -Dsurefire.failIfNoSpecifiedTests=false -DreuseForks=false \
             -Djacoco.sessionId=store-node-test \
             -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec" 2>&1 | tee "$RUNTIME_LOG"
           bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"

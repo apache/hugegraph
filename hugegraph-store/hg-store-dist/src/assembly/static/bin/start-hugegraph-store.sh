@@ -257,10 +257,19 @@ if [ "${#BOOT_JARS[@]}" -ne 1 ] || [ ! -f "${BOOT_JARS[0]}" ]; then
     echo "Error: expected one component executable JAR in $LIB" >&2
     exit 1
 fi
-JAVA_MAIN=(-jar "${BOOT_JARS[0]}")
+# RocksDB fires JNI event callbacks on native threads, which resolve org.rocksdb.* through the
+# system classloader; keep a rocksdbjni jar on the launcher classpath, not only in BOOT-INF/lib.
 if [ -n "${TOPLING_RUNTIME_CLASSPATH:-}" ]; then
-    JAVA_MAIN=(-cp "${TOPLING_RUNTIME_CLASSPATH}:${BOOT_JARS[0]}" org.springframework.boot.loader.JarLauncher)
+    ROCKSDB_CLASSPATH="${TOPLING_RUNTIME_CLASSPATH}"
+else
+    ROCKSDB_JARS=("${LIB}"/rocksdbjni-*.jar)
+    if [ "${#ROCKSDB_JARS[@]}" -ne 1 ] || [ ! -f "${ROCKSDB_JARS[0]}" ]; then
+        echo "Error: expected one rocksdbjni JAR in $LIB; rebuild the distribution" >&2
+        exit 1
+    fi
+    ROCKSDB_CLASSPATH="${ROCKSDB_JARS[0]}"
 fi
+JAVA_MAIN=(-cp "${ROCKSDB_CLASSPATH}:${BOOT_JARS[0]}" org.springframework.boot.loader.JarLauncher)
 
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
