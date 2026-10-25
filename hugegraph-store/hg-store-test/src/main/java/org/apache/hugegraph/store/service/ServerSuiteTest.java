@@ -24,6 +24,7 @@ import org.apache.hugegraph.store.node.grpc.query.AggregativeQueryShutdownTest;
 import org.apache.hugegraph.store.node.grpc.query.FilterIteratorContractTest;
 import org.apache.hugegraph.store.node.grpc.query.IntersectionSpillIteratorTest;
 import org.apache.hugegraph.store.node.grpc.query.OrderByStageTest;
+import org.apache.hugegraph.store.node.grpc.query.ProjectionStageTest;
 import org.apache.hugegraph.store.node.grpc.query.UnaryQueryLifecycleTest;
 import org.apache.hugegraph.store.node.grpc.BatchScanHalfCloseTest;
 import org.junit.runner.RunWith;
@@ -45,6 +46,7 @@ import lombok.extern.slf4j.Slf4j;
         FilterIteratorContractTest.class,
         IntersectionSpillIteratorTest.class,
         OrderByStageTest.class,
+        ProjectionStageTest.class,
         UnaryQueryLifecycleTest.class,
         BatchScanHalfCloseTest.class,
         ScanLifecycleTest.class,

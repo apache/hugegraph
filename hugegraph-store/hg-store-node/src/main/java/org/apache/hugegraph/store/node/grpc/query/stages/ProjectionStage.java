@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.store.node.grpc.query.QueryStage;
 import org.apache.hugegraph.store.node.grpc.query.QueryUtil;
 import org.apache.hugegraph.store.node.grpc.query.model.PipelineResult;
@@ -60,8 +61,10 @@ public class ProjectionStage implements QueryStage {
             return result;
         } else if (result.getResultType() == PipelineResultType.BACKEND_COLUMN &&
                    this.removeAllProperty) {
+            // Replace the column rather than clearing it in place: an upstream dedup set, such as
+            // MapLimitIterator's, may still hold this object as a key.
             var column = result.getColumn();
-            column.value = new byte[0];
+            result.setColumn(RocksDBSession.BackendColumn.of(column.name, new byte[0]));
         }
         return result;
     }
