@@ -34,7 +34,10 @@ import java.util.stream.IntStream;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.store.business.itrv2.MapLimitIterator;
+import org.apache.hugegraph.store.grpc.query.QueryRequest;
 import org.apache.hugegraph.store.node.grpc.query.model.PipelineResult;
+import org.apache.hugegraph.store.node.grpc.query.model.QueryPlan;
+import org.apache.hugegraph.store.node.grpc.query.stages.EarlyStopException;
 import org.apache.hugegraph.store.node.grpc.query.stages.ProjectionStage;
 import org.junit.Test;
 
@@ -71,6 +74,33 @@ public class ProjectionStageTest {
             while (dedup.hasNext()) {
                 BackendColumn column = dedup.next();
                 PipelineResult result = projection.handle(new PipelineResult(column));
+                int key = ByteBuffer.wrap(result.getColumn().name).getInt();
+                assertTrue("key " + key + " emitted twice", keys.add(key));
+            }
+        } finally {
+            dedup.close();
+        }
+
+        assertEquals(IntStream.range(0, KEYS).boxed().collect(Collectors.toSet()), keys);
+    }
+
+    @Test
+    public void testLimitDedupStillDropsCopiesThroughIdOnlyPlan() throws EarlyStopException {
+        // sample_factor defaults to 0.0, which builds a stop-only plan
+        QueryRequest request = QueryRequest.newBuilder()
+                                           .setSampleFactor(1.0)
+                                           .setNullProperty(true)
+                                           .build();
+        QueryPlan plan = QueryUtil.buildPlan(request);
+        assertEquals("QueryPlan{stages=[PROJECTION_STAGE]}", plan.toString());
+        ScanIterator dedup = new MapLimitIterator<BackendColumn>(scanTwice());
+
+        Set<Integer> keys = new HashSet<>();
+        try {
+            while (dedup.hasNext()) {
+                BackendColumn column = dedup.next();
+                PipelineResult result = (PipelineResult) plan.execute(new PipelineResult(column));
+                assertArrayEquals(new byte[0], result.getColumn().value);
                 int key = ByteBuffer.wrap(result.getColumn().name).getInt();
                 assertTrue("key " + key + " emitted twice", keys.add(key));
             }
