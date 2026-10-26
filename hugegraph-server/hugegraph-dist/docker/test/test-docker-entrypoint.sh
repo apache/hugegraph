@@ -856,6 +856,47 @@ install_enable_auth "${empty_dir}"
     grep -q '^restserver\.url=http://127\.0\.0\.1:8080$' conf/rest-server.properties
 )
 
+# An upgraded container can arrive with the same key defined several times,
+# because the image it came from appended on every restart.  Skipping a key that
+# already has a value left those definitions in place, and HugeConfig reads a
+# repeated key as a list: InitStore then dies with "Invalid value for key
+# 'auth.authenticator'" and the container never boots again.  The script owns
+# the collapse, and the first definition is the one the server has been reading.
+dup_upgrade_dir="${test_dir}/duplicate-upgrade"
+mkdir -p "${dup_upgrade_dir}/bin" "${dup_upgrade_dir}/conf/graphs"
+install_enable_auth "${dup_upgrade_dir}"
+(
+    cd "${dup_upgrade_dir}" || exit 1
+    printf '%s\n' \
+        'restserver.url=http://127.0.0.1:8080' \
+        'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        'init_store.enabled=true' \
+        'auth.authenticator=' \
+        'auth.graph_store=hugegraph' \
+        'auth.graph_store=stale-name' \
+        > conf/rest-server.properties
+    printf '%s\n' 'authentication: {' \
+        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator,' \
+        '}' > conf/gremlin-server.yaml
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy' \
+        > conf/graphs/hugegraph.properties
+    unset AUTHENTICATOR_CLASS
+    ./bin/enable-auth.sh
+    assert_line_count 1 '^auth\.authenticator=' conf/rest-server.properties
+    assert_line_count 1 '^auth\.graph_store=' conf/rest-server.properties
+    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+        conf/rest-server.properties
+    grep -q '^auth\.graph_store=hugegraph$' conf/rest-server.properties
+    grep -q '^restserver\.url=http://127\.0\.0\.1:8080$' conf/rest-server.properties
+    grep -q '^init_store\.enabled=true$' conf/rest-server.properties
+    # The yaml already named a class, so nothing may have been appended to it.
+    assert_line_count 1 '^  authenticator: ' conf/gremlin-server.yaml
+    # Nothing to collapse: a second run leaves a single-definition file alone.
+    cp conf/rest-server.properties "${test_dir}/dup-after-first"
+    ./bin/enable-auth.sh
+    cmp conf/rest-server.properties "${test_dir}/dup-after-first"
+)
+
 # A copy-back that fails part way must not leave a truncated config.  The
 # shell's `>` truncates the destination before cat writes a byte, so
 # props.awk snapshots the original first and puts it back.  The snapshot

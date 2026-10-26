@@ -89,6 +89,30 @@ props_get() {
     printf '%s' "${value}"
 }
 
+# How many logical definitions a key carries, `0` when it has none.  Like
+# props_get, a nonzero status means the file could not be read rather than the
+# key being absent, so the status has to survive to the caller instead of
+# collapsing into an empty string that reads as "nothing there".
+props_count() {
+    local status=0 value
+    value=$(PROPS_MODE=count PROPS_KEY="$1" PROPS_FILE="$2" \
+        awk -f "${PROPS_AWK}" /dev/null) || status=$?
+    if (( status > 0 )); then
+        return "${status}"
+    fi
+    printf '%s' "${value}"
+}
+
+# Collapse a key to its first definition, dropping the rest, keeping the bytes
+# the server has already been reading.  Going through props_set with a value
+# from props_get is not the same thing: props_get decodes, and a decoded value
+# containing `=`, `:` or a leading blank does not come back off the encoder
+# byte-identical.
+props_keep_first() {
+    PROPS_MODE=set PROPS_KEEP_FIRST=1 PROPS_KEY="$1" PROPS_FILE="$2" \
+        awk -f "${PROPS_AWK}" /dev/null || fail "cannot update $2"
+}
+
 # The character check for every class this script writes.  Java class names need
 # no properties escaping; anything else would have to go through the entrypoint's
 # encoder first.  It is one function rather than a pattern at each call site so
@@ -128,8 +152,23 @@ props_set() {
 # subshell, the guard saw an empty string, and props_set then tried to write
 # that same unreadable file.
 ensure_rest_prop() {
-    [[ -n "$4" ]] && return 0
-    props_set "$1" "$2" "$3"
+    if [[ -z "$4" ]]; then
+        props_set "$1" "$2" "$3"
+        return 0
+    fi
+    # `$4` non-empty only ever spoke about the FIRST definition, so an older
+    # image that appended on every restart left the key defined two or three
+    # times and this guard let all of them stand.  HugeConfig then reads the key
+    # as a list, `InitStore` fails with "Invalid value for key
+    # 'auth.authenticator'", and the upgraded container never boots.  Collapsing
+    # to the first definition is the answer that changes nothing the server has
+    # already been reading.
+    local definitions
+    definitions=$(props_count "$1" "$3") || fail "cannot read $3"
+    if (( definitions > 1 )); then
+        props_keep_first "$1" "$3"
+    fi
+    return 0
 }
 
 # make a backup

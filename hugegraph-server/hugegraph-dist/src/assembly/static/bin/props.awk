@@ -39,6 +39,15 @@
 #       backslash escapes.  A file that cannot be written exits 2 as
 #       well, before anything is staged, so a read-only config neither
 #       loses a secret into a leftover temp file nor reads as damaged.
+#       With PROPS_KEEP_FIRST=1 the value is not supplied at all: K's first
+#       definition is rewritten with the value it already holds, which drops
+#       every later definition without decoding and re-escaping anything.
+#       That is the collapse an upgraded mounted config needs -- see
+#       ensure_rest_prop in enable-auth.sh.
+#   PROPS_MODE=count  PROPS_KEY=K PROPS_FILE=F
+#       print how many logical definitions K has, `0` when it has none, so a
+#       caller can tell "answered once" from "answered three times".  Exits 2
+#       on an unreadable file, like the other modes.
 #
 # Grammar implemented (java.util.Properties line reader + the
 # first-definition-wins rule Configuration.getString applies):
@@ -336,6 +345,16 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs,
             else BDROP[b] = 1
         }
     }
+    # PROPS_KEEP_FIRST collapses a repeated key to the definition the server
+    # has been reading, by writing that definition's own escaped value back
+    # rather than a value handed in by the caller.  The caller's reader decodes
+    # (`props_get` prints what the server sees), so re-writing through a supplied
+    # value would have to re-escape it here, and a decoded value that contains a
+    # `=`, `:` or leading blank does not come back byte-identical.
+    if (ENVIRON["PROPS_KEEP_FIRST"] == "1") {
+        if (first == 0) return
+        enc_val = BVAL[first]
+    }
     # Staged rewrite: everything lands in a private temp file first, so a
     # failure before the copy-back leaves the original untouched.  The temp file
     # holds secrets, so it is created 0600 and exclusively (see make_temp): a
@@ -420,6 +439,15 @@ function props_get(file, key, decoded,    b) {
     # could not be read or was refused, which is what the guards act on.
 }
 
+function props_count(file, key,    b, n) {
+    props_load(file)
+    n = 0
+    for (b = 1; b <= NBLOCK; b++)
+        if (BTYPE[b] == "entry" && BKEY[b] == key)
+            n++
+    print n
+}
+
 BEGIN {
     mode = ENVIRON["PROPS_MODE"]
     key = ENVIRON["PROPS_KEY"]
@@ -431,7 +459,9 @@ BEGIN {
         props_get(file, key, decoded)
     } else if (mode == "set") {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
+    } else if (mode == "count") {
+        props_count(file, key)
     } else {
-        die("PROPS_MODE must be get or set")
+        die("PROPS_MODE must be get, set or count")
     }
 }
