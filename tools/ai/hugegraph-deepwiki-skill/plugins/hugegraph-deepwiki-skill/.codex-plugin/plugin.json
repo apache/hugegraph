@@ -1,0 +1,28 @@
+{
+  "name": "hugegraph-deepwiki-skill",
+  "version": "0.1.4",
+  "description": "Repository knowledge assistant for Apache HugeGraph.",
+  "author": {
+    "name": "HugeGraph Community",
+    "email": "",
+    "url": "https://github.com/apache/hugegraph"
+  },
+  "homepage": "https://github.com/apache/hugegraph",
+  "repository": "https://github.com/apache/hugegraph",
+  "license": "Apache-2.0",
+  "keywords": ["hugegraph", "deepwiki", "apache", "knowledge-assistant"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "HugeGraph Repository Assistant",
+    "shortDescription": "Ask repository-grounded questions about Apache HugeGraph.",
+    "longDescription": "Provides an Apache HugeGraph repository knowledge assistant for architecture, API, configuration, storage, traversal, schema, and implementation questions. DeepWiki MCP is used as the underlying retrieval channel.",
+    "developerName": "HugeGraph Community",
+    "category": "Developer Tools",
+    "capabilities": ["Knowledge", "MCP"],
+    "websiteURL": "https://github.com/apache/hugegraph",
+    "defaultPrompt": [
+      "Use $hugegraph-deepwiki-skill to answer my HugeGraph repository question."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
