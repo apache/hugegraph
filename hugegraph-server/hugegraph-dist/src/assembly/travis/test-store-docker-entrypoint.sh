@@ -18,7 +18,7 @@
 # Checks that the Store Docker entrypoint passes HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE
 # into SPRING_APPLICATION_JSON as rocksdb.total_memory_size, leaves the rocksdb key
 # out when the variable is unset (so conf/application-pd.yml or auto-sizing applies),
-# and refuses values that are not a plain number of bytes.
+# and refuses values other than auto or a plain number of bytes.
 
 set -euo pipefail
 
@@ -91,9 +91,10 @@ expect_memory "unset leaves the key out" absent
 expect_memory "empty leaves the key out" absent HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=
 expect_memory "bytes are passed through" 2147483648 \
               HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=2147483648
-expect_memory "0 is passed through for auto-sizing" 0 HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=0
+expect_memory "auto is passed through" auto HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=auto
+expect_memory "legacy 0 is passed through for auto-sizing" 0 HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=0
 
-for bad in '4GB' '-1' '1.5e9' '1 2' '1"}'; do
+for bad in '4GB' '-1' '1.5e9' '1 2' '1"}' 'automatic'; do
     if run_entrypoint HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE="${bad}" >/dev/null; then
         echo "  FAIL '${bad}' was accepted"
         FAIL=$((FAIL + 1))

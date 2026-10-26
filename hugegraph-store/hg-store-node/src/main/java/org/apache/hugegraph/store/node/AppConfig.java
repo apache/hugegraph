@@ -108,15 +108,32 @@ public class AppConfig {
         long totalMemory = RocksdbMemoryBudget.resolve(rocksdb.get(RocksdbMemoryBudget.KEY));
         rocksdb.put(RocksdbMemoryBudget.KEY, Long.toString(totalMemory));
         if (raft.getDisruptorBufferSize() == 0) {
-            // Increase one buffer every 32M
-            raft.setDisruptorBufferSize(RocksdbMemoryBudget.disruptorBufferSize(totalMemory));
+            raft.setDisruptorBufferSize(disruptorBufferSize(totalMemory));
         }
 
         if (!rocksdb.containsKey("write_buffer_size") ||
             "0".equals(rocksdb.get("write_buffer_size"))) {
-            rocksdb.put("write_buffer_size",
-                        Long.toString(RocksdbMemoryBudget.writeBufferSize(totalMemory)));
+            rocksdb.put("write_buffer_size", Long.toString(writeBufferSize(totalMemory)));
         }
+    }
+
+    /**
+     * The raft disruptor buffer size when raft.disruptorBufferSize is 0: one buffer every
+     * 32M, from the RocksDB budget in GB, at least 1, rounded to a power of two.
+     */
+    static int disruptorBufferSize(long totalMemory) {
+        // A budget under 1 GB would otherwise give log(0) and a zero-sized buffer
+        int size = (int) Math.max(1, totalMemory / 1000 / 1000 / 1000);
+        return (int) Math.pow(2, Math.round(Math.log(size) / Math.log(2))) * 32;
+    }
+
+    /**
+     * The write_buffer_size when the key is unset or 0: a thousandth of the RocksDB budget,
+     * but never below the 1 MiB rocksdb.write_buffer_size accepts, which a budget under
+     * 1 GiB would otherwise fall under.
+     */
+    static long writeBufferSize(long totalMemory) {
+        return Math.max(totalMemory / 1000, 1024L * 1024L);
     }
 
     @Override

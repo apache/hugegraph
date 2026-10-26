@@ -18,15 +18,18 @@
 package org.apache.hugegraph.store.node.listener;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import org.junit.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
 /**
@@ -42,58 +45,71 @@ public class PdConfigureListenerMemoryOverrideTest {
 
     @Test
     public void testDockerOverrideWinsOverPdConfig() {
-        Map<String, String> rocksdb = bind(json("268435456"), null);
+        Map<String, String> rocksdb = bind(environment(json("268435456"), null));
         assertEquals("268435456", rocksdb.get("total_memory_size"));
         // Other PD-managed keys keep their precedence
         assertEquals(PD_WRITE_BUFFER, rocksdb.get("write_buffer_size"));
     }
 
     @Test
-    public void testDockerAutoSizingOverrideWinsOverPdConfig() {
-        assertEquals("0", bind(json("0"), null).get("total_memory_size"));
+    public void testDockerAutoOverrideWinsOverPdConfig() {
+        assertEquals("auto", bind(environment(json("auto"), null)).get("total_memory_size"));
     }
 
     @Test
     public void testSystemPropertyOverrideWinsOverPdConfig() {
-        assertEquals("536870912", bind(null, "536870912").get("total_memory_size"));
+        assertEquals("536870912",
+                     bind(environment(null, "536870912")).get("total_memory_size"));
         // SPRING_APPLICATION_JSON outranks -D, as without PD configuration
-        assertEquals("268435456",
-                     bind(json("268435456"), "536870912").get("total_memory_size"));
+        assertEquals("268435456", bind(environment(json("268435456"), "536870912"))
+                .get("total_memory_size"));
     }
 
     @Test
     public void testWithoutOverridePdConfigStillApplies() {
-        Map<String, String> rocksdb = bind(null, null);
+        Map<String, String> rocksdb = bind(environment(null, null));
         assertEquals(PD_BUDGET, rocksdb.get("total_memory_size"));
         assertEquals(PD_WRITE_BUFFER, rocksdb.get("write_buffer_size"));
     }
 
     @Test
-    public void testReapplyingKeepsOneOverrideSource() {
+    public void testOnlyTheMemoryKeyIsDropped() {
         StandardEnvironment env = environment(json("268435456"), null);
-        MutablePropertySources sources = env.getPropertySources();
-        PdConfigureListener.keepMemoryOverride(sources);
-        int size = sources.size();
-        // A PD config change re-runs updatePdConfig on the same sources; the new
-        // pd-config replaces the old one and the override goes back on top once
-        sources.addFirst(pdConfig());
-        PdConfigureListener.keepMemoryOverride(sources);
-        assertEquals(size, sources.size());
-        assertEquals(PdConfigureListener.MEMORY_OVERRIDE_SOURCE,
-                     sources.iterator().next().getName());
+        Properties pd = pdConfig();
+        PdConfigureListener.dropOverriddenMemory(pd, env.getPropertySources());
+        assertFalse(pd.containsKey(PdConfigureListener.MEMORY_KEY));
+        assertEquals(PD_WRITE_BUFFER, pd.getProperty("rocksdb.write_buffer_size"));
+    }
+
+    @Test
+    public void testReapplyingKeepsOnePdSource() {
+        StandardEnvironment env = environment(json("268435456"), null);
+        applyPdConfig(env);
+        int size = env.getPropertySources().size();
+        // A PD config change re-runs updatePdConfig on the same sources, and the new
+        // pd-config replaces the old one
+        applyPdConfig(env);
+        assertEquals(size, env.getPropertySources().size());
         assertEquals("268435456", env.getProperty(PdConfigureListener.MEMORY_KEY));
     }
 
-    private static Map<String, String> bind(MapPropertySource json, String systemProperty) {
-        StandardEnvironment env = environment(json, systemProperty);
-        PdConfigureListener.keepMemoryOverride(env.getPropertySources());
+    private static Map<String, String> bind(StandardEnvironment env) {
+        applyPdConfig(env);
         return Binder.get(env).bind("rocksdb", Bindable.mapOf(String.class, String.class))
                      .orElseGet(HashMap::new);
     }
 
+    // What updatePdConfig() does with the PD copy
+    private static void applyPdConfig(StandardEnvironment env) {
+        MutablePropertySources sources = env.getPropertySources();
+        Properties pd = pdConfig();
+        PdConfigureListener.dropOverriddenMemory(pd, sources);
+        sources.addFirst(new PropertiesPropertySource("pd-config", pd));
+    }
+
     /**
-     * The sources as the listener sees them once updatePdConfig() has run: the PD config
-     * first, then SPRING_APPLICATION_JSON, system properties and the local yml.
+     * The sources as the listener sees them: SPRING_APPLICATION_JSON, system properties and
+     * the local yml, in Spring Boot's order.
      */
     private static StandardEnvironment environment(MapPropertySource json,
                                                    String systemProperty) {
@@ -103,7 +119,7 @@ public class PdConfigureListenerMemoryOverrideTest {
         sources.remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
         sources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
         Map<String, Object> local = new HashMap<>();
-        local.put(PdConfigureListener.MEMORY_KEY, "0");
+        local.put(PdConfigureListener.MEMORY_KEY, "auto");
         local.put("rocksdb.write_buffer_size", "32000000");
         sources.addLast(new MapPropertySource("applicationConfig: [application-pd.yml]", local));
         if (systemProperty != null) {
@@ -115,15 +131,14 @@ public class PdConfigureListenerMemoryOverrideTest {
         if (json != null) {
             sources.addFirst(json);
         }
-        sources.addFirst(pdConfig());
         return env;
     }
 
-    private static MapPropertySource pdConfig() {
-        Map<String, Object> pd = new HashMap<>();
+    private static Properties pdConfig() {
+        Properties pd = new Properties();
         pd.put(PdConfigureListener.MEMORY_KEY, PD_BUDGET);
         pd.put("rocksdb.write_buffer_size", PD_WRITE_BUFFER);
-        return new MapPropertySource("pd-config", pd);
+        return pd;
     }
 
     private static MapPropertySource json(String budget) {

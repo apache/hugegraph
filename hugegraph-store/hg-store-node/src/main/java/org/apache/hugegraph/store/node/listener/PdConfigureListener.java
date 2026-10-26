@@ -21,7 +21,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.security.SecureRandom;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
@@ -38,7 +37,6 @@ import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.core.env.PropertySource;
@@ -59,10 +57,9 @@ public class PdConfigureListener implements
     private static final String TIMESTAMP_KEY = "S:Timestamp";
     private static final String PD_CONFIG_FILE_NAME = "application-pd.yml";
     static final String MEMORY_KEY = "rocksdb.total_memory_size";
-    static final String MEMORY_OVERRIDE_SOURCE = "store-memory-override";
-    // Where an operator sets one Store's RocksDB budget, in the documented order: the
-    // Docker entrypoint's SPRING_APPLICATION_JSON (HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE),
-    // then -Drocksdb.total_memory_size
+    // Where an operator sets one Store's RocksDB budget: the Docker entrypoint's
+    // SPRING_APPLICATION_JSON (HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE) or
+    // -Drocksdb.total_memory_size
     private static final String[] MEMORY_OVERRIDE_SOURCES = {"spring.application.json",
                                                              "systemProperties"};
     private final String workDir = System.getProperty("user.dir");
@@ -131,26 +128,24 @@ public class PdConfigureListener implements
         if (!pdConfFile.exists() || pdConfFile.lastModified() <= pdLastModified) {
             log.info("update local application-pd.yml from pd....{}", pdConfig);
             writeYml(pdConfig);
+            dropOverriddenMemory(configs, sources);
             PropertiesPropertySource source = new PropertiesPropertySource("pd-config", configs);
             sources.addFirst(source);
-            keepMemoryOverride(sources);
         }
     }
 
     /**
      * The PD-managed configuration is shared by every Store and goes in front of all
      * other property sources, so a rocksdb.total_memory_size in it would shadow the
-     * budget an operator set for this Store. Put that one explicit setting back on top;
-     * every other PD setting keeps its precedence, and nothing is written back to PD.
+     * budget an operator set for this Store. When one is set, leave that key out of the
+     * PD source and let Spring's own precedence pick it; nothing is written back to PD.
      */
-    static void keepMemoryOverride(MutablePropertySources sources) {
-        sources.remove(MEMORY_OVERRIDE_SOURCE);
+    static void dropOverriddenMemory(Properties pdConfigs, MutablePropertySources sources) {
         for (String name : MEMORY_OVERRIDE_SOURCES) {
             PropertySource<?> source = sources.get(name);
             Object value = source == null ? null : source.getProperty(MEMORY_KEY);
             if (value != null && !value.toString().trim().isEmpty()) {
-                sources.addFirst(new MapPropertySource(
-                        MEMORY_OVERRIDE_SOURCE, Collections.singletonMap(MEMORY_KEY, value)));
+                pdConfigs.remove(MEMORY_KEY);
                 return;
             }
         }

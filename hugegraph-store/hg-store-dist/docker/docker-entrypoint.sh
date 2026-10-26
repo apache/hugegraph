@@ -56,10 +56,10 @@ require_env "HG_STORE_RAFT_ADDRESS"
 : "${HG_STORE_DATA_PATH:=/hugegraph-store/storage}"
 : "${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE:=}"
 
-# Bytes only: the Store parses the value as a long and refuses to start otherwise
+# auto or a number of bytes: the Store refuses to start on anything else
 if [[ -n "${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE}" &&
-      ! "${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE must be a number of bytes," \
+      ! "${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE}" =~ ^([0-9]+|auto)$ ]]; then
+    echo "ERROR: HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE must be auto or a number of bytes," \
          "got '${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE}'" >&2
     exit 2
 fi
@@ -92,6 +92,6 @@ log "  grpc.port=${HG_STORE_GRPC_PORT}"
 log "  raft.address=${HG_STORE_RAFT_ADDRESS}"
 log "  server.port=${HG_STORE_REST_PORT}"
 log "  app.data-path=${HG_STORE_DATA_PATH}"
-log "  rocksdb.total_memory_size=${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE:-<from config, 0 = auto>}"
+log "  rocksdb.total_memory_size=${HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE:-<from config>}"
 
 ./bin/start-hugegraph-store.sh -d false -j "${JAVA_OPTS:-}"
