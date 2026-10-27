@@ -420,11 +420,17 @@ upload sets no timestamp and a missing one counts as 0, so changing `S:FS` alone
 The simplest upgrade is to set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=auto` (or
 `-Drocksdb.total_memory_size=auto`) on every Store and restart it; the Store keeps this value
 above both its local file and PD's copy. To change the shared copy instead, set
-`rocksdb.total_memory_size` to `auto` in `S:FS`, then put the current time in
-milliseconds into `S:Timestamp` through PD's KV service (gRPC `KvService.put`). Every running Store
-watches that key: it reloads PD's copy, writes it over its local file and restarts itself with
+`rocksdb.total_memory_size` to `0` or remove it in `S:FS`, then put the current time in
+milliseconds into `S:Timestamp` through PD's KV service (gRPC `KvService.put`). Use `auto` there
+only once every Store runs this release: an earlier release can't parse `auto` and fails to start,
+while it reads `0` as its old heap-sized default. This also applies to a copy that a Store of this
+release uploaded when PD had none, since the shipped file says `auto`. Every running Store watches
+`S:Timestamp`: it reloads PD's copy, writes it over its local file and restarts itself with
 `bin/restart-hugegraph-store.sh` within 60 seconds. A stopped Store loads the copy at its next
-start.
+start. That self-restart passes no arguments, so `-j` and `-g` from the original start are
+dropped, including the `JAVA_OPTS` the Docker entrypoint passes as `-j`, and the launcher's
+default heap applies; only JVM settings in an exported `JAVA_OPTIONS` carry over. Prefer the
+per-Store override on Stores started with a custom heap.
 
 ### Server Configuration
 
