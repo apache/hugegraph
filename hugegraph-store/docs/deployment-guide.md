@@ -425,12 +425,16 @@ milliseconds into `S:Timestamp` through PD's KV service (gRPC `KvService.put`). 
 only once every Store runs this release: an earlier release can't parse `auto` and fails to start,
 while it reads `0` as its old heap-sized default. This also applies to a copy that a Store of this
 release uploaded when PD had none, since the shipped file says `auto`. Every running Store watches
-`S:Timestamp`: it reloads PD's copy, writes it over its local file and restarts itself with
-`bin/restart-hugegraph-store.sh` within 60 seconds. A stopped Store loads the copy at its next
-start. That self-restart passes no arguments, so `-j` and `-g` from the original start are
-dropped, including the `JAVA_OPTS` the Docker entrypoint passes as `-j`, and the launcher's
-default heap applies; only JVM settings in an exported `JAVA_OPTIONS` carry over. Prefer the
-per-Store override on Stores started with a custom heap.
+`S:Timestamp`: it reloads PD's copy, writes it over its local file and runs
+`bin/restart-hugegraph-store.sh` within 60 seconds, so all Stores restart within the same minute.
+A stopped Store loads the copy at its next start. That self-restart passes no arguments, so `-j`
+and `-g` from the original start are dropped and the launcher's default heap applies; only JVM
+settings in an exported `JAVA_OPTIONS` carry over. A Docker Store doesn't restart at all: Java is
+the entrypoint's last process, so stopping it ends the container with exit code 143. The container
+stays down unless a restart policy (the bundled compose files use `restart: unless-stopped`) starts
+it again through the entrypoint. On Docker, set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` instead of
+publishing `S:Timestamp`. Elsewhere, prefer the per-Store override on Stores started with a custom
+heap.
 
 ### Server Configuration
 
