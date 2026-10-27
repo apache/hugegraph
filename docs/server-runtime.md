@@ -378,6 +378,15 @@ without a preceding REST graph query, and subsequent REST queries must remain us
 Gremlin scripts still cannot read restricted system properties such as `java.version`
 or disable the security manager.
 
+### HStore transport configuration
+
+HStore's gRPC transport reads the boolean configuration property
+`io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator` on every allocator invocation.
+The server's existing property-read whitelist allows this exact, non-sensitive flag,
+including direct reads from Gremlin scripts. Other restricted property reads and bulk
+system-property enumeration remain denied; this entry grants no wildcard access to
+the gRPC property namespace.
+
 ### Property-query index coverage
 
 For type-compatible values, a global property-index query such as

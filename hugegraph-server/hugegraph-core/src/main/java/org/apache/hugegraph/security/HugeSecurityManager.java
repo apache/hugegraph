@@ -63,7 +63,9 @@ public class HugeSecurityManager extends SecurityManager {
             "line.separator",
             "file.separator",
             // Sofa
-            "java.specification.version"
+            "java.specification.version",
+            // Non-sensitive gRPC allocator selection; scripts may read this flag too.
+            "io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator"
     );
 
     private static final Set<String> ASYNC_SCHEMA_METHODS = ImmutableSet.of(
@@ -318,8 +320,7 @@ public class HugeSecurityManager extends SecurityManager {
     public void checkPropertyAccess(String key) {
         if (!callFromAcceptClassLoaders() && callFromGremlin() &&
             !WHITE_SYSTEM_PROPERTIES.contains(key) && !callFromBackendHbase() &&
-            !callFromSnapshot() && !callFromRaft() && !callFromSofaRpc() &&
-            !callFromGrpcNettyAllocator(key)) {
+            !callFromSnapshot() && !callFromRaft() && !callFromSofaRpc()) {
             throw newSecurityException("Not allowed to access system property(%s) via Gremlin",
                                        key);
         }
@@ -410,13 +411,6 @@ public class HugeSecurityManager extends SecurityManager {
 
     private static boolean callFromSofaRpc() {
         return callFromWorkerWithClass(SOFA_RPC_CLASSES);
-    }
-
-    private static boolean callFromGrpcNettyAllocator(String key) {
-        // gRPC reads this configuration on every new transport, even after
-        // initialization. Keep direct script reads and other properties denied.
-        return "io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator".equals(key) &&
-               callFromMethod("io.grpc.netty.shaded.io.grpc.netty.Utils", "getByteBufAllocator");
     }
 
     private static boolean callFromNewSecurityException() {

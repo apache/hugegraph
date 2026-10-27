@@ -63,9 +63,11 @@ public class HugeSecurityManagerGrpcTest {
     }
 
     @Test
-    public void testScriptCannotReadAllocatorProperty() {
-        assertDenied("System.getProperty('" + ALLOCATOR_PROPERTY + "')",
-                     "system property(" + ALLOCATOR_PROPERTY + ")");
+    public void testScriptCanReadAllocatorProperty() throws Exception {
+        String expected = System.getProperty(ALLOCATOR_PROPERTY, "true");
+        String script = "System.getProperty('" + ALLOCATOR_PROPERTY + "', 'true')";
+        Assert.assertEquals(expected, eval(script, "gremlin-server-exec-grpc-regression"));
+        Assert.assertEquals(expected, eval(script, "task-worker-grpc-regression"));
     }
 
     @Test
@@ -75,8 +77,10 @@ public class HugeSecurityManagerGrpcTest {
 
     @Test
     public void testScriptCannotReadOtherGrpcProperty() {
-        String key = "io.grpc.netty.shaded.io.grpc.netty.unrelated";
-        assertDenied("System.getProperty('" + key + "')", "system property(" + key + ")");
+        for (String key : new String[]{"io.grpc.netty.shaded.io.grpc.netty.unrelated",
+                                       ALLOCATOR_PROPERTY + ".unrelated"}) {
+            assertDenied("System.getProperty('" + key + "')", "system property(" + key + ")");
+        }
     }
 
     @Test
@@ -85,9 +89,9 @@ public class HugeSecurityManagerGrpcTest {
     }
 
     @Test
-    public void testAllocatorAccessDoesNotAllowSubsequentScriptRead() {
-        assertDenied("allocator.allocate(false); System.getProperty('" + ALLOCATOR_PROPERTY + "')",
-                     "system property(" + ALLOCATOR_PROPERTY + ")");
+    public void testAllocatorAccessDoesNotAllowSubsequentSensitiveRead() {
+        assertDenied("allocator.allocate(false); System.getProperty('user.home')",
+                     "system property(user.home)");
     }
 
     private static void assertAllocatorAllowed(String worker) throws Exception {
