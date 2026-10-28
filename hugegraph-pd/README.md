@@ -80,9 +80,20 @@ bin/stop-hugegraph-pd.sh
 #### Startup Options
 
 ```bash
-bin/start-hugegraph-pd.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-y ENABLE_OTEL] [-d DAEMON]
+bin/start-hugegraph-pd.sh [-c CONF_DIR] [-l LOGS_DIR] [-i PID_FILE] [-o PLUGINS_DIR] \
+    [-g GC_TYPE] [-j "JVM_OPTIONS"] [-y ENABLE_OTEL] [-d DAEMON]
 ```
 
+- `-c`: Conf directory (default: `conf` under the install root). Resolved to an
+  absolute path if relative; must already exist (it is read, never created).
+- `-l`: Logs directory (default: `logs` under the install root). Resolved to an
+  absolute path if relative; created if missing.
+- `-i`: PID file (default: `bin/pid` under the install root). Resolved to an
+  absolute path if relative; must be removable/writable, but its parent is not
+  auto-created.
+- `-o`: Plugins directory (default: `plugins` under the install root). Resolved
+  to an absolute path if relative; created if missing. Its contents are joined
+  into a `:`-separated CLASSPATH, so avoid `:`/`;` in this path.
 - `-g`: Explicit GC selection (`g1`/`G1` or `zgc`/`ZGC`). Without `-g`, JVM defaults or the collector
   set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
   unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
@@ -90,6 +101,9 @@ bin/start-hugegraph-pd.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-y ENABLE_OTEL] [-d D
 - `-j`: Custom JVM options (e.g., `-j "-Xmx4g -Xms4g"`)
 - `-y`: Enable OpenTelemetry tracing (`true` or `false`, default: `false`)
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
+
+`-c`/`-l`/`-i`/`-o` must avoid embedded CR/LF characters; `stop-hugegraph-pd.sh`
+accepts the same `-i` so it can locate the PID file a non-default `start` wrote.
 
 The launcher always loads `bin/jvm-module.options`, including with custom `JAVA_OPTIONS` or `-j`.
 Keep this file in the distribution: it grants the Java 17 access required by Hessian Raft serialization;

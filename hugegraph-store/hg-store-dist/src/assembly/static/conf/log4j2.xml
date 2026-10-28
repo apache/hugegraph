@@ -20,7 +20,8 @@
 <!-- Config will be auto loaded every 60s -->
 <configuration status="error" monitorInterval="60">
     <properties>
-        <property name="LOG_PATH">logs</property>
+        <!-- Overridable via -DLOG_PATH=<dir> (see LOGS_OVERRIDE / -l in start-hugegraph-store.sh) -->
+        <property name="LOG_PATH">${sys:LOG_PATH:-logs}</property>
         <property name="FILE_NAME">hugegraph-store</property>
         <property name="RAFT_FILE_NAME">raft-hugegraph-store</property>
         <property name="AUDIT_FILE_NAME">audit-hugegraph-store</property>

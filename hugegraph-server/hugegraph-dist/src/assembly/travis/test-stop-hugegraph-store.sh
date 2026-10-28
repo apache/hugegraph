@@ -24,7 +24,12 @@ FIXTURE=$(mktemp -d)
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/bin"
 cp "$SCRIPT" "$FIXTURE/bin/stop-hugegraph-store.sh"
-cat > "$FIXTURE/bin/util.sh" <<'UTIL'
+# Source the util.sh so reject_unsafe_path/canonicalize_file (used by
+# stop-hugegraph-store.sh before kill_process_and_wait is invoked) behave
+# as in production, and only stub out kill_process_and_wait so no
+# real process is signalled.
+cp "$ROOT/hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh" "$FIXTURE/bin/util.sh"
+cat >> "$FIXTURE/bin/util.sh" <<'UTIL'
 kill_process_and_wait() {
     [[ "$1" == HugeGraphStoreServer && "$2" == 12345 && "$3" == 30 ]] || return 99
     return "$STOP_RESULT"

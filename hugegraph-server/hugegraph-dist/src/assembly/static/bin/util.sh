@@ -371,32 +371,333 @@ function check_port() {
     return 0
 }
 
-function crontab_append() {
-    local job="$1"
-    crontab -l | grep -F "$job" >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        return 1
-    fi
-    (crontab -l ; echo "$job") | crontab -
+# Emit $1 as ONE complete POSIX shell word, INCLUDING the surrounding quotes.
+# Callers should NOT add another pair of quotes:
+#     /data/team's-logs  ->  '/data/team'\''s-logs'
+#
+function shell_quote() {
+    local sq="'" repl="'\\''"
+    printf "'%s'" "${1//$sq/$repl}"
 }
 
-function crontab_remove() {
-    local job="$1"
-    # check exist before remove
-    crontab -l | grep -F "$job" >/dev/null 2>&1
-    if [ $? -eq 1 ]; then
-        return 0
-    fi
+# Validate a path-like value. $1=value  $2=label for the error  $3=crlf|cron|classpath
+#   crlf      : reject CR/LF. Call on the RAW value (e.g. $OPTARG) BEFORE
+#               canonicalize_dir/canonicalize_file.
+#   cron      : crlf + reject '%'.
+#   classpath : crlf + reject ':' and ';'. For a directory whose contents are
+#               joined into a ':'-separated CLASSPATH (the plugins dir), where
+#               a ':' in the path itself would split one entry into two bogus
+#               ones. On Cygwin, hugegraph-server.sh converts that classpath
+#               with 'cygpath -p -w', which re-delimits it on ';' instead, so a
+#               ';' in the path would do the same splitting there.
+function reject_unsafe_path() {
+    case "$1" in
+        *[$'\n\r']*)
+            echo "ERROR: $2 must not contain CR/LF characters" >&2
+            return 1 ;;
+    esac
 
-    crontab -l | grep -Fv "$job"  | crontab -
+    case "$3" in
+        cron)
+            case "$1" in
+                *%*)
+                    echo "ERROR: $2 must not contain '%' (reserved by cron)" >&2
+                    return 1 ;;
+            esac ;;
+        classpath)
+            case "$1" in
+                *:*)
+                    echo "ERROR: $2 must not contain ':' (CLASSPATH separator)" >&2
+                    return 1 ;;
+                *';'*)
+                    echo "ERROR: $2 must not contain ';' (CLASSPATH separator on Cygwin)" >&2
+                    return 1 ;;
+            esac ;;
+    esac
+    return 0
+}
 
-    # Check exist after remove
-    crontab -l | grep -F "$job" >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+# Validate (cron rules) then quote. $1=value  $2=label. Prints the quoted word.
+function cron_quote() {
+    reject_unsafe_path "$1" "$2" cron || return 1
+    shell_quote "$1"
+}
+
+# Fail fast when a required config file is missing or unreadable.
+# read_property() returns an empty string in that case, which otherwise looks
+# exactly like "the property is not set" and lets startup continue with silent
+# defaults.
+#   $1 = file   $2 = for error message
+function ensure_file_readable() {
+    local file="$1" description="$2"
+    if [ ! -f "$file" ]; then
+        echo "ERROR: missing $description: '$file'" >&2
+        if [ -n "${CONF_OVERRIDE:-}" ]; then
+            echo "       The conf dir passed with -c must contain the same files" >&2
+            echo "       as the packaged conf directory." >&2
+        fi
         return 1
-    else
+    fi
+    if [ ! -r "$file" ]; then
+        echo "ERROR: unreadable $description: '$file'" >&2
+        echo "       Check the file's ownership and permissions." >&2
+        return 1
+    fi
+    return 0
+}
+
+# A relative path inside a config file is resolved by the JVM against the
+# working directory, which the start scripts set to $TOP -- not against the
+# directory the config file itself lives in. So when -c points at an external
+# conf dir, a value such as 'graphs=./conf/graphs' still loads
+# $TOP/conf/graphs and the operator's copy is ignored with no message at all.
+# Refuse to start in such case when -c is set and say exactly what to change.
+#   $1 = value read from the config   $2 = property name   $3 = config file
+function reject_relative_conf_path() {
+    local value="$1" property="$2" file="$3"
+    # Only an overridden conf dir can disagree with the working directory.
+    [ -z "${CONF_OVERRIDE:-}" ] && return 0
+    [ -z "$value" ] && return 0
+    case "$value" in
+        /*) return 0 ;;
+    esac
+    # Build the suggestion: the stock values are written relative to $TOP (e.g.
+    # './conf/graphs'), while $CONF_OVERRIDE already IS the conf dir, so drop a
+    # leading './' and a leading 'conf/' to avoid suggesting '.../conf/conf/...'.
+    local suggestion="${value#./}"
+    suggestion="${suggestion#conf/}"
+    echo "ERROR: '$property' is the relative path '$value' in $file." >&2
+    echo "       Relative paths resolve against the working directory, so with" >&2
+    echo "       -c '$CONF_OVERRIDE' this would silently keep using the packaged" >&2
+    echo "       directory instead of your copy. Set '$property' to an absolute" >&2
+    echo "       path (for example '$CONF_OVERRIDE/$suggestion')." >&2
+    return 1
+}
+
+# Serialize concurrent cron edits (across both processes and scripts: start,
+# stop and restart can all touch the crontab around the same time). Uses
+# flock(1) when available; falls back to an atomic mkdir-based lock with a
+# stale-lock timeout on systems without flock (e.g. stock macOS).
+# NOTE: neither path is reentrant. A process that already holds this lock
+# must not call crontab_lock_acquire (directly, or via crontab_append /
+# crontab_remove) again before releasing it: flock(1) keys locks off the open
+# file description, not the pid, so a second acquire from the SAME process
+# blocks on itself for the full CRONTAB_LOCK_TIMEOUT_S and then fails.
+# The lock file is keyed to the calling user's uid: a single shared name
+# under /tmp would be created and owned by whichever user got there first,
+# so every other account could then fail to open it (wrong owner, or a
+# hardened fs.protected_regular sysctl, which blocks even root) with no
+# obvious cause.
+CRONTAB_LOCK_FILE="${TMPDIR:-/tmp}/.hugegraph-crontab-$(id -u).lock"
+CRONTAB_LOCK_FD=9
+CRONTAB_LOCK_TIMEOUT_S=30
+
+function crontab_lock_acquire() {
+    if command_available flock; then
+        local open_err
+        open_err="$(eval "exec ${CRONTAB_LOCK_FD}>\"\$CRONTAB_LOCK_FILE\"" 2>&1)"
+        if [ $? -ne 0 ]; then
+            echo "ERROR: cannot open crontab lock file '$CRONTAB_LOCK_FILE': $open_err" >&2
+            return 1
+        fi
+        if ! flock -w "$CRONTAB_LOCK_TIMEOUT_S" "$CRONTAB_LOCK_FD"; then
+            eval "exec ${CRONTAB_LOCK_FD}>&-" 2>/dev/null
+            echo "ERROR: timed out waiting for the crontab lock" >&2
+            return 1
+        fi
         return 0
     fi
+    local lockdir="${CRONTAB_LOCK_FILE}.d" waited=0
+    while ! mkdir -- "$lockdir" 2>/dev/null; do
+        # If mtime can't be determined (stat lacks -c/-f, or the holder
+        # removed lockdir in the gap between our failed mkdir and this stat),
+        # do NOT assume epoch 0 / "infinitely old": that would make a
+        # perfectly live, just-created lock look stale and get stolen.
+        # Skip the staleness check instead and just retry after the sleep below.
+        local mtime
+        mtime=$(stat -c %Y "$lockdir" 2>/dev/null || stat -f %m "$lockdir" 2>/dev/null) || mtime=""
+        if [ -n "$mtime" ]; then
+            local age=$(( $(date +%s) - mtime ))
+            if [ "$age" -gt "$CRONTAB_LOCK_TIMEOUT_S" ]; then
+                rmdir -- "$lockdir" 2>/dev/null   # stale lock from a killed process
+                continue
+            fi
+        fi
+        sleep 1
+        waited=$((waited + 1))
+        if [ "$waited" -ge "$CRONTAB_LOCK_TIMEOUT_S" ]; then
+            echo "ERROR: timed out waiting for the crontab lock" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+function crontab_lock_release() {
+    if command_available flock; then
+        eval "exec ${CRONTAB_LOCK_FD}>&-" 2>/dev/null
+    else
+        rmdir -- "${CRONTAB_LOCK_FILE}.d" 2>/dev/null
+    fi
+}
+
+# Print the current crontab to stdout. Returns 0 = table read (possibly
+# empty), 1 = user has no crontab (not an error), 2 = read failure.
+# A failure MUST NOT be confused with "empty": writing back an empty table
+# that was really a read error would destroy every job the user has.
+function crontab_list() {
+    local err out
+    err="$(mktemp -- "${TMPDIR:-/tmp}/cron-err.XXXXXX")" || return 2
+    out="$(mktemp -- "${TMPDIR:-/tmp}/cron-out.XXXXXX")" || { rm -f -- "$err"; return 2; }
+    chmod 600 -- "$err" "$out" 2>/dev/null
+    if crontab -l >"$out" 2>"$err"; then
+        cat -- "$out"
+        rm -f -- "$err" "$out"
+        return 0
+    fi
+    # "no crontab for <user>" on otherwise-empty stdout is simply an empty
+    # table, not a failure.
+    if [ ! -s "$out" ] && grep -qi 'no crontab' -- "$err"; then
+        rm -f -- "$err" "$out"
+        return 1
+    fi
+    echo "ERROR: cannot read the crontab: $(cat -- "$err")" >&2
+    rm -f -- "$err" "$out"
+    return 2
+}
+
+# crontab_append <line> [key ...]   keys default to <line>
+# 0 = installed.  1 = a key already present (nothing written).
+# 2 = crontab could not be read, locked or written.
+#
+# The crontab is kept in a temp FILE, not a shell variable, because command
+# substitution strips trailing newlines, which can silently desync line-count
+# reasoning. A trap guarantees the temp file and the lock are released even
+# if the script is interrupted (Ctrl-C) mid-edit.
+function crontab_append() {
+    local job="${1:-}"; shift || true
+    local keys=()
+    if [ $# -gt 0 ]; then keys=("$@"); else keys=("$job"); fi
+    local args=() k
+    for k in "${keys[@]}"; do args+=(-e "$k"); done
+
+    local table lock_held=0 prev_exit_trap
+    table="$(mktemp -- "${TMPDIR:-/tmp}/cron-cur.XXXXXX")" || return 2
+    chmod 600 -- "$table" 2>/dev/null
+    # RETURN is this call's own cleanup; EXIT is process-global, so save any
+    # trap the caller already had and chain it after ours. The handler clears
+    # both traps once it runs so it cannot fire again on a later, unrelated
+    # function return and reference locals that no longer exist.
+    prev_exit_trap="$(trap -p EXIT)"
+    trap '
+        rm -f -- "$table" 2>/dev/null
+        [ "$lock_held" -eq 1 ] && crontab_lock_release
+        trap - RETURN EXIT
+        eval "$prev_exit_trap"
+    ' RETURN EXIT
+
+    crontab_lock_acquire || return 2
+    lock_held=1
+
+    crontab_list >"$table"
+    local rc=$?
+    if [ "$rc" -eq 2 ]; then return 2; fi
+    [ "$rc" -eq 1 ] && : >"$table"   # no crontab yet: start from an empty file
+
+    if [ -s "$table" ] && grep -F "${args[@]}" -- "$table" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # printf, not echo: a line starting with -n/-e or containing backslashes
+    # must be written verbatim.
+    printf '%s\n' "$job" >>"$table" || return 2
+    if ! crontab -- "$table"; then
+        return 2
+    fi
+    return 0
+}
+
+# crontab_remove <key> [key ...]
+# Deletes every crontab line containing any key (matched literally, via
+# grep -F). Steps: lock -> read the table into a file -> if no key is present,
+# return early without writing -> filter out matching lines into a second
+# file -> install it with 'crontab' (or 'crontab -r' if nothing is left) ->
+# re-read the table and confirm no key remains.
+# 0 = removed, or nothing to remove to begin with.
+# 1 = failed before any write was attempted (table verifiably untouched).
+# 2 = a write was attempted but could not be confirmed (the install reported
+#     an error, or the post-write verify failed/still shows a key) - the
+#     caller should re-check manually rather than assume nothing happened.
+#
+# Same file-based read/filter/verify flow and the same interrupt-safe
+# trap/lock pattern as crontab_append.
+function crontab_remove() {
+    [ $# -eq 0 ] && return 0
+
+    local args=() k
+    for k in "$@"; do args+=(-e "$k"); done
+
+    local table kept lock_held=0 prev_exit_trap
+    table="$(mktemp -- "${TMPDIR:-/tmp}/cron-cur.XXXXXX")" || return 1
+    kept="$(mktemp -- "${TMPDIR:-/tmp}/cron-new.XXXXXX")" || { rm -f -- "$table"; return 1; }
+    chmod 600 -- "$table" "$kept" 2>/dev/null
+    prev_exit_trap="$(trap -p EXIT)"
+    trap '
+        rm -f -- "$table" "$kept" 2>/dev/null
+        [ "$lock_held" -eq 1 ] && crontab_lock_release
+        trap - RETURN EXIT
+        eval "$prev_exit_trap"
+    ' RETURN EXIT
+
+    crontab_lock_acquire || return 1
+    lock_held=1
+
+    crontab_list >"$table"
+    local rc=$?
+    [ "$rc" -eq 1 ] && return 0   # no crontab at all -> nothing to remove
+    [ "$rc" -ne 0 ] && return 1   # real read failure -> never write
+
+    if [ ! -s "$table" ] || ! grep -F "${args[@]}" -- "$table" >/dev/null 2>&1; then
+        return 0   # key not present -> nothing to remove
+    fi
+
+    grep -Fv "${args[@]}" -- "$table" >"$kept"
+    local grep_rc=$?
+    # 0 = some lines kept, 1 = all lines matched (an empty result is correct
+    # here), anything else is a grep failure and must not reach crontab. No
+    # write has happened yet, so this is still return 1.
+    if [ "$grep_rc" -gt 1 ]; then
+        echo "ERROR: failed to filter the crontab; leaving it unchanged" >&2
+        return 1
+    fi
+
+    # From here on a write is attempted: any failure past this point is a
+    # return 2 (unconfirmed), never a return 1 (table verifiably untouched).
+    if [ -s "$kept" ]; then
+        if ! crontab -- "$kept"; then
+            echo "ERROR: failed to install the new crontab; state unconfirmed" >&2
+            return 2
+        fi
+    else
+        # Removing the last line. Portable way to clear a table; 'crontab -'
+        # with empty stdin is implementation-defined.
+        crontab -r 2>/dev/null || true
+    fi
+
+    # Verify against a fresh read. The install above already happened, so any
+    # failure here can only report "unconfirmed", not "unchanged".
+    crontab_list >"$table"
+    rc=$?
+    [ "$rc" -eq 1 ] && return 0
+    if [ "$rc" -ne 0 ]; then
+        echo "ERROR: could not verify the crontab after removal" >&2
+        return 2
+    fi
+    if [ -s "$table" ] && grep -F "${args[@]}" -- "$table" >/dev/null 2>&1; then
+        echo "ERROR: key still present in the crontab after removal" >&2
+        return 2
+    fi
+    return 0
 }
 
 # wait_for_startup friendly_name host port timeout_s
@@ -720,6 +1021,59 @@ function ensure_path_writable() {
     fi
 }
 
+# Canonicalize a (possibly relative) directory override into an absolute path.
+#   $1 = path, $2 = mode (optional)
+#   default    : create the directory if missing. -l and -o name directories the
+#                scripts write into, so creating them is the expected setup step.
+#   "nocreate" : resolve only. The directory is never created, and a missing one
+#                is an error. Used for -c: a conf dir is only ever READ, so a
+#                typo such as '-c /dat/conf' must fail here naming the wrong
+#                directory, instead of silently creating an empty one and
+#                failing later on a file missing inside it.
+function canonicalize_dir() {
+    local path="$1"
+    local mode="${2:-create}"
+    [ -z "$path" ] && return 0
+    if [ "$mode" != "nocreate" ]; then
+        mkdir -p "$path" 2>/dev/null
+    elif [ ! -d "$path" ]; then
+        echo "Error: no such directory '$path'" >&2
+        exit 1
+    fi
+    (cd "$path" 2>/dev/null && pwd) || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+}
+
+# Canonicalize a (possibly relative) file override (e.g. the pid file) into an
+# absolute path.
+#   $1 = path, $2 = mode (optional)
+#   default    : create the parent directory if missing (start/restart scripts,
+#                which have to be able to write the pid file afterwards).
+#   "nocreate" : resolve only. The parent is never created, and a missing one
+#                is an error. The stop scripts only ever READ the pid file, so
+#                they must not leave an empty directory tree behind for a typo
+#                such as '-i /var/run/hugegraf/server.pid'.
+function canonicalize_file() {
+    local path="$1"
+    local mode="${2:-create}"
+    [ -z "$path" ] && return 0
+    local dir file abs_dir
+    dir="$(dirname "$path")"
+    file="$(basename "$path")"
+    # In "nocreate" mode the parent is never created; a missing one then makes
+    # the cd below fail, which reports the error and exits.
+    if [ "$mode" != "nocreate" ]; then
+        mkdir -p "$dir" 2>/dev/null
+    fi
+    abs_dir="$(cd "$dir" 2>/dev/null && pwd)" || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+    echo "$abs_dir/$file"
+}
+
 function get_ip() {
     local os=$(uname)
     local loopback="127.0.0.1"
@@ -892,7 +1246,8 @@ function kill_process_and_wait() {
 
 function exit_with_usage_help(){
     echo "USAGE: $0 [-d true|false] [-g g1|G1|zgc|ZGC] [-m true|false] [-p true|false]" \
-         "[-s true|false] [-j java_options] [-t timeout] [-y true|false]"
+         "[-s true|false] [-j java_options] [-t timeout] [-y true|false]" \
+         "[-c conf_dir] [-l logs_dir] [-o plugins_dir] [-i pid_file]"
     echo "Without -g, JVM/caller collector selection applies. -j applies when JAVA_OPTIONS is empty."
     echo "Default/G1 tuning precedes caller options, so caller tuning values win."
     echo "Do not combine -g with a different collector in JAVA_OPTIONS or -j."

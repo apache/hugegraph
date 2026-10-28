@@ -242,15 +242,32 @@ bin/restart-hugegraph-store.sh
 #### Startup Options
 
 ```bash
-bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
+bin/start-hugegraph-store.sh [-c CONF_DIR] [-l LOGS_DIR] [-i PID_FILE] [-o PLUGINS_DIR] \
+    [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
 ```
 
+- `-c`: Conf directory (default: `conf` under the install root). Resolved to an
+  absolute path if relative; must already exist (it is read, never created).
+- `-l`: Logs directory (default: `logs` under the install root). Resolved to an
+  absolute path if relative; created if missing.
+- `-i`: PID file (default: `bin/pid` under the install root). Resolved to an
+  absolute path if relative; must be removable/writable, but its parent is not
+  auto-created.
+- `-o`: Plugins directory (default: `plugins` under the install root). Resolved
+  to an absolute path if relative; created if missing. Its contents are joined
+  into a `:`-separated CLASSPATH, so avoid `:`/`;` in this path.
 - `-g`: Explicit GC selection (`g1`/`G1` or `zgc`/`ZGC`). Without `-g`, JVM defaults or the collector
   set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
   unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
   or `-j`; conflicting selections are rejected by the JVM.
 - `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
+
+`-c`/`-l`/`-i`/`-o` must avoid embedded CR/LF characters; `stop-hugegraph-store.sh`
+and `restart-hugegraph-store.sh` accept the same flags so they can locate the
+paths a non-default `start` used. `restart-hugegraph-store.sh` validates
+`-c`/`-l`/`-o` before stopping the running Store, so an unusable override is
+rejected while the old process is still up rather than after it has been killed.
 
 The launcher always loads `bin/jvm-module.options`, including with custom `JAVA_OPTIONS` or `-j`.
 Keep this file in the distribution: it grants the Java 17 access required by Hessian Raft serialization;

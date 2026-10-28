@@ -27,22 +27,37 @@ abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
+while getopts "i:" arg; do
+    case ${arg} in
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-i pid_file]" && exit 1 ;;
+    esac
+done
+
 BIN=$(abs_path)
 TOP="$(cd $BIN/../ && pwd)"
 
 . "$BIN"/util.sh
 
-PID_FILE=$BIN/pid
+reject_unsafe_path "$PID_FILE_OVERRIDE" "-i pid file" crlf || exit 1
+
+# Resolve to the same absolute path start-hugegraph-pd.sh wrote. "nocreate":
+# stop only reads the pid file
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE" nocreate)" || exit 1
+
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 SERVER_SHUTDOWN_TIMEOUT_S=30
 
-if [ ! -f ${PID_FILE} ]; then
+if [ ! -f "${PID_FILE}" ]; then
     echo "The pid file $PID_FILE doesn't exist"
     exit 0
 fi
 
-PID=$(cat $PID_FILE)
-kill_process_and_wait "HugeGraphPDServer" "$PID" "$SERVER_SHUTDOWN_TIMEOUT_S"
-
-if [ $? -eq 0 ]; then
+PID=$(cat "$PID_FILE")
+# An unchecked call would let the script fall off the end with status 0, so a
+# shutdown that timed out with the JVM still alive would be reported as success.
+if kill_process_and_wait "HugeGraphPDServer" "$PID" "$SERVER_SHUTDOWN_TIMEOUT_S"; then
     rm "$PID_FILE"
+else
+    exit 1
 fi

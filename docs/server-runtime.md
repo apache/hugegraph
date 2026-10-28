@@ -30,6 +30,48 @@ component files. CI checks positive-test and startup logs for Java module-access
 errors and unsupported JVM options, including errors printed without failing the
 operation.
 
+### Launcher path overrides
+
+`bin/start-hugegraph.sh` accepts four path overrides. The override flags also work in
+`bin/init-store.sh` (`-c`/`-o`), `bin/stop-hugegraph.sh` (`-i`) and the monitor
+cron job installed by `-m true`, so stop/restart/monitor stay consistent with
+the paths `bin/start-hugegraph.sh` used.
+
+| Flag | Meaning | Default (when omitted) |
+|---|---|---|
+| `-c <dir>` | Conf directory | `$TOP/conf` |
+| `-l <dir>` | Logs directory | `$TOP/logs` |
+| `-i <file>` | PID file | `$BIN/pid` |
+| `-o <dir>` | Plugins directory | `$TOP/plugins` |
+
+`$TOP` is the distribution's install root (the parent of `bin/`); `$BIN` is
+`$TOP/bin`.
+
+Relative values are resolved to absolute paths before use: `-l` and `-o` name
+directories the launcher writes into, so a relative or missing directory is
+created; `-c` and `-i` are only ever read, so a relative value is resolved
+without creating anything, and a missing `-c` directory is a startup error.
+A value for `-c` or `-i` must still be an existing path once resolved — the
+launcher does not create the external conf dir or a pid file's parent
+directory for you unless that parent already exists.
+
+Avoid `:`, `;`, `%`, and embedded CR/LF characters in any of these four paths:
+`-o` is joined into a `:`-separated CLASSPATH (and `;`-separated on Cygwin), so
+a `:`/`;` in that path corrupts the classpath; `%` is reserved by cron and is
+rejected whenever `-m true` persists these paths into a crontab line; CR/LF is
+always rejected. The launcher validates each path both before and after
+resolving a relative value to an absolute one, since resolution against the
+working directory can itself introduce a problem character that was not in
+the original value.
+
+When `-c` points at an external conf directory, keep `graphs` in
+`rest-server.properties` and `ssl.keystore_file` (when `restserver.url` is
+`https`) as absolute paths, or under that `-c` directory. Both are otherwise
+resolved by the JVM against the working directory (`$TOP`), not against `-c`,
+so a relative value there silently keeps using the packaged copy instead of
+yours; the launcher refuses to start in that case and names the property and
+file to fix.
+
 ### Launcher GC options
 
 Use `bin/start-hugegraph.sh -g g1` (or `-g G1`) to select G1 explicitly.
