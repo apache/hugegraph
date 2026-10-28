@@ -18,6 +18,7 @@
 package org.apache.hugegraph.store.node;
 
 import org.apache.hugegraph.store.node.listener.PdConfigureListener;
+import org.apache.hugegraph.store.util.GraphIdPreflightException;
 import org.apache.hugegraph.util.RocksDBRuntime;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -32,7 +33,18 @@ import com.alipay.remoting.util.StringUtils;
 public class StoreNodeApplication {
 
     public static void main(String[] args) {
-        start(args);
+        try {
+            start(args);
+        } catch (RuntimeException failure) {
+            for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+                if (cause instanceof GraphIdPreflightException) {
+                    // Native factory workers can keep the JVM alive after Spring refuses startup.
+                    failure.printStackTrace();
+                    System.exit(1);
+                }
+            }
+            throw failure;
+        }
     }
 
     public static void start() {

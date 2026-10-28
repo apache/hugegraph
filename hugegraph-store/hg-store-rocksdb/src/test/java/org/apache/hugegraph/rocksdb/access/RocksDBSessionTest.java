@@ -17,25 +17,58 @@
 
 package org.apache.hugegraph.rocksdb.access;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import org.apache.commons.configuration2.MapConfiguration;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
+import org.junit.Assume;
 import org.junit.BeforeClass;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.rocksdb.Checkpoint;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.DBOptions;
+import org.rocksdb.InfoLogLevel;
+import org.rocksdb.Logger;
+import org.rocksdb.Options;
+import org.rocksdb.RocksDB;
 
 public class RocksDBSessionTest {
 
     private final String graphName = "testDummy";
+
+    @Rule
+    public TemporaryFolder temporary = new TemporaryFolder();
 
     @BeforeClass
     public static void init() {
@@ -49,6 +82,278 @@ public class RocksDBSessionTest {
         HugeConfig hConfig = new HugeConfig(new MapConfiguration(configMap));
         RocksDBFactory rFactory = RocksDBFactory.getInstance();
         rFactory.setHugeConfig(hConfig);
+    }
+
+    @Test
+    public void resolveExistingPathPreservesVersionsAndConstructorStillPrunes() throws Exception {
+        Path root = this.temporary.newFolder("versions").toPath();
+        for (String name : new String[]{"db", "db_2", "db_2_3", "db_4_1", "db_99_temp_"}) {
+            writeNative(root.resolve(name), bytes(name));
+        }
+        Map<String, String> before = fileHashes(root);
+        assertEquals(root.resolve("db_4_1").toString(),
+                     RocksDBSession.resolveExistingDBPath(root.toString(), "db", 5L));
+        assertEquals(before, fileHashes(root));
+        assertArrayEquals(bytes("db_4_1"), readNative(root.resolve("db_4_1")));
+        try (RocksDBSession session = new RocksDBSession(smallConfig(), root.toString(), "db", 5L)) {
+            assertEquals(root.resolve("db_4_1").toString(), session.getDbPath());
+            assertArrayEquals(bytes("db_4_1"), session.getDB().get(bytes("key")));
+            assertFalse(Files.exists(root.resolve("db")));
+            assertFalse(Files.exists(root.resolve("db_2")));
+            assertFalse(Files.exists(root.resolve("db_2_3")));
+            assertTrue(Files.exists(root.resolve("db_99_temp_")));
+        }
+    }
+
+    @Test
+    public void resolveNewPathDoesNotCreateDatabase() throws Exception {
+        Path root = this.temporary.newFolder("missing").toPath();
+        Path missing = root.resolve("not-created");
+        assertNull(RocksDBSession.resolveExistingDBPath(missing.toString(), "db", 0L));
+        assertFalse(Files.exists(missing));
+        Files.createDirectory(root.resolve("db"));
+        assertNull(RocksDBSession.resolveExistingDBPath(root.toString(), "db", 0L));
+        assertTrue(Files.isDirectory(root.resolve("db")));
+        assertFalse(Files.exists(root.resolve("db/CURRENT")));
+    }
+
+    @Test
+    public void resolveIncompleteNewerVersionPreservesExistingDatabase() throws Exception {
+        Path root = this.temporary.newFolder("incomplete").toPath();
+        writeNative(root.resolve("db_1"), bytes("existing"));
+        Files.createDirectory(root.resolve("db_2"));
+        Map<String, String> before = fileHashes(root);
+        assertThrows(DBStoreException.class,
+                     () -> RocksDBSession.resolveExistingDBPath(root.toString(), "db", 2L));
+        assertTrue(Files.isDirectory(root.resolve("db_2")));
+        assertEquals(before, fileHashes(root));
+        assertArrayEquals(bytes("existing"), readNative(root.resolve("db_1")));
+    }
+
+    @Test
+    public void resolveMissingCurrentDoesNotTreatCheckpointAsNewDatabase() throws Exception {
+        Path root = this.temporary.newFolder("missing-current-checkpoint").toPath();
+        Path source = root.resolve("producer");
+        Path database = root.resolve("db");
+        writeNative(source, bytes("existing"));
+        createNativeSnapshot(source, database);
+        assertArrayEquals(bytes("existing"), readNative(database));
+        Files.delete(database.resolve("CURRENT"));
+        Map<String, String> before = fileHashes(root);
+
+        DBStoreException failure = assertThrows(DBStoreException.class,
+                () -> RocksDBSession.resolveExistingDBPath(root.toString(), "db", 0L));
+
+        assertTrue(failure.getMessage(), failure.getMessage().contains("no CURRENT"));
+        assertTrue(failure.getMessage(), failure.getMessage().contains(database.toString()));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("#incomplete-database-directories"));
+        assertEquals(before, fileHashes(root));
+        assertArrayEquals(bytes("existing"), readNative(source));
+    }
+
+    @Test
+    public void resolveRejectsNonemptyRetainedVersionWithoutCurrent() throws Exception {
+        Path root = this.temporary.newFolder("retained-missing-current").toPath();
+        writeNative(root.resolve("db_1"), bytes("retained"));
+        writeNative(root.resolve("db_2"), bytes("latest"));
+        Files.delete(root.resolve("db_1/CURRENT"));
+        Map<String, String> before = fileHashes(root);
+
+        DBStoreException failure = assertThrows(DBStoreException.class,
+                () -> RocksDBSession.resolveExistingDBPath(root.toString(), "db", 2L));
+
+        assertTrue(failure.getMessage(), failure.getMessage().contains(root.resolve("db_1").toString()));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("#incomplete-database-directories"));
+        assertEquals(before, fileHashes(root));
+        assertArrayEquals(bytes("latest"), readNative(root.resolve("db_2")));
+    }
+
+    @Test
+    public void resolveRejectsUnreadableParent() throws Exception {
+        Path root = this.temporary.newFolder("unreadable-parent").toPath();
+        assertRestrictedPathRejected(root, root, "-wx------", root);
+    }
+
+    @Test
+    public void resolveRejectsUnsearchableDatabase() throws Exception {
+        Path root = this.temporary.newFolder("unsearchable-db").toPath();
+        assertRestrictedPathRejected(root, root.resolve("db_2"), "r--------", root);
+    }
+
+    @Test
+    public void resolveRejectsUnknownMissingPathUnderDeniedAncestor() throws Exception {
+        Path root = this.temporary.newFolder("denied-ancestor").toPath();
+        assertRestrictedPathRejected(root, root, "---------", root.resolve("missing"));
+    }
+
+    private static void assertRestrictedPathRejected(Path root, Path restricted,
+                                                    String mode, Path requested) throws Exception {
+        Assume.assumeTrue("POSIX permissions are required for the access regression",
+                          Files.getFileStore(root).supportsFileAttributeView("posix"));
+        Path database = root.resolve("db_2");
+        writeNative(database, bytes("existing"));
+        Map<String, String> before = fileHashes(root);
+        Set<PosixFilePermission> original = Files.getPosixFilePermissions(restricted);
+        try {
+            Files.setPosixFilePermissions(restricted, PosixFilePermissions.fromString(mode));
+            boolean denied = restricted.equals(database) ? !Files.isExecutable(restricted) :
+                             !Files.isReadable(restricted);
+            Assume.assumeTrue("Permission denial is required; root DAC override may bypass it", denied);
+            DBStoreException failure = assertThrows(DBStoreException.class,
+                    () -> RocksDBSession.resolveExistingDBPath(requested.toString(), "db", 2L));
+            assertTrue(failure.getCause() instanceof IOException);
+        } finally {
+            Files.setPosixFilePermissions(restricted, original);
+        }
+        assertEquals(before, fileHashes(root));
+        assertArrayEquals(bytes("existing"), readNative(database));
+        assertFalse(Files.exists(root.resolve("db")));
+        assertFalse(Files.exists(root.resolve("missing")));
+    }
+
+    @Test
+    public void rejectedSnapshotPreservesActiveVersionAndStaging() throws Exception {
+        Path root = this.temporary.newFolder("rejected").toPath();
+        Path snapshot = root.resolve("snapshot");
+        writeNative(root.resolve("producer"), bytes("candidate"));
+        createNativeSnapshot(root.resolve("producer"), snapshot);
+        Path target = root.resolve("db_20");
+        Path staging = root.resolve("db_20_temp_");
+        IllegalStateException rejection = new IllegalStateException("candidate content rejected");
+        AtomicInteger validated = new AtomicInteger();
+        AtomicReference<Map<String, String>> stagedBefore = new AtomicReference<>();
+        try (RocksDBSession active = new RocksDBSession(smallConfig(), root.toString(), "db", 0L)) {
+            active.getDB().put(bytes("key"), bytes("active"));
+            writeNative(target, bytes("previous-version"));
+            String activePath = active.getDbPath();
+            long sequence = active.getLatestSequenceNumber();
+            Map<String, String> activeBefore = fileHashes(Path.of(activePath));
+            Map<String, String> targetBefore = fileHashes(target);
+            Map<String, String> snapshotBefore = fileHashes(snapshot);
+            DBStoreException failed = assertThrows(DBStoreException.class, () ->
+                    active.loadSnapshot(snapshot.toString(), 20L, path -> {
+                        assertEquals(staging.toString(), path);
+                        try {
+                            assertArrayEquals(bytes("candidate"), readNative(Path.of(path)));
+                            stagedBefore.set(fileHashes(Path.of(path)));
+                        } catch (Exception e) {
+                            throw new AssertionError(e);
+                        }
+                        validated.incrementAndGet();
+                        throw rejection;
+                    }));
+            assertSame(rejection, failed.getCause());
+            assertEquals(1, validated.get());
+            assertEquals(activePath, active.getDbPath());
+            assertEquals(sequence, active.getLatestSequenceNumber());
+            assertArrayEquals(bytes("active"), active.getDB().get(bytes("key")));
+            assertEquals(activeBefore, fileHashes(Path.of(activePath)));
+            assertEquals(targetBefore, fileHashes(target));
+            assertEquals(snapshotBefore, fileHashes(snapshot));
+            assertArrayEquals(bytes("previous-version"), readNative(target));
+            assertArrayEquals(bytes("candidate"), readNative(staging));
+            assertEquals(stagedBefore.get(), fileHashes(staging));
+        }
+    }
+
+    @Test
+    public void acceptedSnapshotAndOriginalOverloadActivateNativeData() throws Exception {
+        Path root = this.temporary.newFolder("accepted").toPath();
+        Path snapshot = root.resolve("snapshot");
+        writeNative(root.resolve("producer"), bytes("candidate"));
+        createNativeSnapshot(root.resolve("producer"), snapshot);
+        AtomicInteger validated = new AtomicInteger();
+        try (RocksDBSession active = new RocksDBSession(smallConfig(), root.toString(), "db", 0L)) {
+            active.loadSnapshot(snapshot.toString(), 20L, path -> {
+                try {
+                    assertArrayEquals(bytes("candidate"), readNative(Path.of(path)));
+                } catch (Exception e) {
+                    throw new AssertionError(e);
+                }
+                validated.incrementAndGet();
+            });
+            assertEquals(1, validated.get());
+            assertFalse(Files.exists(root.resolve("db_20_temp_")));
+            assertArrayEquals(bytes("candidate"), readNative(root.resolve("db_20")));
+            active.loadSnapshot(snapshot.toString(), 21L);
+            assertArrayEquals(bytes("candidate"), readNative(root.resolve("db_21")));
+        }
+        try (RocksDBSession reopened = new RocksDBSession(smallConfig(), root.toString(), "db", 21L)) {
+            assertEquals(root.resolve("db_21").toString(), reopened.getDbPath());
+            assertArrayEquals(bytes("candidate"), reopened.getDB().get(bytes("key")));
+        }
+    }
+
+    private static HugeConfig smallConfig() {
+        Map<String, Object> values = new HashMap<>();
+        values.put("rocksdb.optimize_mode", false);
+        values.put("rocksdb.write_buffer_size", 65536L);
+        values.put("rocksdb.max_background_jobs", 1);
+        values.put("rocksdb.max_subcompactions", 1);
+        values.put("rocksdb.log_level", "ERROR");
+        return new HugeConfig(new MapConfiguration(values));
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void writeNative(Path path, byte[] value) throws Exception {
+        try (Options options = new Options().setCreateIfMissing(true).setWriteBufferSize(65536L);
+             RocksDB db = RocksDB.open(options, path.toString())) {
+            db.put(bytes("key"), value);
+        }
+    }
+
+    private static void createNativeSnapshot(Path source, Path snapshot) throws Exception {
+        try (Options options = new Options();
+             RocksDB db = RocksDB.open(options, source.toString());
+             Checkpoint checkpoint = Checkpoint.create(db)) {
+            checkpoint.createCheckpoint(snapshot.toString());
+        }
+    }
+
+    private static byte[] readNative(Path path) throws Exception {
+        try (Options options = new Options();
+             ColumnFamilyOptions cfOptions = new ColumnFamilyOptions();
+             DBOptions dbOptions = new DBOptions();
+             Logger logger = new Logger(dbOptions) {
+                 @Override
+                 protected void log(InfoLogLevel level, String message) {
+                     // Native readback must not create or replace the DB's LOG file.
+                 }
+             }) {
+            dbOptions.setLogger(logger);
+            List<ColumnFamilyDescriptor> descriptors = new ArrayList<>();
+            for (byte[] name : RocksDB.listColumnFamilies(options, path.toString())) {
+                descriptors.add(new ColumnFamilyDescriptor(name, cfOptions));
+            }
+            List<ColumnFamilyHandle> handles = new ArrayList<>();
+            try (RocksDB db = RocksDB.openReadOnly(dbOptions, path.toString(), descriptors, handles)) {
+                try {
+                    return db.get(handles.get(0), bytes("key"));
+                } finally {
+                    for (ColumnFamilyHandle handle : handles) {
+                        handle.close();
+                    }
+                }
+            }
+        }
+    }
+
+    private static Map<String, String> fileHashes(Path root) throws Exception {
+        Map<String, String> hashes = new TreeMap<>();
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())) {
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path));
+                StringBuilder encoded = new StringBuilder();
+                for (byte value : digest) {
+                    encoded.append(String.format("%02x", value));
+                }
+                hashes.put(root.relativize(path).toString(), encoded.toString());
+            }
+        }
+        return hashes;
     }
 
     private static byte[] intToBytesForPartId(int v) {

@@ -40,6 +40,7 @@ import org.apache.hugegraph.store.cmd.response.UpdatePartitionResponse;
 import org.apache.hugegraph.store.consts.PoolNames;
 import org.apache.hugegraph.store.listener.PartitionChangedListener;
 import org.apache.hugegraph.store.listener.StoreStateListener;
+import org.apache.hugegraph.store.meta.GraphIdManager;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.meta.ShardGroup;
@@ -55,6 +56,7 @@ import org.apache.hugegraph.store.processor.Processors;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.util.ExecutorUtil;
+import org.apache.hugegraph.store.util.GraphIdPreflightException;
 import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.Lifecycle;
 
@@ -123,6 +125,9 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         }
 
         this.options = opts;
+        BusinessHandlerImpl.initRocksdb(opts.getRocksdbConfig(), getRocksdbListener());
+        GraphIdManager.checkStoreDataBeforeStartup(opts.getDataPath());
+
         // Move to the front
         if (uninterruptibleJobs == null) {
             JobOptions jobConfig = options.getJobConfig();
@@ -132,8 +137,6 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
                                                               jobConfig.getUninterruptibleQueueSize(),
                                                               false);
         }
-
-        BusinessHandlerImpl.initRocksdb(opts.getRocksdbConfig(), getRocksdbListener());
 
         if (opts.isFakePD()) {
             pdProvider = new FakePdServiceProvider(opts.getFakePdOptions());
@@ -263,12 +266,16 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
             partitionManager.setStore(store);
             try {
                 partitionManager.loadPartition();
+                restoreLocalPartitionEngine();
+            } catch (GraphIdPreflightException e) {
+                log.error("GraphID preflight rejected Store recovery; preserve the data before migration", e);
+                heartbeatService.requestExit(-1);
+                return;
             } catch (PartitionManager.InvalidShardException e) {
                 // Never wait for shutdown hooks while owning the state callback lock.
                 heartbeatService.requestExit(0);
                 return;
             }
-            restoreLocalPartitionEngine();
         }
     }
 
@@ -295,6 +302,8 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
                 g.forEach((id, p) -> {
                     try {
                         createPartitionEngine(p);
+                    } catch (GraphIdPreflightException e) {
+                        throw e;
                     } catch (Exception e) {
                         log.error("Partition {}-{} restore  exception {}", p.getGraphName(),
                                   p.getId(), e);

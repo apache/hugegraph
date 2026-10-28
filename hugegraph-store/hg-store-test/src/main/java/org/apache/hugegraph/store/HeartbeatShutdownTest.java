@@ -44,6 +44,7 @@ import org.apache.hugegraph.store.meta.StoreMetadata;
 import org.apache.hugegraph.store.metric.HgMetricService;
 import org.apache.hugegraph.store.options.HgStoreEngineOptions;
 import org.apache.hugegraph.store.pd.PdProvider;
+import org.apache.hugegraph.store.util.GraphIdPreflightException;
 import org.apache.hugegraph.store.util.PartitionMetaStoreWrapper;
 import org.junit.Assert;
 import org.junit.Test;
@@ -54,6 +55,39 @@ import org.rocksdb.RocksDB;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 
 public class HeartbeatShutdownTest {
+
+    @Test
+    public void testGraphIdRefusalRequestsNonzeroExitDuringLoadOrRaftRestore() throws Exception {
+        for (boolean failDuringLoad : new boolean[]{true, false}) {
+            Constructor<HgStoreEngine> constructor = HgStoreEngine.class.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            HgStoreEngine engine = Mockito.spy(constructor.newInstance());
+            PartitionManager manager = Mockito.mock(PartitionManager.class);
+            HeartbeatService heartbeat = Mockito.mock(HeartbeatService.class);
+            HgStoreEngineOptions options = new HgStoreEngineOptions();
+            options.setFakePD(true);
+            setField(HgStoreEngine.class, engine, "partitionManager", manager);
+            setField(HgStoreEngine.class, engine, "heartbeatService", heartbeat);
+            setField(HgStoreEngine.class, engine, "options", options);
+            GraphIdPreflightException refusal = new GraphIdPreflightException("legacy fixture");
+            Partition partition = new Partition(Metapb.Partition.newBuilder()
+                                                        .setId(1).setGraphName("graph").build());
+            if (failDuringLoad) {
+                Mockito.doThrow(refusal).when(manager).loadPartition();
+            } else {
+                Mockito.when(manager.getPartitions()).thenReturn(Map.of("graph", Map.of(1, partition)));
+                Mockito.doThrow(refusal).when(engine).createPartitionEngine(partition);
+            }
+
+            engine.stateChanged(new Store(), Metapb.StoreState.Offline, Metapb.StoreState.Up);
+
+            Mockito.verify(heartbeat).requestExit(-1);
+            Assert.assertTrue(engine.getPartitionEngines().isEmpty());
+            if (failDuringLoad) {
+                Mockito.verify(engine, Mockito.never()).restoreLocalPartitionEngine();
+            }
+        }
+    }
 
     @Test
     public void testInvalidRecoveredShardExitsAfterNodeDestroy() throws Exception {

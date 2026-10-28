@@ -101,6 +101,7 @@ import org.apache.hugegraph.store.grpc.Graphpb.ScanPartitionRequest;
 import org.apache.hugegraph.store.grpc.Graphpb.ScanPartitionRequest.Request;
 import org.apache.hugegraph.store.grpc.Graphpb.ScanPartitionRequest.ScanType;
 import org.apache.hugegraph.store.grpc.query.DeDupOption;
+import org.apache.hugegraph.store.meta.GraphIdManager;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.meta.asynctask.AsyncTaskState;
@@ -1195,11 +1196,20 @@ public class BusinessHandlerImpl implements BusinessHandler {
     public void loadSnapshot(String snapshotPath, String graph, int partId, long v1) throws
                                                                                      HgStoreException {
         try (RocksDBSession dbSession = getSession(graph, partId)) {
-            dbSession.loadSnapshot(snapshotPath, v1);
+            dbSession.loadSnapshot(snapshotPath, v1, stagedPath -> {
+                try {
+                    GraphIdManager.checkLegacyGraphIdData(stagedPath, partId);
+                } catch (HgStoreException e) {
+                    throw new DBStoreException(e.getMessage(), e);
+                }
+            });
             keyCreator.clearCache(partId);
             factory.destroyGraphDB(dbSession.getGraphName());
         } catch (DBStoreException e) {
-            throw new HgStoreException(HgStoreException.EC_RKDB_IMPORT_SNAPSHOT_FAIL, e.toString());
+            HgStoreException failure =
+                    new HgStoreException(HgStoreException.EC_RKDB_IMPORT_SNAPSHOT_FAIL, e.toString());
+            failure.initCause(e);
+            throw failure;
         }
     }
 
@@ -1490,7 +1500,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
             long version = HgStoreEngine.getInstance().getCommittedIndex(partId);
             dbSession =
                     factory.createGraphDB(partitionManager.getDbDataPath(partId, dbName), dbName,
-                                          version);
+                                          version, path -> GraphIdManager.checkLegacyGraphIdData(path, partId));
             if (dbSession == null) {
                 log.info("failed to create a new graph db: {}", dbName);
                 throw new HgStoreException(HgStoreException.EC_RKDB_CREATE_FAIL,

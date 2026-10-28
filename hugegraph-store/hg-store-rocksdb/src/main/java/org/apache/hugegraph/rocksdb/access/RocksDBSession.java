@@ -21,9 +21,13 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,7 +37,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.config.HugeConfig;
@@ -73,11 +79,11 @@ import lombok.extern.slf4j.Slf4j;
 public class RocksDBSession implements AutoCloseable, Cloneable {
 
     private static final int CPUS = Runtime.getRuntime().availableProcessors();
+    private static final String TEMP_SUFFIX = "_temp_";
     final Statistics rocksDbStats;
     final WriteOptions writeOptions;
     final AtomicInteger refCount;
     final AtomicBoolean shutdown;
-    final String tempSuffix = "_temp_";
     private final transient String graphName;
     private final HugeConfig hugeConfig;
     private final ReentrantReadWriteLock cfHandleLock;
@@ -300,7 +306,60 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         return this.cfHandleLock.readLock();
     }
 
+    /**
+     * Resolve the path the constructor would select without opening or pruning databases.
+     * Returns null for a new database without CURRENT. An incomplete selected version with
+     * another existing database is rejected rather than treated as a new database.
+     */
+    public static String resolveExistingDBPath(String dbDataPath, String graphName, long version) {
+        return resolveExistingDBPath(dbDataPath, graphName, version, null);
+    }
+
+    public static String resolveExistingDBPath(String dbDataPath, String graphName, long version,
+                                               Consumer<String> existingDatabaseValidator) {
+        String path = Paths.get(dbDataPath, graphName).toString();
+        String selected = findLatestDBPath(path, version, false, existingDatabaseValidator);
+        return hasCurrentFile(selected) ? selected : null;
+    }
+
+    private static boolean hasCurrentFile(String dbPath) {
+        try {
+            if (!Files.readAttributes(Paths.get(dbPath, "CURRENT"), BasicFileAttributes.class).isRegularFile()) {
+                throw new DBStoreException("Database path %s has a non-file CURRENT", dbPath);
+            }
+            return true;
+        } catch (NoSuchFileException e) {
+            // A checkpoint can contain SSTs but no WAL. Without CURRENT, a later
+            // createIfMissing open would replace its data with an empty database.
+            try (Stream<Path> files = Files.list(Paths.get(dbPath))) {
+                if (files.findAny().isPresent()) {
+                    throw new DBStoreException("Nonempty database path %s has no CURRENT; preserve this path. " +
+                                               "See docs/store-graphid-upgrade.md#incomplete-database-directories",
+                                               dbPath);
+                }
+                return false;
+            } catch (NoSuchFileException missingDirectory) {
+                return false;
+            } catch (IOException | UncheckedIOException failure) {
+                throw new DBStoreException(String.format("Unable to inspect database path %s", dbPath), failure);
+            }
+        } catch (IOException e) {
+            throw new DBStoreException(String.format("Unable to inspect database path %s", dbPath), e);
+        }
+    }
+
     private String findLatestDBPath(String path, long version) {
+        String selected = findLatestDBPath(path, version, true);
+        log.info("{} latest db path {}", this.graphName, selected);
+        return selected;
+    }
+
+    private static String findLatestDBPath(String path, long version, boolean prune) {
+        return findLatestDBPath(path, version, prune, null);
+    }
+
+    private static String findLatestDBPath(String path, long version, boolean prune,
+                                          Consumer<String> existingDatabaseValidator) {
         File file = new File(path);
         int strIndex = file.getName().indexOf("_");
 
@@ -313,7 +372,18 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         String prefix = defaultName + "_";
         File parentFile = new File(file.getParent());
         ArrayList<HgPair<Long, Long>> dbs = new ArrayList<>();
-        File[] files = parentFile.listFiles();
+        File[] files;
+        if (prune) {
+            files = parentFile.listFiles();
+        } else {
+            try (Stream<Path> paths = Files.list(parentFile.toPath())) {
+                files = paths.map(Path::toFile).toArray(File[]::new);
+            } catch (NoSuchFileException e) {
+                files = null;
+            } catch (IOException | UncheckedIOException e) {
+                throw new DBStoreException(String.format("Unable to list database directory %s", parentFile), e);
+            }
+        }
         if (files != null) {
             dbs.ensureCapacity(files.length);
             // search all db path
@@ -322,7 +392,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                 if (!name.startsWith(prefix) && !name.equals(defaultName)) {
                     continue;
                 }
-                if (name.endsWith(tempSuffix)) {
+                if (name.endsWith(TEMP_SUFFIX)) {
                     continue;
                 }
                 long v1 = -1L;
@@ -345,6 +415,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         RocksDBFactory factory = RocksDBFactory.getInstance();
         // get last index db path
         String latestDBPath = "";
+        boolean existingDatabase = false;
         if (!dbs.isEmpty()) {
 
             dbs.sort((o1, o2) -> o1.getKey().equals(o2.getKey()) ?
@@ -363,11 +434,18 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                             String.format("%s_%d_%d", defaultName, pair.getKey(), pair.getValue());
                 }
                 String curDBPath = Paths.get(parentFile.getPath(), curDBName).toString();
+                if (!prune && !factory.findPathInRemovedList(curDBPath) &&
+                    hasCurrentFile(curDBPath)) {
+                    existingDatabase = true;
+                    if (existingDatabaseValidator != null) {
+                        existingDatabaseValidator.accept(curDBPath);
+                    }
+                }
                 if (i == dbCount - 1) {
                     latestDBPath = curDBPath;
                 } else {
                     // delete old db, do not delete files in the deletion queue
-                    if (!factory.findPathInRemovedList(curDBPath)) {
+                    if (prune && !factory.findPathInRemovedList(curDBPath)) {
                         try {
                             FileUtils.deleteDirectory(new File(curDBPath));
                             log.info("delete old dbpath {}", curDBPath);
@@ -386,8 +464,10 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                     Paths.get(parentFile.getPath(), String.format("%s_%d", defaultName, version))
                          .toString();
         }
-        //
-        log.info("{} latest db path {}", this.graphName, latestDBPath);
+        if (!prune && existingDatabase && !hasCurrentFile(latestDBPath)) {
+            throw new DBStoreException("Selected database path %s has no CURRENT while another version exists",
+                                       latestDBPath);
+        }
         return latestDBPath;
     }
 
@@ -697,6 +777,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         try {
             try (final Options options = new Options();
                  final ColumnFamilyOptions cfOptions = new ColumnFamilyOptions()) {
+                RocksDBSession.initOptions(this.hugeConfig, null, null, cfOptions, cfOptions);
                 List<ColumnFamilyDescriptor> columnFamilyDescriptorList = new ArrayList<>();
                 List<byte[]> columnFamilyBytes = RocksDB.listColumnFamilies(options, snapshotPath);
 
@@ -711,15 +792,27 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                 }
                 List<ColumnFamilyHandle> columnFamilyHandleList = new ArrayList<>();
 
-                try (final DBOptions dbOptions = new DBOptions();
-                     final RocksDB db = RocksDB.openReadOnly(dbOptions, snapshotPath,
-                                                             columnFamilyDescriptorList,
-                                                             columnFamilyHandleList)) {
-                    for (ColumnFamilyHandle handle : columnFamilyHandleList) {
-                        if (handle == null) {
-                            log.error("verifySnapshot some ColumnFamilyHandle is null in {}",
-                                      snapshotPath);
-                            return false;
+                try (final DBOptions dbOptions = new DBOptions()) {
+                    RocksDB db = null;
+                    try {
+                        db = RocksDB.openReadOnly(dbOptions, snapshotPath,
+                                                  columnFamilyDescriptorList,
+                                                  columnFamilyHandleList);
+                        for (ColumnFamilyHandle handle : columnFamilyHandleList) {
+                            if (handle == null) {
+                                log.error("verifySnapshot some ColumnFamilyHandle is null in {}",
+                                          snapshotPath);
+                                return false;
+                            }
+                        }
+                    } finally {
+                        for (ColumnFamilyHandle handle : columnFamilyHandleList) {
+                            if (handle != null) {
+                                handle.close();
+                            }
+                        }
+                        if (db != null) {
+                            db.close();
                         }
                     }
                 }
@@ -733,6 +826,16 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     }
 
     public void loadSnapshot(String snapshotPath, long v1) throws DBStoreException {
+        this.loadSnapshot(snapshotPath, v1, path -> { });
+    }
+
+    /**
+     * Validate the verified staging directory before replacing a database version. The validator
+     * must inspect it read-only. Rejection preserves existing databases and the staging directory.
+     */
+    public void loadSnapshot(String snapshotPath, long v1,
+                             Consumer<String> validator) throws DBStoreException {
+        E.checkArgumentNotNull(validator, "Snapshot validator can't be null");
         long startTime = System.currentTimeMillis();
         log.info("begin load snapshot from {}", snapshotPath);
         cfHandleLock.writeLock().lock();
@@ -750,7 +853,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
             String defaultName = dbFile.getName().split("_")[0];
             String defaultPath = Paths.get(parent, defaultName).toString();
             String newDBPath = String.format("%s_%d", defaultPath, v1);
-            String tempDBPath = newDBPath + tempSuffix;
+            String tempDBPath = newDBPath + TEMP_SUFFIX;
 
             // first link snapshot to temp dir
             try {
@@ -790,6 +893,8 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                         String.format("failed to verify snapshot %s", tempDBPath));
             }
 
+            validator.accept(tempDBPath);
+
             // move temp to newDBPath
             try {
                 FileUtils.deleteDirectory(new File(newDBPath));
@@ -804,7 +909,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         } catch (final Exception e) {
             log.error("failed to load snapshot from {}", snapshotPath);
             throw new DBStoreException(
-                    String.format("Fail to write snapshot at path %s", snapshotPath));
+                    String.format("Fail to write snapshot at path %s", snapshotPath), e);
         } finally {
             cfHandleLock.writeLock().unlock();
         }

@@ -19,23 +19,48 @@ package org.apache.hugegraph.store.meta;
 
 import static org.apache.hugegraph.store.constant.HugeServerTables.VERTEX_TABLE;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.SessionOperator;
+import org.apache.hugegraph.store.business.BusinessHandlerImpl;
+import org.apache.hugegraph.store.constant.HugeServerTables;
 import org.apache.hugegraph.store.meta.base.DBSessionBuilder;
 import org.apache.hugegraph.store.meta.base.PartitionMetaStore;
+import org.apache.hugegraph.store.options.HgStoreEngineOptions;
 import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.store.util.Asserts;
+import org.apache.hugegraph.store.util.GraphIdPreflightException;
 import org.apache.hugegraph.store.util.HgStoreException;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.DBOptions;
+import org.rocksdb.InfoLogLevel;
+import org.rocksdb.Logger;
+import org.rocksdb.Options;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
 
 import com.google.protobuf.Int64Value;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -99,6 +124,9 @@ public class GraphIdManager extends PartitionMetaStore {
                     byte[] key = MetadataKeyHelper.getGraphIDKey(graphName);
                     Int64Value id = get(Int64Value.parser(), key);
                     if (id == null) {
+                        try (RocksDBSession session = this.sessionBuilder.getSession(this.partitionId)) {
+                            checkLegacyGraphIdData(session, this.partitionId);
+                        }
                         id = Int64Value.of(getCId(GRAPH_ID_PREFIX, maxGraphID));
                         if (id.getValue() == -1) {
                             throw new HgStoreException(HgStoreException.EC_FAIL,
@@ -258,6 +286,135 @@ public class GraphIdManager extends PartitionMetaStore {
             flush();
         }
         return gid;
+    }
+
+    /**
+     * Inspect every retained local partition version before any PD registration or Raft startup.
+     */
+    public static void checkStoreDataBeforeStartup(String dataPaths) {
+        for (String root : dataPaths.split(",")) {
+            Path data = Paths.get(root, HgStoreEngineOptions.DB_Path_Prefix);
+            // A new Store has no partition directory yet; unknown access errors still fail below.
+            if (Files.notExists(data)) {
+                continue;
+            }
+            Set<String> names = new TreeSet<>();
+            try (Stream<Path> paths = Files.list(data)) {
+                for (Path path : (Iterable<Path>) paths::iterator) {
+                    String name = path.getFileName().toString().split("_")[0];
+                    if (name.matches("[0-9]+") &&
+                        Files.readAttributes(path, BasicFileAttributes.class).isDirectory()) {
+                        names.add(name);
+                    }
+                }
+            } catch (IOException | UncheckedIOException e) {
+                throw new GraphIdPreflightException("GraphID preflight failed during startup at " + data, e);
+            }
+            for (String name : names) {
+                try {
+                    int partitionId = Integer.parseInt(name);
+                    String dbName = BusinessHandlerImpl.getDbName(partitionId);
+                    try (RocksDBSession cached = RocksDBFactory.getInstance().queryGraphDB(dbName)) {
+                        if (cached != null) {
+                            checkLegacyGraphIdData(cached, partitionId);
+                        }
+                    }
+                    RocksDBSession.resolveExistingDBPath(data.toString(), dbName, 0L,
+                            path -> checkLegacyGraphIdData(path, partitionId));
+                } catch (RuntimeException e) {
+                    throw new GraphIdPreflightException("GraphID preflight failed during startup for partition " +
+                                                        name + " at " + data + ": " + e.getMessage(), e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Reject unresolved rows written with the 1.7 missing-graph sentinel.
+     * Their graph ownership cannot be inferred from the shared physical prefix.
+     */
+    public static void checkLegacyGraphIdData(RocksDBSession session, int partitionId) {
+        var lock = session.getCfHandleReadLock();
+        lock.lock();
+        try {
+            checkLegacyGraphIdData(session.getDB(), session.getTables(), partitionId);
+        } catch (RocksDBException e) {
+            throw new GraphIdPreflightException("Can't inspect legacy GraphID data in partition " + partitionId +
+                                                " at " + session.getDbPath(), e);
+        } catch (GraphIdPreflightException e) {
+            throw new GraphIdPreflightException(e.getMessage() + " at " + session.getDbPath(), e);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void checkLegacyGraphIdData(String existingDbPath, int partitionId) {
+        try (Options options = new Options();
+             ColumnFamilyOptions cfOptions = new ColumnFamilyOptions();
+             DBOptions dbOptions = new DBOptions();
+             Logger logger = new Logger(dbOptions) {
+                 @Override
+                 protected void log(InfoLogLevel level, String message) {
+                     // Keep inspection from creating or replacing the DB's LOG file.
+                 }
+             }) {
+            dbOptions.setLogger(logger);
+            HugeConfig config = RocksDBFactory.getInstance().getHugeConfig();
+            if (config != null) {
+                RocksDBSession.initOptions(config, null, null, cfOptions, cfOptions);
+            }
+            List<byte[]> names = RocksDB.listColumnFamilies(options, existingDbPath);
+            List<ColumnFamilyDescriptor> descriptors = new ArrayList<>();
+            for (byte[] name : names) {
+                descriptors.add(new ColumnFamilyDescriptor(name, cfOptions));
+            }
+            List<ColumnFamilyHandle> handles = new ArrayList<>();
+            RocksDB db = null;
+            try {
+                db = RocksDB.openReadOnly(dbOptions, existingDbPath, descriptors, handles);
+                Map<String, ColumnFamilyHandle> tables = new HashMap<>();
+                for (int i = 0; i < names.size(); i++) {
+                    tables.put(new String(names.get(i), StandardCharsets.UTF_8), handles.get(i));
+                }
+                checkLegacyGraphIdData(db, tables, partitionId);
+            } finally {
+                for (ColumnFamilyHandle handle : handles) {
+                    handle.close();
+                }
+                if (db != null) {
+                    db.close();
+                }
+            }
+        } catch (RocksDBException e) {
+            throw new GraphIdPreflightException("Can't inspect legacy GraphID data in partition " + partitionId +
+                                                " at " + existingDbPath, e);
+        } catch (GraphIdPreflightException e) {
+            throw new GraphIdPreflightException(e.getMessage() + " at " + existingDbPath, e);
+        }
+    }
+
+    private static void checkLegacyGraphIdData(RocksDB db,
+                                               Map<String, ColumnFamilyHandle> tables,
+                                               int partitionId) throws RocksDBException {
+        byte[] prefix = {(byte) 0xff, (byte) 0xfe};
+        for (String table : HugeServerTables.TABLES) {
+            ColumnFamilyHandle handle = tables.get(table);
+            if (HugeServerTables.UNKNOWN_TABLE.equals(table) || handle == null) {
+                continue;
+            }
+            try (var iterator = db.newIterator(handle)) {
+                iterator.seek(prefix);
+                iterator.status();
+                if (iterator.isValid()) {
+                    byte[] key = iterator.key();
+                    if (key.length >= prefix.length && key[0] == prefix[0] && key[1] == prefix[1]) {
+                        throw new GraphIdPreflightException("Legacy GraphID data in partition " + partitionId +
+                                                           ", table " + table + ", prefix 0xFFFE; " +
+                                                           "stop upgrade and recover the affected data");
+                    }
+                }
+            }
+        }
     }
 
     /**

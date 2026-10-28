@@ -92,6 +92,160 @@ public class GraphIDManagerTest extends UnitTestBase {
     }
 
     @Test
+    public void testLegacyVertexRowsBlockAllocation() {
+        this.assertLegacyRowsBlockAllocation(VERTEX_TABLE, false);
+    }
+
+    @Test
+    public void testLegacyOutEdgeRowsBlockAllocationWithoutVertexTable() {
+        this.assertLegacyRowsBlockAllocation(OUT_EDGE_TABLE, false);
+    }
+
+    @Test
+    public void testLegacyInEdgeRowsBlockAllocationWithoutVertexTable() {
+        this.assertLegacyRowsBlockAllocation(IN_EDGE_TABLE, false);
+    }
+
+    @Test
+    public void testLegacyIndexRowsBlockAllocationWithoutVertexTable() {
+        this.assertLegacyRowsBlockAllocation(INDEX_TABLE, false);
+    }
+
+    @Test
+    public void testLegacyRowsBlockAllocationDespiteExistingMapping() {
+        this.assertLegacyRowsBlockAllocation(INDEX_TABLE, true);
+    }
+
+    @Test
+    public void testLegacyCheckPreservesCleanAndLegalBoundaryData() {
+        GraphIdManager.maxGraphID = this.previousMaxGraphId;
+        Set<String> cleanTables = new HashSet<>(this.session.getTables().keySet());
+        GraphIdManager.checkLegacyGraphIdData(this.session, PARTITION_ID);
+        Assert.assertEquals(cleanTables, this.session.getTables().keySet());
+        Assert.assertFalse(this.session.tableIsExist(VERTEX_TABLE));
+
+        GraphIdManager manager = this.newManager();
+        manager.updateGraphIds(Collections.singletonMap("boundary", 0xFFFDL));
+        this.session.createTables(OUT_EDGE_TABLE);
+        byte[] key = {(byte) 0xff, (byte) 0xfd, 1, 0, 0};
+        byte[] value = {43};
+        SessionOperator operator = this.session.sessionOp();
+        operator.prepare();
+        try {
+            operator.put(OUT_EDGE_TABLE, key, value);
+            operator.commit();
+        } catch (RuntimeException e) {
+            operator.rollback();
+            throw e;
+        }
+        Set<String> tablesBefore = new HashSet<>(this.session.getTables().keySet());
+        this.session.flush(true);
+        Map<String, String> filesBefore = this.databaseFiles();
+        GraphIdManager.checkLegacyGraphIdData(this.session, PARTITION_ID);
+        GraphIdManager.checkLegacyGraphIdData(this.session.getDbPath(), PARTITION_ID);
+        Assert.assertEquals(filesBefore, this.databaseFiles());
+        Assert.assertEquals(0L, manager.getGraphIdOrCreate("clean-control"));
+        Assert.assertEquals(0xFFFDL, this.newManager().getGraphId("boundary"));
+        Assert.assertArrayEquals(value, operator.get(OUT_EDGE_TABLE, key));
+        Assert.assertEquals(tablesBefore, this.session.getTables().keySet());
+        Assert.assertTrue(this.session.getIteratorMap().isEmpty());
+    }
+
+    private void assertLegacyRowsBlockAllocation(String table, boolean existingMapping) {
+        GraphIdManager.maxGraphID = this.previousMaxGraphId;
+        GraphIdManager manager = this.newManager();
+        if (existingMapping) {
+            manager.updateGraphIds(Collections.singletonMap("existing", 1L));
+        }
+        this.session.createTables(table);
+        byte[] key = {(byte) 0xff, (byte) 0xfe, 1, 0, 0};
+        byte[] value = {42};
+        SessionOperator operator = this.session.sessionOp();
+        operator.prepare();
+        try {
+            operator.put(table, key, value);
+            operator.commit();
+        } catch (RuntimeException e) {
+            operator.rollback();
+            throw e;
+        }
+        Map<String, String> metadataBefore = this.metadataRows();
+        Set<String> tablesBefore = new HashSet<>(this.session.getTables().keySet());
+        this.session.flush(true);
+        Map<String, String> filesBefore = this.databaseFiles();
+        Assert.assertThrows(HgStoreException.class,
+                            () -> GraphIdManager.checkLegacyGraphIdData(this.session.getDbPath(),
+                                                                       PARTITION_ID));
+        Assert.assertEquals(filesBefore, this.databaseFiles());
+        HgStoreException failure = Assert.assertThrows(HgStoreException.class,
+                () -> manager.getGraphIdOrCreate("legacy-first-batch"));
+        Assert.assertTrue(failure.getMessage().contains("partition " + PARTITION_ID));
+        Assert.assertTrue(failure.getMessage().contains("table " + table));
+        Assert.assertTrue(failure.getMessage().contains("prefix 0xFFFE"));
+        Assert.assertEquals(filesBefore, this.databaseFiles());
+        Assert.assertEquals(metadataBefore, this.metadataRows());
+        Assert.assertEquals(tablesBefore, this.session.getTables().keySet());
+        Assert.assertArrayEquals(value, operator.get(table, key));
+        Assert.assertEquals(0xFFFE, manager.getGraphId("legacy-first-batch"));
+        Assert.assertNull(manager.get(Int64Value.parser(),
+                                      MetadataKeyHelper.getGraphIDKey("legacy-first-batch")));
+        Assert.assertNull(manager.get(Int64Value.parser(),
+                manager.genCIDSlotKey(GraphIdManager.GRAPH_ID_PREFIX, 0L)));
+        Assert.assertNull(manager.get(Int64Value.parser(),
+                                      MetadataKeyHelper.getCidKey(GraphIdManager.GRAPH_ID_PREFIX)));
+        if (existingMapping) {
+            Assert.assertEquals(1L, this.newManager().getGraphId("existing"));
+        }
+        this.reopenDatabase();
+        Assert.assertArrayEquals(value, this.session.sessionOp().get(table, key));
+        Assert.assertEquals(metadataBefore, this.metadataRows());
+        Assert.assertThrows(HgStoreException.class,
+                            () -> GraphIdManager.checkLegacyGraphIdData(this.session, PARTITION_ID));
+        Assert.assertTrue(this.session.getIteratorMap().isEmpty());
+    }
+
+    @Test
+    public void testLegacyPathCheckDoesNotCreateMissingDatabase() {
+        File missing = new File(this.dbPath, "not-created");
+        Assert.assertFalse(missing.exists());
+        Assert.assertThrows(HgStoreException.class,
+                            () -> GraphIdManager.checkLegacyGraphIdData(missing.getAbsolutePath(),
+                                                                       PARTITION_ID));
+        Assert.assertFalse(missing.exists());
+    }
+
+    private Map<String, String> databaseFiles() {
+        Map<String, String> files = new LinkedHashMap<>();
+        java.nio.file.Path db = new File(this.session.getDbPath()).toPath();
+        try (var paths = java.nio.file.Files.walk(db)) {
+            paths.filter(java.nio.file.Files::isRegularFile).sorted().forEach(path -> {
+                try {
+                    byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(java.nio.file.Files.readAllBytes(path));
+                    files.put(db.relativize(path).toString(), java.util.HexFormat.of().formatHex(digest));
+                } catch (java.io.IOException | java.security.NoSuchAlgorithmException e) {
+                    throw new AssertionError(e);
+                }
+            });
+        } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+        }
+        return files;
+    }
+
+    private Map<String, String> metadataRows() {
+        Map<String, String> rows = new LinkedHashMap<>();
+        try (var iterator = this.session.sessionOp().scan("default")) {
+            while (iterator.hasNext()) {
+                RocksDBSession.BackendColumn column = iterator.next();
+                rows.put(java.util.HexFormat.of().formatHex(column.name),
+                         java.util.HexFormat.of().formatHex(column.value));
+            }
+        }
+        return rows;
+    }
+
+    @Test
     public void testAllocateBoundaryIdBeforeWrap() {
         GraphIdManager manager = this.newManager();
 
