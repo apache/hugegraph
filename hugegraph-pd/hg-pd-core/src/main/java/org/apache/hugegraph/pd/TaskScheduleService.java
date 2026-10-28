@@ -41,6 +41,7 @@ import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.meta.TaskInfoMeta;
 import org.apache.hugegraph.pd.raft.RaftEngine;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -249,14 +250,31 @@ public class TaskScheduleService {
      * of replicas in the shard group
      */
     public List<Metapb.Partition> patrolPartitions() throws PDException {
+        PartitionPatrolResult result = patrolPartitionsWithResult();
+        return result == null ? null : result.getPartitions();
+    }
+
+    @Getter
+    public static class PartitionPatrolResult {
+
+        private final List<Integer> reallocatedShardGroups = new ArrayList<>();
+        private final List<Metapb.Partition> partitions = new ArrayList<>();
+        private final Map<Integer, Long> offlineShardRequests = new HashMap<>();
+    }
+
+    public PartitionPatrolResult patrolPartitionsWithResult() throws PDException {
         if (!isLeader()) {
             return null;
         }
+        PartitionPatrolResult result = new PartitionPatrolResult();
 
         // If the number of replicas is inconsistent, reallocate replicas
         for (Metapb.ShardGroup group : storeService.getShardGroups()) {
             if (group.getShardsCount() != pdConfig.getPartition().getShardCount()) {
-                storeService.reallocShards(group);
+                List<Metapb.Shard> shards = storeService.reallocShards(group);
+                if (!group.getShardsList().equals(shards)) {
+                    result.reallocatedShardGroups.add(group.getId());
+                }
                 kvService.put(BALANCE_SHARD_KEY, "DOING", 180 * 1000);
             }
         }
@@ -273,13 +291,20 @@ public class TaskScheduleService {
                 }
                 partIds.add(partition.getId());
 
-                storeService.storeTurnoff(pair.getValue());
+                for (Integer changed : storeService.storeTurnoffWithResult(pair.getValue())) {
+                    if (!result.reallocatedShardGroups.contains(changed)) {
+                        result.reallocatedShardGroups.add(changed);
+                    }
+                }
                 partitionService.shardOffline(partition, pair.getValue().getId());
+                // shardOffline logs its own failures; report a request, not a completed repair.
+                result.offlineShardRequests.put(partition.getId(), pair.getValue().getId());
+                result.partitions.add(partition);
             }
 
         }
 
-        return null;
+        return result;
     }
 
     /**

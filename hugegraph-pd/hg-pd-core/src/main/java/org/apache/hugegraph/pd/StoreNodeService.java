@@ -335,6 +335,11 @@ public class StoreNodeService {
      * @throws PDException
      */
     public synchronized void storeTurnoff(Metapb.Store store) throws PDException {
+        storeTurnoffWithResult(store);
+    }
+
+    public synchronized List<Integer> storeTurnoffWithResult(Metapb.Store store) throws PDException {
+        List<Integer> changed = new ArrayList<>();
         // Traverse ShardGroup,redistribution
         for (Metapb.ShardGroup group : getShardGroupsByStore(store.getId())) {
             Metapb.ShardGroup.Builder builder = Metapb.ShardGroup.newBuilder(group);
@@ -344,8 +349,12 @@ public class StoreNodeService {
                     builder.addShards(shard);
                 }
             });
-            reallocShards(builder.build());
+            List<Metapb.Shard> shards = reallocShards(builder.build());
+            if (!group.getShardsList().equals(shards)) {
+                changed.add(group.getId());
+            }
         }
+        return changed;
     }
 
     /**

@@ -263,11 +263,27 @@ curl --user "hg:${PD_SECRET}" "${PD_REST}/v1/task/balanceLeaders"
 ```
 
 A busy task returns body `status: 1001`; inspect the result and wait for current
-maintenance to finish rather than looping patrol/balance calls. A follower can
-return an empty success, and leader transfers are asynchronous: HTTP 200 or a
+maintenance to finish rather than looping patrol/balance calls. Images containing
+the task response fix for #3231 return body `status: 100` on a follower, naming the
+known leader's Raft address (`null` while no leader is known). Legacy images can
+still return empty success from followers.
+
+On updated images, partition patrol retains `status` and `partitions` and adds
+`reallocatedShardGroups` (groups whose shard allocation changed) and
+`offlineShardRequests` (group ID to retired Store ID). The latter records requests,
+not successful repairs: inspect group membership to verify their outcome.
+An empty result means patrol ran without scheduling changes. Leader and partition
+balances retain their transfer maps; a partition balance skipped because of its
+maintenance gates returns `{"status":0,"outcome":"skipped"}` instead of an empty
+body. Nonzero `status` identifies a refusal rather than a successful empty plan.
+
+Leader transfers are asynchronous: HTTP 200 or a
 returned transfer plan does not prove completion. Recheck `/v1/partitions` and
 `/v1/stores` for actual leaders, full membership and fresh heartbeats before
 continuing maintenance.
+
+<!-- TODO: simplify the legacy follower-response workaround once supported images
+     include the task response fix for apache/hugegraph#3231. -->
 
 Preserve volumes and recorded member identities during recovery. Deleting a
 RocksDB lock file or assigning an empty volume does not recover shard data.
