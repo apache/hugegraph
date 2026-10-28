@@ -334,6 +334,7 @@ raft:
   address: 192.168.1.20:8510            # Raft RPC address
   snapshotInterval: 1800                # Snapshot interval (seconds)
   disruptorBufferSize: 1024             # Raft log buffer
+  maxSegmentFileSize: 1073741824        # 1 GiB per new segment log file
   max-log-file-size: 10737418240        # Max log file: 10GB
 
 # Data Storage
@@ -341,6 +342,37 @@ app:
   data-path: ./storage                  # Data directory (supports multiple paths: ./storage,/data1,/data2)
   fake-pd: false                        # Use real PD cluster
 ```
+
+With `raft.useRocksDBSegmentLogStorage=true` (the default),
+`raft.maxSegmentFileSize` controls newly allocated segment files. The default is
+1 GiB, preserving the effective size used before this setting was connected to
+the log storage factory. Previously declared 64 MiB defaults were ignored; an
+explicit 64 MiB value now takes effect. For a small development cluster,
+`16777216` selects 16 MiB. An explicit `raft.maxSegmentFileSize` takes priority;
+when it is unset, the existing `-Djraft.log_storage.segment.max.size.bytes`
+system property remains a fallback, followed by 1 GiB if neither is set. The
+distribution's default placeholder preserves this fallback too.
+Existing segments containing logs retain their original size and remain readable after
+this setting changes. On restart, an incompatible **blank preallocated** segment is
+atomically renamed to `<sequence>.s.blank-<old-size>-<unique-id>` before JRaft loads its
+allocation pool. JRaft then allocates blank segments at the configured size. This also
+avoids a write failure after increasing the size when an entry fits the new limit but
+does not fit an old blank segment. No nonempty segment is renamed or resized.
+
+Blank detection follows JRaft 1.3.x's segment header format and runs after RocksDB has
+acquired the log directory lock, before segment mapping and background allocation.
+Unknown or incomplete headers are retained and fail startup with a diagnostic when
+their size differs; the code does not guess that sparse or zero-filled files are empty.
+Recheck this compatibility handling when upgrading JRaft. Renamed files are retained
+for diagnosis and are outside JRaft's normal log retention. Renaming does not reclaim
+their allocated blocks; review them during offline maintenance before deleting them.
+Keep the configured size larger than the largest encoded Raft entry, including
+entries that a newly added Store must receive. Reading an existing large segment
+does not make a smaller segment large enough for new writes or replica catch-up.
+The limit is per segment, not a limit on total Raft log or database disk usage.
+Segment files may be sparse: compare allocated filesystem blocks with apparent
+file sizes when investigating disk consumption, and allow space for RocksDB WAL,
+snapshots, compaction and container images as well.
 
 File: `hugegraph-store/conf/application-pd.yml` (RocksDB tuning)
 

@@ -1,0 +1,246 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Metadata namespace changes protect existing Server metadata
+templates:
+  - server-deployment.yaml
+kubernetesProvider:
+  scheme:
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: other-hugegraph-pd
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: other
+          app.kubernetes.io/component: pd
+      spec:
+        replicas: "1"
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: RELEASE-NAME-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: RELEASE-NAME
+        annotations:
+          hugegraph.apache.org/metadata-cluster: hg-test
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: HG_SERVER_CLUSTER
+                    value: hg-test
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: custom-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: custom
+        annotations:
+          hugegraph.apache.org/metadata-cluster: production
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: HG_SERVER_CLUSTER
+                    value: production
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: legacy-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: legacy
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env: []
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mismatch-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: mismatch
+        annotations:
+          hugegraph.apache.org/metadata-cluster: hg-test
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: HG_SERVER_CLUSTER
+                    value: production
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unknown-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: unknown
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: HG_SERVER_CLUSTER
+                    valueFrom:
+                      secretKeyRef:
+                        name: external-namespace
+                        key: cluster
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: adopted-hugegraph-server
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/component: server
+          app.kubernetes.io/instance: adopted
+        annotations:
+          hugegraph.apache.org/metadata-cluster: production
+      spec:
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: HG_SERVER_CLUSTER
+                    valueFrom:
+                      secretKeyRef:
+                        name: external-namespace
+                        key: cluster
+tests:
+  - it: permits an unchanged explicitly recorded namespace
+    release:
+      upgrade: true
+    asserts:
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/metadata-cluster"]
+          value: hg-test
+
+  - it: refuses changing an explicitly configured namespace
+    release:
+      upgrade: true
+    set:
+      metadataCluster: production
+    asserts:
+      - failedTemplate:
+          errorPattern: metadataCluster
+
+  - it: preserves an existing custom namespace when explicitly selected
+    release:
+      name: custom
+      upgrade: true
+    set:
+      metadataCluster: production
+    asserts:
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/metadata-cluster"]
+          value: production
+
+  - it: refuses replacing a custom namespace with the default
+    release:
+      name: custom
+      upgrade: true
+    asserts:
+      - failedTemplate:
+          errorPattern: metadataCluster
+
+  - it: retains the official historical Server default when no record exists
+    release:
+      name: legacy
+      upgrade: true
+    asserts:
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/metadata-cluster"]
+          value: hg-test
+
+  - it: requires verification before adopting a legacy deployment into a custom namespace
+    release:
+      name: legacy
+      upgrade: true
+    set:
+      metadataCluster: production
+    asserts:
+      - failedTemplate:
+          errorPattern: metadataCluster
+
+  - it: refuses an environment value that conflicts with its recorded annotation
+    release:
+      name: mismatch
+      upgrade: true
+    asserts:
+      - failedTemplate:
+          errorPattern: metadataCluster
+
+  - it: cannot infer a valueFrom namespace without a verified record
+    release:
+      name: unknown
+      upgrade: true
+    asserts:
+      - failedTemplate:
+          errorPattern: metadataCluster
+
+  - it: permits explicit adoption of a verified valueFrom namespace
+    release:
+      name: adopted
+      upgrade: true
+    set:
+      metadataCluster: production
+    asserts:
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/metadata-cluster"]
+          value: production
+
+  - it: permits a fresh custom install independently of existing upgrade records
+    release:
+      name: legacy
+      upgrade: false
+    set:
+      metadataCluster: production
+    asserts:
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/metadata-cluster"]
+          value: production

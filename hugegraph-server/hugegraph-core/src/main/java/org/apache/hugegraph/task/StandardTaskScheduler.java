@@ -479,8 +479,8 @@ public class StandardTaskScheduler implements TaskScheduler {
                             }
                         }
                     }
-                    if (workerFailure instanceof Error) {
-                        throw (Error) workerFailure;
+                    if (workerFailure instanceof Error matchedError) {
+                        throw matchedError;
                     }
                     if (workerFailure != null) {
                         throw (RuntimeException) workerFailure;

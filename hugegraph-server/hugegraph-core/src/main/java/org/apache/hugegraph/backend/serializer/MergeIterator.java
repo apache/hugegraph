@@ -58,8 +58,8 @@ public class MergeIterator<T, R> extends WrappedIterator<T> {
     @Override
     public void close() throws Exception {
         for (Iterator<R> iter : this.iterators) {
-            if (iter instanceof AutoCloseable) {
-                ((AutoCloseable) iter).close();
+            if (iter instanceof AutoCloseable autoCloseable) {
+                autoCloseable.close();
             }
         }
     }

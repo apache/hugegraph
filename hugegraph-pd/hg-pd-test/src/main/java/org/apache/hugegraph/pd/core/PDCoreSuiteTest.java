@@ -41,11 +41,13 @@ import lombok.extern.slf4j.Slf4j;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         GraphSpaceUsageTest.class,
+        GraphSpaceCleanupTest.class,
         RaftStateMachineTest.class,
         MetadataKeyHelperTest.class,
         IdMetaStoreReadIndexTest.class,
         HgKVStoreImplTest.class,
         PDNativeOwnerTest.class,
+        RaftStartupTest.class,
         PDConfigTest.class,
         ConfigServiceTest.class,
         IdServiceTest.class,
@@ -54,6 +56,8 @@ import lombok.extern.slf4j.Slf4j;
         PartitionServiceTest.class,
         StoreMonitorDataServiceTest.class,
         StoreServiceTest.class,
+        StoreDrainTest.class,
+        StorePlacementSubmissionTest.class,
         TaskScheduleServiceTest.class,
         IpAuthHandlerTest.class,
         RaftEngineCliProcessorsTest.class,

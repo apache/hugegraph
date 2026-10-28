@@ -106,12 +106,12 @@ public final class HugeCountStrategy
                            Collections.singletonList(isStepPredicate)) {
                     final Object value = p.getValue();
                     final PBiPredicate predicate = p.getBiPredicate();
-                    if (value instanceof Number) {
+                    if (value instanceof Number matchedNumber) {
                         final long highRangeOffset =
                                 INCREASED_OFFSET_SCALAR_PREDICATES.contains(predicate) ?
                                 1L : 0L;
                         final Long highRangeCandidate =
-                                (long) Math.ceil(((Number) value).doubleValue()) +
+                                (long) Math.ceil(matchedNumber.doubleValue()) +
                                 highRangeOffset;
 
                         if ((predicate.equals(Compare.gt) ||
@@ -127,8 +127,7 @@ public final class HugeCountStrategy
                         if (update) {
                             if (parent instanceof EmptyStep) {
                                 useNotStep = false;
-                            } else if (parent instanceof RepeatStep) {
-                                final RepeatStep repeatStep = (RepeatStep) parent;
+                            } else if (parent instanceof final RepeatStep repeatStep) {
                                 dismissCountIs = useNotStep =
                                         Objects.equals(traversal,
                                                        repeatStep.getUntilTraversal()) ||
@@ -168,9 +167,9 @@ public final class HugeCountStrategy
                         final Long highRangeOffset = RANGE_PREDICATES.get(predicate);
                         if (value instanceof Collection && highRangeOffset != null) {
                             final Object high = Collections.max((Collection) value);
-                            if (high instanceof Number) {
+                            if (high instanceof Number matchedNumber) {
                                 final Long highRangeCandidate =
-                                        ((Number) high).longValue() + highRangeOffset;
+                                        matchedNumber.longValue() + highRangeOffset;
                                 final boolean update = highRange == null ||
                                                        highRangeCandidate > highRange;
                                 if (update) {
@@ -296,8 +295,8 @@ public final class HugeCountStrategy
     }
 
     private boolean supportsCountPredicate(P<?> predicate) {
-        if (predicate instanceof ConnectiveP) {
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+        if (predicate instanceof ConnectiveP<?> connectivePredicate) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 // The bound calculation only handles a flat AND/OR. Every
                 // branch must be safe: ignoring one can change the truth value.
                 if (child instanceof ConnectiveP ||
@@ -305,12 +304,12 @@ public final class HugeCountStrategy
                     return false;
                 }
             }
-            return !((ConnectiveP<?>) predicate).getPredicates().isEmpty();
+            return !connectivePredicate.getPredicates().isEmpty();
         }
 
         final PBiPredicate<?, ?> biPredicate = predicate.getBiPredicate();
         final Object value = predicate.getValue();
-        if (value instanceof Number) {
+        if (value instanceof Number matchedNumber) {
             // Bound derivation uses doubleValue() and ceil(). Restrict it to
             // standard number types and the range where adjacent integer
             // counts remain distinguishable in the predicate's numeric type.
@@ -319,7 +318,7 @@ public final class HugeCountStrategy
                   value instanceof Float || value instanceof Double)) {
                 return false;
             }
-            final double bound = ((Number) value).doubleValue();
+            final double bound = matchedNumber.doubleValue();
             final double exactIntegerLimit = value instanceof Float ?
                                              16777215D : 9007199254740991D;
             if (!Double.isFinite(bound) || Math.abs(bound) > exactIntegerLimit) {

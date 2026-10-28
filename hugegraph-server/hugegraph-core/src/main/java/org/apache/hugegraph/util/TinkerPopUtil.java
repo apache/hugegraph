@@ -28,41 +28,29 @@ public final class TinkerPopUtil {
     }
 
     public static Directions direction(Direction direction) {
-        switch (direction) {
-            case OUT:
-                return Directions.OUT;
-            case IN:
-                return Directions.IN;
-            case BOTH:
-                return Directions.BOTH;
-            default:
-                throw new AssertionError("Unknown direction: " + direction);
-        }
+        return switch (direction) {
+            case OUT -> Directions.OUT;
+            case IN -> Directions.IN;
+            case BOTH -> Directions.BOTH;
+            default -> throw new AssertionError("Unknown direction: " + direction);
+        };
     }
 
     public static Direction direction(Directions direction) {
-        switch (direction) {
-            case OUT:
-                return Direction.OUT;
-            case IN:
-                return Direction.IN;
-            case BOTH:
-                return Direction.BOTH;
-            default:
-                throw new AssertionError("Unknown direction: " + direction);
-        }
+        return switch (direction) {
+            case OUT -> Direction.OUT;
+            case IN -> Direction.IN;
+            case BOTH -> Direction.BOTH;
+            default -> throw new AssertionError("Unknown direction: " + direction);
+        };
     }
 
     public static Cardinality cardinality(VertexProperty.Cardinality cardinality) {
-        switch (cardinality) {
-            case single:
-                return Cardinality.SINGLE;
-            case list:
-                return Cardinality.LIST;
-            case set:
-                return Cardinality.SET;
-            default:
-                throw new AssertionError("Unknown cardinality: " + cardinality);
-        }
+        return switch (cardinality) {
+            case single -> Cardinality.SINGLE;
+            case list -> Cardinality.LIST;
+            case set -> Cardinality.SET;
+            default -> throw new AssertionError("Unknown cardinality: " + cardinality);
+        };
     }
 }

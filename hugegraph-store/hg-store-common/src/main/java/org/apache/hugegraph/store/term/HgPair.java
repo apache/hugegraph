@@ -119,8 +119,7 @@ public class HgPair<K, V> implements Serializable {
         if (this == o) {
             return true;
         }
-        if (o instanceof HgPair) {
-            HgPair<?, ?> pair = (HgPair<?, ?>) o;
+        if (o instanceof HgPair<?, ?> pair) {
             return Objects.equals(key, pair.key) && Objects.equals(value, pair.value);
         }
         return false;

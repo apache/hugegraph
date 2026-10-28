@@ -891,8 +891,8 @@ public class StandardTaskAdmissionTest {
         }
 
         private HugeTask<Object> task(TaskCallable<Object> job) {
-            if (job instanceof BlockingJob) {
-                this.jobs.add((BlockingJob) job);
+            if (job instanceof BlockingJob blockingJob) {
+                this.jobs.add(blockingJob);
             }
             HugeTask<Object> task = new HugeTask<>(IdGenerator.of(this.nextId++), null, job);
             task.type("test");

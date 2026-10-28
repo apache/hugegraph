@@ -208,7 +208,7 @@ public class AppConfig {
         private double aveLogEntrySizeRation;
         @Value("${raft.useRocksDBSegmentLogStorage:true}")
         private boolean useRocksDBSegmentLogStorage;
-        @Value("${raft.maxSegmentFileSize:67108864}")
+        @Value("${raft.maxSegmentFileSize:${jraft.log_storage.segment.max.size.bytes:1073741824}}")
         private int maxSegmentFileSize;
         @Value("${raft.maxReplicatorInflightMsgs:256}")
         private int maxReplicatorInflightMsgs;

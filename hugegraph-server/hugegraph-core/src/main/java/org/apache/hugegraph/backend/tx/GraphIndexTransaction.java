@@ -835,8 +835,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 !label.properties().containsAll(requiredProperties)) {
                 continue;
             }
-            if (label instanceof EdgeLabel) {
-                EdgeLabel edgeLabel = (EdgeLabel) label;
+            if (label instanceof EdgeLabel edgeLabel) {
                 // Base labels have no direct edges; their property indexes
                 // include edges of their sub-labels (see updateEdgeIndex()).
                 if (edgeLabel.isFather() ||

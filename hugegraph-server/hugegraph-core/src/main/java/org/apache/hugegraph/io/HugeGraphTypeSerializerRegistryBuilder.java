@@ -133,14 +133,14 @@ public final class HugeGraphTypeSerializerRegistryBuilder
         // Use the same field names and values as the existing GraphSON schema API.
         GraphSONSchemaSerializer serializer = new GraphSONSchemaSerializer();
         Map<HugeKeys, Object> fields;
-        if (schema instanceof PropertyKey) {
-            fields = serializer.writePropertyKey((PropertyKey) schema);
-        } else if (schema instanceof VertexLabel) {
-            fields = serializer.writeVertexLabel((VertexLabel) schema);
-        } else if (schema instanceof EdgeLabel) {
-            fields = serializer.writeEdgeLabel((EdgeLabel) schema);
-        } else if (schema instanceof IndexLabel) {
-            fields = serializer.writeIndexLabel((IndexLabel) schema);
+        if (schema instanceof PropertyKey propertyKey) {
+            fields = serializer.writePropertyKey(propertyKey);
+        } else if (schema instanceof VertexLabel vertexLabel) {
+            fields = serializer.writeVertexLabel(vertexLabel);
+        } else if (schema instanceof EdgeLabel edgeLabel) {
+            fields = serializer.writeEdgeLabel(edgeLabel);
+        } else if (schema instanceof IndexLabel indexLabel) {
+            fields = serializer.writeIndexLabel(indexLabel);
         } else {
             throw new IllegalArgumentException("Unsupported schema type: " + schema.getClass());
         }
@@ -153,20 +153,20 @@ public final class HugeGraphTypeSerializerRegistryBuilder
         if (value instanceof Enum && isHugeGraphEnum(value.getClass())) {
             return ((Enum<?>) value).name();
         }
-        if (value instanceof SchemaElement) {
-            return schemaMap((SchemaElement) value);
+        if (value instanceof SchemaElement schemaElement) {
+            return schemaMap(schemaElement);
         }
-        if (value instanceof SchemaManager) {
-            return schemaManagerMap((SchemaManager) value);
+        if (value instanceof SchemaManager schemaManager) {
+            return schemaManagerMap(schemaManager);
         }
-        if (value instanceof Map) {
+        if (value instanceof Map<?, ?> map) {
             Map<Object, Object> result = new LinkedHashMap<>();
-            ((Map<?, ?>) value).forEach((key, item) -> result.put(schemaValue(key), schemaValue(item)));
+            map.forEach((key, item) -> result.put(schemaValue(key), schemaValue(item)));
             return result;
         }
-        if (value instanceof Collection) {
-            List<Object> result = new ArrayList<>(((Collection<?>) value).size());
-            for (Object item : (Collection<?>) value) {
+        if (value instanceof Collection<?> collection) {
+            List<Object> result = new ArrayList<>(collection.size());
+            for (Object item : collection) {
                 result.add(schemaValue(item));
             }
             return result;

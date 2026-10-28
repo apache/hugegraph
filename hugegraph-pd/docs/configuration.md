@@ -194,6 +194,8 @@ pd:
 
 **Production Recommendations**:
 - `pd.data-path`: Use dedicated SSD with at least 50GB free space
+  - PD opens its metadata RocksDB at `<pd.data-path>/rocksdb`. If its `LOCK` is still held, usually by a previous PD process that is still stopping, PD retries for up to 30 seconds and then fails startup. Run PD in the foreground (`-d false`) under a supervisor so that a failed start exits and is restarted.
+  - Never delete the `LOCK` files in `<pd.data-path>/rocksdb/` or `<pd.data-path>/pd_raft/log/` to get past this: while the previous process is alive, two processes then write the same database. Stop or kill the old process instead.
 - `pd.patrol-interval`:
   - Development: `300` (5 minutes) for fast testing
   - Production: `1800` (30 minutes) to reduce overhead

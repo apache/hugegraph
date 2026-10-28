@@ -131,3 +131,8 @@ server:
 #       memory: 1536Mi
 
 # Network isolation is selected by mode or an explicit enabled override.
+
+# Optional computation follows this preset only when explicitly enabled.
+vermeer:
+  enabled: false
+  mode: cluster

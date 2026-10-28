@@ -199,7 +199,7 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
 
         RaftEngine.getInstance().addStateListener(this);
         RaftEngine.getInstance().addStateListener(configService);
-        RaftEngine.getInstance().init(pdConfig.getRaft());
+        RaftStartup.init(pdConfig);
         //pdConfig = configService.loadConfig(); onLeaderChanged
         storeNodeService = new StoreNodeService(pdConfig);
         partitionService = new PartitionService(pdConfig, storeNodeService);
@@ -1144,6 +1144,24 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
             response = Pdpb.SetGraphSpaceResponse.newBuilder().setHeader(newErrorHeader(e)).build();
         }
         observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void deleteGraphSpace(Pdpb.DeleteGraphSpaceRequest request,
+                                 StreamObserver<Pdpb.DeleteGraphSpaceResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getDeleteGraphSpaceMethod(), request, observer);
+            return;
+        }
+        Pdpb.DeleteGraphSpaceResponse.Builder response = Pdpb.DeleteGraphSpaceResponse.newBuilder();
+        try {
+            configService.deleteGraphSpace(request.getGraphSpaceName(), partitionService);
+            response.setHeader(okHeader);
+        } catch (PDException e) {
+            response.setHeader(newErrorHeader(e));
+        }
+        observer.onNext(response.build());
         observer.onCompleted();
     }
 

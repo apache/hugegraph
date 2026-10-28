@@ -333,17 +333,11 @@ public class TestGraph implements Graph {
             this.loadedGraph == null) {
             return false;
         }
-        switch (this.loadedGraph) {
-            case "gryo":
-            case "graphsonv2d0":
-                return true;
-            case "graphml":
-            case "graphsonv1d0":
-            case "regularLoad":
-                return false;
-            default:
-                throw new AssertionError(String.format("Wrong IO type %s", this.loadedGraph));
-        }
+        return switch (this.loadedGraph) {
+            case "gryo", "graphsonv2d0" -> true;
+            case "graphml", "graphsonv1d0", "regularLoad" -> false;
+            default -> throw new AssertionError(String.format("Wrong IO type %s", this.loadedGraph));
+        };
     }
 
     @Watched

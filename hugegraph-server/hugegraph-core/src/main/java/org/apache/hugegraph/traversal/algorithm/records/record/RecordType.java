@@ -53,15 +53,11 @@ public enum RecordType implements SerialEnum {
     }
 
     public static RecordType fromCode(byte code) {
-        switch (code) {
-            case 1:
-                return INT;
-            case 2:
-                return SET;
-            case 3:
-                return ARRAY;
-            default:
-                throw new AssertionError("Unsupported record code: " + code);
-        }
+        return switch (code) {
+            case 1 -> INT;
+            case 2 -> SET;
+            case 3 -> ARRAY;
+            default -> throw new AssertionError("Unsupported record code: " + code);
+        };
     }
 }

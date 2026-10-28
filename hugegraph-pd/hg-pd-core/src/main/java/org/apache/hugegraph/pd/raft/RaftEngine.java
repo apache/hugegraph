@@ -218,8 +218,8 @@ public class RaftEngine {
             log.info("PD Raft IP whitelist is disabled");
             return;
         }
-        if (rpcServer instanceof BoltRpcServer) {
-            ((BoltRpcServer) rpcServer).getServer().option(
+        if (rpcServer instanceof BoltRpcServer boltServer) {
+            boltServer.getServer().option(
                     BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER,
                     new ExtendedNettyChannelHandler() {
                         @Override
@@ -461,6 +461,10 @@ public class RaftEngine {
 
     public void addTaskHandler(RaftTaskHandler handler) {
         this.stateMachine.addTaskHandler(handler);
+    }
+
+    public void removeTaskHandler(RaftTaskHandler handler) {
+        this.stateMachine.removeTaskHandler(handler);
     }
 
     public PDConfig.Raft getConfig() {
@@ -729,8 +733,8 @@ public class RaftEngine {
                                   String.format("Raft read index timed out after %d ms",
                                                 timeoutMs));
         } catch (ExecutionException e) {
-            if (e.getCause() instanceof PDException) {
-                throw (PDException) e.getCause();
+            if (e.getCause() instanceof PDException failure) {
+                throw failure;
             }
             throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
         }

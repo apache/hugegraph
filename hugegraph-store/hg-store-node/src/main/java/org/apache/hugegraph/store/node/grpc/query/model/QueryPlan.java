@@ -131,8 +131,8 @@ public class QueryPlan {
             }
         }
         this.stages.clear();
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error error) {
+            throw error;
         }
         if (failure != null) {
             throw (RuntimeException) failure;

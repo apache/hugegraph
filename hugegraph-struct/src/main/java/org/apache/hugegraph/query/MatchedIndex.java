@@ -63,10 +63,10 @@ public class MatchedIndex {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof MatchedIndex)) {
+        if (!(other instanceof MatchedIndex index)) {
             return false;
         }
-        Set<IndexLabel> indexLabels = ((MatchedIndex) other).indexLabels;
+        Set<IndexLabel> indexLabels = index.indexLabels;
         return Objects.equals(this.indexLabels, indexLabels);
     }
 

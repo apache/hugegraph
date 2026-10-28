@@ -31,6 +31,7 @@ import java.util.NoSuchElementException;
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
@@ -103,8 +104,8 @@ public class HstoreSessionsImplTest {
         String namespace = "hstore-clear-test-" + System.nanoTime();
         String graphName = namespace + "/m";
         PDClient pdClient = Mockito.mock(PDClient.class);
-        Mockito.doThrow(new PDException(-1, "PD is not the leader"))
-               .when(pdClient).delGraph(graphName);
+        PDException deletionFailure = new PDException(-1, "PD is not the leader");
+        Mockito.doThrow(deletionFailure).when(pdClient).delGraph(graphName);
         HgStoreClient storeClient = Mockito.mock(HgStoreClient.class);
         Mockito.when(storeClient.openSession(Mockito.anyString()))
                .thenAnswer(invocation -> Mockito.mock(HgStoreSession.class));
@@ -118,7 +119,9 @@ public class HstoreSessionsImplTest {
             store.init();
 
             // The store side may be gone even though PD refused the delete
-            store.clear(true);
+            BackendException error = Assert.assertThrows(BackendException.class,
+                                                        () -> store.clear(true));
+            Assert.assertSame(deletionFailure, error.getCause());
             store.init();
             Mockito.verify(pdClient, Mockito.times(2)).setGraph(graph(graphName));
         } finally {

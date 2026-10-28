@@ -761,8 +761,8 @@ public class TextSerializer extends AbstractSerializer {
 
     private String writeEdgeId(Id id, boolean withOwnerVertex) {
         EdgeId edgeId;
-        if (id instanceof EdgeId) {
-            edgeId = (EdgeId) id;
+        if (id instanceof EdgeId matchedEdgeId) {
+            edgeId = matchedEdgeId;
         } else {
             edgeId = EdgeId.parse(id.asString());
         }
@@ -812,8 +812,8 @@ public class TextSerializer extends AbstractSerializer {
 
     private static Id readId(String id) {
         Object value = JsonUtil.fromJson(id, Object.class);
-        if (value instanceof Number) {
-            return IdGenerator.of(((Number) value).longValue());
+        if (value instanceof Number matchedNumber) {
+            return IdGenerator.of(matchedNumber.longValue());
         } else {
             assert value instanceof String;
             return IdGenerator.of(value.toString());
@@ -842,8 +842,8 @@ public class TextSerializer extends AbstractSerializer {
         Id[] ids = new Id[values.length];
         for (int i = 0; i < values.length; i++) {
             Object value = values[i];
-            if (value instanceof Number) {
-                ids[i] = IdGenerator.of(((Number) value).longValue());
+            if (value instanceof Number matchedNumber) {
+                ids[i] = IdGenerator.of(matchedNumber.longValue());
             } else {
                 assert value instanceof String;
                 ids[i] = IdGenerator.of(value.toString());
@@ -882,8 +882,8 @@ public class TextSerializer extends AbstractSerializer {
                 expiredTime = 0L;
             }
             Id id;
-            if (idValue instanceof Number) {
-                id = IdGenerator.of(((Number) idValue).longValue());
+            if (idValue instanceof Number matchedNumber) {
+                id = IdGenerator.of(matchedNumber.longValue());
             } else {
                 assert idValue instanceof String;
                 id = IdGenerator.of(idValue.toString());

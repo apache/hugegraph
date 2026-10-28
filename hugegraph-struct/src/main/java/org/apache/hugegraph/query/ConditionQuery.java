@@ -116,11 +116,11 @@ public class ConditionQuery extends IdQuery {
     }
 
     public static String concatValues(Object value) {
-        if (value instanceof String) {
-            return escapeSpecialValueIfNeeded((String) value);
+        if (value instanceof String string) {
+            return escapeSpecialValueIfNeeded(string);
         }
-        if (value instanceof List) {
-            return concatValues((List<?>) value);
+        if (value instanceof List<?> values) {
+            return concatValues(values);
         } else if (needConvertNumber(value)) {
             return LongEncoding.encodeNumber(value);
         } else {
@@ -183,8 +183,7 @@ public class ConditionQuery extends IdQuery {
 
     public ConditionQuery query(Condition condition) {
         // Query by id (HugeGraph-259)
-        if (condition instanceof Relation) {
-            Relation relation = (Relation) condition;
+        if (condition instanceof Relation relation) {
             if (relation.key().equals(HugeKeys.ID) &&
                     relation.relation() == RelationType.EQ) {
                 E.checkArgument(relation.value() instanceof Id,
@@ -353,8 +352,8 @@ public class ConditionQuery extends IdQuery {
 
     public boolean containsLabelOrUserpropRelation() {
         for (Condition c : this.conditions) {
-            while (c instanceof Condition.Not) {
-                c = ((Condition.Not) c).condition();
+            while (c instanceof Condition.Not not) {
+                c = not.condition();
             }
             if (c.isLogic()) {
                 Condition.BinCondition binCondition =
@@ -948,8 +947,7 @@ public class ConditionQuery extends IdQuery {
         this.optimizedType = optimizedType;
 
         Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery cq = (ConditionQuery) originQuery;
+        if (originQuery instanceof ConditionQuery cq) {
             /*
              * Two sub-query(flatten) will both set optimized of originQuery,
              * here we just keep the higher one, this may not be a perfect way
@@ -975,8 +973,7 @@ public class ConditionQuery extends IdQuery {
 
     public void updateResultsFilter() {
         Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = (ConditionQuery) originQuery;
+        if (originQuery instanceof ConditionQuery originCQ) {
             if (this.resultsFilter != null) {
                 originCQ.updateResultsFilter(this.resultsFilter);
             } else {
@@ -988,8 +985,7 @@ public class ConditionQuery extends IdQuery {
     protected void updateResultsFilter(ResultsFilter filter) {
         this.resultsFilter = filter;
         Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = (ConditionQuery) originQuery;
+        if (originQuery instanceof ConditionQuery originCQ) {
             originCQ.updateResultsFilter(filter);
         }
     }
@@ -1122,12 +1118,9 @@ public class ConditionQuery extends IdQuery {
         public boolean checkRangeIndex(BaseElement element, Condition cond,
                                        Map<Id, Boolean> rangeIndexMatches) {
             // Not UserpropRelation
-            if (!(cond instanceof Condition.UserpropRelation)) {
+            if (!(cond instanceof Condition.UserpropRelation propRelation)) {
                 return true;
             }
-
-            Condition.UserpropRelation propRelation =
-                    (Condition.UserpropRelation) cond;
             Id propId = propRelation.key();
             Set<Object> fieldValues = this.toRemoveIndexValues(propId,
                                                                element.id());

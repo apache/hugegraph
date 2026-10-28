@@ -55,6 +55,10 @@ public class PDConfig implements InitializingBean {
     @Value("${pd.cluster_id:1}")
     private long clusterId;
 
+    // Server metadata namespace, distinct from the numeric PD cluster ID.
+    @Value("${pd.server-cluster:hg}")
+    private String serverCluster = "hg";
+
     // The patrol task interval
     @Value("${pd.patrol-interval:300}")
     private long patrolInterval = 300;

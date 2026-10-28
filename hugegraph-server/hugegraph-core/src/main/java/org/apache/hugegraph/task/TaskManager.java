@@ -141,8 +141,8 @@ public final class TaskManager {
         if (!drained && (failure == null || scheduler.pendingTasks() != 0)) {
             // A running cron/job must finish before owner callbacks are queued
             // on its executor. In particular, do not rejoin a timed-out cron.
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error matchedError) {
+                throw matchedError;
             }
             if (failure != null) {
                 throw (RuntimeException) failure;
@@ -169,8 +169,8 @@ public final class TaskManager {
                 }
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;
@@ -217,8 +217,8 @@ public final class TaskManager {
                     failure.addSuppressed(error);
                 }
             }
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error matchedError) {
+                throw matchedError;
             }
             throw new HugeException("Exception when closing task tx", failure);
         }

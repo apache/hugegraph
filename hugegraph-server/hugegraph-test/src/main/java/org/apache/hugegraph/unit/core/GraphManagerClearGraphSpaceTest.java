@@ -220,6 +220,75 @@ public class GraphManagerClearGraphSpaceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void testAddAndUpdateRefreshQuotasOnEveryReplica() {
+        MetaManager meta = Mockito.mock(MetaManager.class);
+        Object response = new Object();
+        Mockito.when(meta.extractGraphSpacesFromResponse(response)).thenReturn(List.of("gs"));
+        AtomicReference<GraphSpace> metadata = new AtomicReference<>();
+        Mockito.when(meta.graphSpace("gs")).thenAnswer(call -> metadata.get() == null ? null :
+                JsonUtil.fromJson(JsonUtil.toJson(metadata.get()), GraphSpace.class));
+        GraphManager first = new GraphManager(
+                new HugeConfig(new PropertiesConfiguration()), Mockito.mock(EventHub.class));
+        GraphManager second = new GraphManager(
+                new HugeConfig(new PropertiesConfiguration()), Mockito.mock(EventHub.class));
+        try {
+            for (GraphManager manager : List.of(first, second)) {
+                Whitebox.setInternalState(manager, "metaManager", meta);
+                Whitebox.setInternalState(manager, "PDExist", true);
+                Map<String, GraphSpace> spaces = Whitebox.getInternalState(manager, "graphSpaces");
+                GraphSpace cached = new GraphSpace("gs");
+                cached.storageLimit = 917;
+                spaces.put("gs", cached);
+                spaces.put("other", new GraphSpace("other"));
+                Map<String, Service> services = Whitebox.getInternalState(manager, "services");
+                services.put("gs-service", Mockito.mock(Service.class));
+                Whitebox.invoke(GraphManager.class, "listenMetaChanges", manager);
+            }
+            ArgumentCaptor<Consumer> added = ArgumentCaptor.forClass(Consumer.class);
+            ArgumentCaptor<Consumer> updated = ArgumentCaptor.forClass(Consumer.class);
+            Mockito.verify(meta, Mockito.times(2)).listenGraphSpaceAdd(added.capture());
+            Mockito.verify(meta, Mockito.times(2)).listenGraphSpaceUpdate(updated.capture());
+            GraphSpace current = new GraphSpace("gs");
+            current.storageLimit = 10;
+            metadata.set(current);
+            // The REST update path also emits ADD, so both event channels must refresh existing caches.
+            for (Consumer listener : added.getAllValues()) {
+                listener.accept(response);
+            }
+            Assert.assertEquals(10, first.graphSpace("gs").storageLimit());
+            Assert.assertEquals(10, second.graphSpace("gs").storageLimit());
+            current.storageLimit = 100;
+            for (Consumer listener : updated.getAllValues()) {
+                listener.accept(response);
+            }
+            // An older ADD delivered after UPDATE must reread current metadata, not restore its old value.
+            for (Consumer listener : added.getAllValues()) {
+                listener.accept(response);
+            }
+            for (GraphManager manager : List.of(first, second)) {
+                Assert.assertEquals(100, manager.graphSpace("gs").storageLimit());
+                Assert.assertTrue(manager.graphSpaces().contains("other"));
+                Map<String, Service> services = Whitebox.getInternalState(manager, "services");
+                Assert.assertTrue(services.containsKey("gs-service"));
+            }
+            metadata.set(null);
+            for (Consumer listener : updated.getAllValues()) {
+                listener.accept(response);
+            }
+            Assert.assertFalse(first.graphSpaces().contains("gs"));
+            Assert.assertFalse(second.graphSpaces().contains("gs"));
+            Mockito.verify(meta, Mockito.never()).addGraphSpaceConfig(Mockito.anyString(),
+                                                                     Mockito.any(GraphSpace.class));
+            Mockito.verify(meta, Mockito.never()).notifyGraphSpaceAdd(Mockito.anyString());
+            Mockito.verify(meta, Mockito.never()).notifyGraphSpaceUpdate(Mockito.anyString());
+        } finally {
+            first.close();
+            second.close();
+        }
+    }
+
+    @Test
     public void testDelayedRemoveCannotOverwriteInPlaceApiUpdate() throws Exception {
         MetaManager meta = Mockito.mock(MetaManager.class);
         GraphManager manager = new GraphManager(

@@ -206,8 +206,8 @@ public final class RaftContext {
                 }
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;

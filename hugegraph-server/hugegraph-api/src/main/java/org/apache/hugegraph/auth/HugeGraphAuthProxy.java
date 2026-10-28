@@ -2090,8 +2090,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public RolePermission rolePermission(AuthElement element) {
             String username = currentUsername();
-            if (!(element instanceof HugeUser) ||
-                !((HugeUser) element).name().equals(username)) {
+            if (!(element instanceof HugeUser user) ||
+                !user.name().equals(username)) {
                 verifyUserPermission(HugePermission.READ, element);
             }
             return this.authManager.rolePermission(element);
@@ -2497,8 +2497,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public void apply(Traversal.Admin<?, ?> traversal) {
             String script;
-            if (traversal instanceof HugeScriptTraversal) {
-                script = ((HugeScriptTraversal<?, ?>) traversal).script();
+            if (traversal instanceof HugeScriptTraversal<?, ?> hugeScriptTraversal) {
+                script = hugeScriptTraversal.script();
             } else {
                 GroovyTranslator translator = GroovyTranslator.of("g");
                 Script script1 = translator.translate(traversal.getBytecode());

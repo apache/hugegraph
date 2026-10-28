@@ -593,36 +593,26 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
     }
 
     private BackendEntry serialize(SchemaElement schema) {
-        switch (schema.type()) {
-            case PROPERTY_KEY:
-                return this.serializer.writePropertyKey((PropertyKey) schema);
-            case VERTEX_LABEL:
-                return this.serializer.writeVertexLabel((VertexLabel) schema);
-            case EDGE_LABEL:
-                return this.serializer.writeEdgeLabel((EdgeLabel) schema);
-            case INDEX_LABEL:
-                return this.serializer.writeIndexLabel((IndexLabel) schema);
-            default:
-                throw new AssertionError(String.format(
+        return switch (schema.type()) {
+            case PROPERTY_KEY -> this.serializer.writePropertyKey((PropertyKey) schema);
+            case VERTEX_LABEL -> this.serializer.writeVertexLabel((VertexLabel) schema);
+            case EDGE_LABEL -> this.serializer.writeEdgeLabel((EdgeLabel) schema);
+            case INDEX_LABEL -> this.serializer.writeIndexLabel((IndexLabel) schema);
+            default -> throw new AssertionError(String.format(
                         "Unknown schema type '%s'", schema.type()));
-        }
+        };
     }
 
     @SuppressWarnings({"unchecked"})
     private <T> T deserialize(BackendEntry entry, HugeType type) {
-        switch (type) {
-            case PROPERTY_KEY:
-                return (T) this.serializer.readPropertyKey(this.graph(), entry);
-            case VERTEX_LABEL:
-                return (T) this.serializer.readVertexLabel(this.graph(), entry);
-            case EDGE_LABEL:
-                return (T) this.serializer.readEdgeLabel(this.graph(), entry);
-            case INDEX_LABEL:
-                return (T) this.serializer.readIndexLabel(this.graph(), entry);
-            default:
-                throw new AssertionError(String.format(
+        return switch (type) {
+            case PROPERTY_KEY -> (T) this.serializer.readPropertyKey(this.graph(), entry);
+            case VERTEX_LABEL -> (T) this.serializer.readVertexLabel(this.graph(), entry);
+            case EDGE_LABEL -> (T) this.serializer.readEdgeLabel(this.graph(), entry);
+            case INDEX_LABEL -> (T) this.serializer.readIndexLabel(this.graph(), entry);
+            default -> throw new AssertionError(String.format(
                         "Unknown schema type '%s'", type));
-        }
+        };
     }
 
     public void checkSchemaName(String name) {

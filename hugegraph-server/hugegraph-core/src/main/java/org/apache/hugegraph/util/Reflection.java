@@ -108,8 +108,8 @@ public class Reflection {
                                                        String[] members,
                                                        String type) {
         Throwable cause = exception.getCause();
-        if (cause instanceof IllegalArgumentException) {
-            throw (IllegalArgumentException) cause;
+        if (cause instanceof IllegalArgumentException illegalArgumentException) {
+            throw illegalArgumentException;
         }
         Throwable failure = cause != null ? cause : exception;
         throw new HugeException(

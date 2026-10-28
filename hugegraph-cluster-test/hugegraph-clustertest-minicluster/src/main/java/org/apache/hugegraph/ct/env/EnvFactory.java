@@ -30,14 +30,9 @@ public class EnvFactory {
         if (env == null) {
             EnvType envType = EnvType.getSystemEnvType();
             switch (envType) {
-                case SingleNode:
-                    env = new SimpleEnv();
-                    break;
-                case MultiNode:
-                    env = new MultiNodeEnv();
-                    break;
-                default:
-                    LOG.error("No such env type: {}", envType);
+                case SingleNode -> env = new SimpleEnv();
+                case MultiNode -> env = new MultiNodeEnv();
+                default -> LOG.error("No such env type: {}", envType);
             }
         }
         return env;

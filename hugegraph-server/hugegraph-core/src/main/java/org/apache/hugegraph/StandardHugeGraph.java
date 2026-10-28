@@ -1209,8 +1209,8 @@ public class StandardHugeGraph implements HugeGraph {
                 }
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;
@@ -1467,8 +1467,8 @@ public class StandardHugeGraph implements HugeGraph {
                 failure = CloseFailure.collect(failure, error);
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;
@@ -1519,8 +1519,8 @@ public class StandardHugeGraph implements HugeGraph {
                     failure = CloseFailure.collect(failure, error);
                 }
             }
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error matchedError) {
+                throw matchedError;
             }
             if (failure != null) {
                 throw (RuntimeException) failure;
@@ -1579,9 +1579,9 @@ public class StandardHugeGraph implements HugeGraph {
                             LOG.debug("Calling proxy.invalid2 with type: {}, IDs: {}", type,
                                       Arrays.toString((Id[]) ids));
                             proxy.invalid2(type, (Id[]) ids);
-                        } else if (ids instanceof Id) {
+                        } else if (ids instanceof Id matchedId) {
                             LOG.debug("Calling proxy.invalid with type: {}, ID: {}", type, ids);
-                            proxy.invalid(type, (Id) ids);
+                            proxy.invalid(type, matchedId);
                         } else {
                             LOG.error("Unexpected argument: {}", ids);
                             E.checkArgument(false, "Unexpected argument: %s", ids);

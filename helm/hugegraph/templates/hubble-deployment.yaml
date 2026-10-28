@@ -24,6 +24,7 @@
 {{- fail "hubble.mode must be one of: pd, direct" }}
 {{- end }}
 {{- $pdMode := eq $mode "pd" }}
+{{- $vermeerEnabled := (.Values.vermeer | default dict).enabled | default false }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,6 +53,9 @@ spec:
         {{- if $pdMode }}
         # Rolls Hubble when the PD REST Secret written into its properties changes.
         checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
+        {{- end }}
+        {{- if $vermeerEnabled }}
+        checksum/vermeer-auth: {{ include "hugegraph.vermeer.authChecksum" . | quote }}
         {{- end }}
         {{- with .Values.hubble.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
@@ -87,11 +91,19 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $vermeerEnabled }}
+      initContainers:
+        {{- include "hugegraph.vermeer.tokenInit" (dict "root" . "uid" (include "hugegraph.hubble.vermeerUid" .) "gid" (include "hugegraph.hubble.vermeerGid" .) "resources" .Values.hubble.resources) | nindent 8 }}
+      {{- end }}
       containers:
         - name: hubble
           image: {{ include "hugegraph.image" (dict "image" .Values.hubble.image "appVersion" $.Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.hubble.image.pullPolicy }}
-          {{- with .Values.hubble.securityContext }}
+          {{- $securityContext := deepCopy (.Values.hubble.securityContext | default dict) }}
+          {{- if $vermeerEnabled }}
+          {{- $_ := set $securityContext "runAsUser" (int (include "hugegraph.hubble.vermeerUid" .)) }}
+          {{- end }}
+          {{- with $securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -156,6 +168,9 @@ spec:
               {{- end }}
               while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
                 case "${LINE}" in
+                  vermeer.url=*|vermeer.token_file=*)
+                    # Written once below, including explicit blanks when disabled.
+                    ;;
                   pd.enabled=*)
                     printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
                     FOUND_PD_ENABLED=true
@@ -207,6 +222,12 @@ spec:
                     ;;
                 esac
               done <"${CONF}"
+              {{- if $vermeerEnabled }}
+              printf 'vermeer.url=%s\nvermeer.token_file=%s\n' \
+                "${HG_HUBBLE_VERMEER_URL}" "${HG_HUBBLE_VERMEER_TOKEN_FILE}" >>"${TMP}"
+              {{- else }}
+              printf 'vermeer.url=\nvermeer.token_file=\n' >>"${TMP}"
+              {{- end }}
               if [[ "${FOUND_PD_ENABLED}" == false ]]; then
                 printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
               fi
@@ -255,6 +276,10 @@ spec:
             - name: http
               containerPort: {{ .Values.hubble.port }}
           env:
+            - name: HG_HUBBLE_VERMEER_URL
+              value: {{ if $vermeerEnabled }}{{ printf "http://%s:%v" (include "hugegraph.vermeer.masterName" .) .Values.vermeer.master.httpPort | quote }}{{ else }}""{{ end }}
+            - name: HG_HUBBLE_VERMEER_TOKEN_FILE
+              value: {{ if $vermeerEnabled }}"/var/run/hugegraph/vermeer/token"{{ else }}""{{ end }}
             {{- if $pdMode }}
             - name: HG_HUBBLE_PD_PEERS
               value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
@@ -280,6 +305,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /hubble-data
+            {{- if $vermeerEnabled }}
+            - name: vermeer-token
+              mountPath: /var/run/hugegraph/vermeer
+              readOnly: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: /actuator/health
@@ -308,6 +338,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if $vermeerEnabled }}
+        {{- include "hugegraph.vermeer.tokenVolumes" . | nindent 8 }}
+        {{- end }}
         - name: data
           {{- if .Values.hubble.persistence.enabled }}
           persistentVolumeClaim:

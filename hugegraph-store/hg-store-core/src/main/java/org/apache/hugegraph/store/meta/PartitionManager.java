@@ -36,6 +36,7 @@ import java.util.function.Consumer;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.store.HgStoreEngine;
 import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.cmd.HgCmdClient;
@@ -106,6 +107,10 @@ public class PartitionManager extends GlobalMetaStore {
 
         private InvalidShardException() {
             super("Local partition does not belong to this store");
+        }
+
+        private InvalidShardException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
@@ -259,6 +264,7 @@ public class PartitionManager extends GlobalMetaStore {
         }
 
         Set<Integer> normalPartitions = new HashSet<>();
+        Set<Integer> retainedPartitions = new HashSet<>();
 
         // Once according to the partition read
         for (int partId : partIds) {
@@ -269,62 +275,106 @@ public class PartitionManager extends GlobalMetaStore {
             }
 
             var metaParts = wrapper.scan(partId, Metapb.Partition.parser(), key);
-            int countOfPartition = 0;
+            if (metaParts.isEmpty()) {
+                wrapper.close(partId);
+                continue;
+            }
 
-            var shards = pdProvider.getShardGroup(partId).getShardsList();
-
+            // A migrated replica can have an older derived SHARDGROUP in its data DB than
+            // its durable Raft configuration. Validate recovery against PD before Raft replay.
+            var pdGroup = recoveryShardGroup(partId);
+            var shards = pdGroup.getShardsList();
+            if (shards.stream().noneMatch(s -> s.getStoreId() == storeId)) {
+                log.error("partition {} is illegal. store id {} not in valid shard group:{}",
+                          partId, storeId, shards2Peers(shards));
+                throw new InvalidShardException();
+            }
+            List<Metapb.Partition> recoverableParts = new ArrayList<>();
             for (var metaPart : metaParts) {
                 var graph = metaPart.getGraphName();
-                var pdPartition = pdProvider.getPartitionByID(graph, metaPart.getId());
-                boolean isLegeal = false;
-
-                if (pdPartition != null) {
-                    // Check if it contains this store id
-                    if (shards.stream().anyMatch(s -> s.getStoreId() == storeId)) {
-                        isLegeal = true;
-                    }
-                } else {
-                    continue;
+                if (metaPart.getId() != partId || graph.isEmpty()) {
+                    throw new InvalidShardException("Invalid persisted partition " + graph +
+                                                    "-" + partId, null);
                 }
-
-                if (isLegeal) {
-                    if (!partitions.containsKey(graph)) {
-                        partitions.put(graph, new ConcurrentHashMap<>());
+                Partition pdPartition;
+                try {
+                    pdPartition = pdProvider.getPartitionByIDForRecovery(graph, metaPart.getId());
+                } catch (PDException e) {
+                    if (e.getErrorCode() == Pdpb.ErrorType.NOT_FOUND_VALUE) {
+                        // A graph can be dropped while this Store is offline. Do not serve it or
+                        // infer permission to delete its data, Store path or Raft metadata.
+                        retainedPartitions.add(partId);
+                        log.warn("PD no longer has partition {}-{}; skipping recovery and " +
+                                 "retaining local data", graph, partId);
+                        continue;
                     }
-
-                    countOfPartition += 1;
-
-                    Partition partition = new Partition(metaPart);
-                    partition.setWorkState(
-                            Metapb.PartitionState.PState_Normal);     // Start recovery work state
-                    partitions.get(graph).put(partition.getId(), partition);
-                    log.info("load partition : {} -{}", partition.getGraphName(),
-                             partition.getId());
-                } else {
-                    // Invalid
-                    // removePartitionFromLocalDb(graph, partId);
-                    // var businessHandler = HgStoreEngine.getInstance().getBusinessHandler();
-                    // businessHandler.truncate(graph, partId);
-                    // businessHandler.dbCompaction(graph, partId);
-                    log.error("partition {}-{} is illegal. store id {} not in valid shard group:{}",
-                              graph, partId, getStore().getId(), shards2Peers(shards));
-                    throw new InvalidShardException();
+                    throw new InvalidShardException("Cannot read persisted partition " + graph +
+                                                    "-" + partId + " from PD", e);
+                } catch (RuntimeException e) {
+                    throw new InvalidShardException("Cannot read persisted partition " + graph +
+                                                    "-" + partId + " from PD", e);
                 }
+                if (pdPartition == null || pdPartition.getId() != partId ||
+                    !graph.equals(pdPartition.getGraphName())) {
+                    throw new InvalidShardException("Cannot verify persisted partition " + graph +
+                                                    "-" + partId + " with PD", null);
+                }
+                recoverableParts.add(metaPart);
+            }
+            if (recoverableParts.isEmpty()) {
+                wrapper.close(partId);
+                continue;
             }
 
-            if (countOfPartition > 0) {
-                // Partition data is normal
-                normalPartitions.add(partId);
+            // Only refresh startup metadata, once per group even when several graphs share it.
+            // The running engine and JRaft's durable configuration remain authoritative.
+            if (HgStoreEngine.getInstance().getPartitionEngine(partId) == null) {
+                updateShardGroup(ShardGroup.from(pdGroup));
             }
+            for (var metaPart : recoverableParts) {
+                var graph = metaPart.getGraphName();
+                partitions.computeIfAbsent(graph, g -> new ConcurrentHashMap<>());
+                Partition partition = new Partition(metaPart);
+                partition.setWorkState(Metapb.PartitionState.PState_Normal);
+                partitions.get(graph).put(partition.getId(), partition);
+                log.info("load partition : {} -{}", partition.getGraphName(), partition.getId());
+            }
+            normalPartitions.add(partId);
             wrapper.close(partId);
         }
 
         // Remove redundant partition storage paths, partitions that have been migrated away may migrate back
         for (var location : storeMetadata.getPartitionStores()) {
-            if (!normalPartitions.contains(location.getPartitionId())) {
+            if (!normalPartitions.contains(location.getPartitionId()) &&
+                !retainedPartitions.contains(location.getPartitionId())) {
                 storeMetadata.removePartitionStore(location.getPartitionId());
             }
         }
+    }
+
+    private Metapb.ShardGroup recoveryShardGroup(int partId) {
+        Metapb.ShardGroup group;
+        try {
+            group = pdProvider.getShardGroupDirect(partId);
+        } catch (RuntimeException e) {
+            throw new InvalidShardException("Cannot read recovery shard group " + partId +
+                                            " from PD", e);
+        }
+        if (group == null || group.getId() != partId || group.getShardsCount() == 0) {
+            throw new InvalidShardException("Invalid recovery shard group " + partId +
+                                            " from PD", null);
+        }
+        Set<Long> stores = new HashSet<>();
+        for (var shard : group.getShardsList()) {
+            if (shard.getStoreId() == 0 || !stores.add(shard.getStoreId()) ||
+                (shard.getRole() != Metapb.ShardRole.Leader &&
+                 shard.getRole() != Metapb.ShardRole.Follower &&
+                 shard.getRole() != Metapb.ShardRole.Learner)) {
+                throw new InvalidShardException("Invalid recovery shard members for group " +
+                                                partId + " from PD", null);
+            }
+        }
+        return group;
     }
 
     public List<Metapb.Partition> loadPartitionsFromDb(int partitionId) {
@@ -797,7 +847,11 @@ public class PartitionManager extends GlobalMetaStore {
             for (Shard shard : shardGroup.getShards()) {
                 Store store = getStore(shard.getStoreId());
                 if (store != null && !store.getRaftAddress().isEmpty()) {
-                    peers.add(store.getRaftAddress() + "::" + priority);
+                    String peer = store.getRaftAddress() + "::" + priority;
+                    if (shard.getRole() == Metapb.ShardRole.Learner) {
+                        peer += "/learner";
+                    }
+                    peers.add(peer);
                     final int gap = Math.max(decayPriorityGap, (priority / 5));
                     priority = Math.max(ElectionPriority.MinValue, (priority - gap));
                 }

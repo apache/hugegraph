@@ -55,8 +55,8 @@ class GrpcKvIteratorImpl implements HgKvPagingIterator<HgKvEntry>, HgKvOrderedIt
 
     public static HgKvIterator<HgKvEntry> of(HgStoreNodeSession nodeSession,
                                              KvCloseableIterator<Kv> iterator) {
-        if (iterator instanceof HgPageSize) {
-            return of(nodeSession, iterator, (HgPageSize) iterator);
+        if (iterator instanceof HgPageSize pageSize) {
+            return of(nodeSession, iterator, pageSize);
         }
         return new GrpcKvIteratorImpl(nodeSession, iterator, () -> 1);
     }
@@ -110,10 +110,10 @@ class GrpcKvIteratorImpl implements HgKvPagingIterator<HgKvEntry>, HgKvOrderedIt
         if (key == null) {
             return emptyBytes;
         }
-        if (!(this.iterator instanceof HgSeekAble)) {
+        if (!(this.iterator instanceof HgSeekAble seekable)) {
             return emptyBytes;
         }
-        byte[] upstream = ((HgSeekAble) this.iterator).position();
+        byte[] upstream = seekable.position();
         byte[] code = HgStoreClientUtil.toIntBytes(this.element.code());
         byte[] result = new byte[upstream.length + Integer.BYTES + key.length];
         System.arraycopy(upstream, 0, result, 0, upstream.length);
@@ -124,8 +124,8 @@ class GrpcKvIteratorImpl implements HgKvPagingIterator<HgKvEntry>, HgKvOrderedIt
 
     @Override
     public void seek(byte[] position) {
-        if (this.iterator instanceof HgSeekAble) {
-            ((HgSeekAble) this.iterator).seek(position);
+        if (this.iterator instanceof HgSeekAble seekable) {
+            seekable.seek(position);
         }
     }
 

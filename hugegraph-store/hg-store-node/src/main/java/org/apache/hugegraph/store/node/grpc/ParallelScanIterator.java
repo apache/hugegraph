@@ -73,8 +73,8 @@ public class ParallelScanIterator implements ScanIterator {
     private volatile Throwable cleanupFailure;
 
     private static void rethrow(Throwable failure) {
-        if (failure instanceof RuntimeException) {
-            throw (RuntimeException) failure;
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
         }
         if (failure != null) {
             throw (Error) failure;

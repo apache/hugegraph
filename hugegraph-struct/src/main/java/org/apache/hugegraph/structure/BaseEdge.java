@@ -194,34 +194,27 @@ public class BaseEdge extends BaseElement implements Cloneable {
     }
     @Override
     public Object sysprop(HugeKeys key) {
-        switch (key) {
-            case ID:
-                return this.id();
-            case OWNER_VERTEX:
-                return this.ownerVertexId();
-            case LABEL:
+        return switch (key) {
+            case ID -> this.id();
+            case OWNER_VERTEX -> this.ownerVertexId();
+            case LABEL -> {
                 if (this.schemaLabel().fatherId() != null) {
-                    return this.schemaLabel().fatherId();
+                    yield this.schemaLabel().fatherId();
                 } else {
-                    return this.schemaLabel().id();
+                    yield this.schemaLabel().id();
                 }
-            case DIRECTION:
-                return this.direction();
-
-            case SUB_LABEL:
-                return this.schemaLabel().id();
-
-            case OTHER_VERTEX:
-                return this.otherVertexId();
-            case SORT_VALUES:
-                return this.name();
-            case PROPERTIES:
-                return this.getPropertiesMap();
-            default:
+            }
+            case DIRECTION -> this.direction();
+            case SUB_LABEL -> this.schemaLabel().id();
+            case OTHER_VERTEX -> this.otherVertexId();
+            case SORT_VALUES -> this.name();
+            case PROPERTIES -> this.getPropertiesMap();
+            default -> {
                 E.checkArgument(false,
                         "Invalid system property '%s' of Edge", key);
-                return null;
-        }
+                yield null;
+            }
+        };
 
     }
 
@@ -248,10 +241,10 @@ public class BaseEdge extends BaseElement implements Cloneable {
         if (this == object) {
             return true;
         }
-        if (!(object instanceof BaseEdge) || this.id() == null) {
+        if (!(object instanceof BaseEdge edge) || this.id() == null) {
             return false;
         }
-        return this.id().equals(((BaseEdge) object).id());
+        return this.id().equals(edge.id());
     }
 
     @Override

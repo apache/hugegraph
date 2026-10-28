@@ -86,6 +86,9 @@ import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.meta.MetaManager;
+import org.apache.hugegraph.meta.PdMetaDriver;
+import org.apache.hugegraph.pd.client.PDClient;
+import org.apache.hugegraph.pd.common.PDException;
 import org.apache.tinkerpop.gremlin.server.Settings;
 import org.apache.tinkerpop.gremlin.server.util.DefaultGraphManager;
 import org.mockito.Mockito;
@@ -109,6 +112,92 @@ import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
 import com.alipay.sofa.jraft.util.Endpoint;
 
 public class GraphManagerConfigTest {
+
+    @Test
+    public void testGraphSpaceDropCleansPdStatisticsBeforeRemovingConfiguration() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(null, false);
+    }
+
+    @Test
+    public void testGraphSpaceDropKeepsConfigurationWhenPdCleanupFails() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(new PDException(1003, "write failed"), false);
+    }
+
+    @Test
+    public void testEmptyServerSpaceKeepsRemainingPdGraphDiagnosis() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(new PDException(1003,
+                "PD still has 1 graph record in space 'shop': [shop/old/g]. " +
+                "Inspect GET /v1/partitionsAndStats"), false);
+    }
+
+    @Test
+    public void testGraphSpaceDropDoesNotCleanStatisticsWhenGraphRemovalFails() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(null, true);
+    }
+
+    @Test
+    public void testGraphSpaceDropReportsOldPdRpcAsFailure() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(io.grpc.Status.UNIMPLEMENTED.asRuntimeException(), false);
+    }
+
+    @Test
+    public void testGraphSpaceDropDoesNotMislabelOtherRpcFailuresAsOldPd() throws Exception {
+        this.checkGraphSpaceStatisticsCleanup(io.grpc.Status.UNAVAILABLE.asRuntimeException(), false);
+    }
+
+    private void checkGraphSpaceStatisticsCleanup(Exception pdFailure, boolean graphFailure) throws Exception {
+        GraphManager manager = Mockito.mock(GraphManager.class, Mockito.CALLS_REAL_METHODS);
+        MetaManager meta = Mockito.mock(MetaManager.class);
+        PdMetaDriver driver = Mockito.mock(PdMetaDriver.class);
+        PDClient client = Mockito.mock(PDClient.class);
+        Whitebox.setInternalState(manager, "serviceGraphSpace", "internal");
+        Whitebox.setInternalState(manager, "metaManager", meta);
+        Whitebox.setInternalState(manager, "graphSpaces", new HashMap<String, GraphSpace>());
+        Mockito.doNothing().when(manager).clearGraphSpace("shop");
+        Mockito.when(meta.metaDriver()).thenReturn(driver);
+        Mockito.when(driver.pdClient()).thenReturn(client);
+        if (pdFailure != null) {
+            Mockito.doThrow(pdFailure).when(client).deleteGraphSpace("shop");
+        }
+        if (graphFailure) {
+            Mockito.doThrow(new HugeException("graph removal failed")).when(manager).clearGraphSpace("shop");
+        }
+        if (pdFailure != null || graphFailure) {
+            HugeException failure = Assert.assertThrows(HugeException.class,
+                    () -> manager.dropGraphSpace("shop"));
+            if (pdFailure instanceof PDException) {
+                Assert.assertTrue(failure.getMessage().contains(pdFailure.getMessage()));
+                Assert.assertSame(pdFailure, failure.getCause());
+            }
+            if (pdFailure instanceof io.grpc.StatusRuntimeException) {
+                io.grpc.StatusRuntimeException rpcFailure = (io.grpc.StatusRuntimeException) pdFailure;
+                Assert.assertSame(pdFailure, failure.getCause());
+                if (rpcFailure.getStatus().getCode() == io.grpc.Status.Code.UNIMPLEMENTED) {
+                    for (String detail : List.of("UNIMPLEMENTED", "Upgrade all PD nodes", "Graphs",
+                                                 "authorization", "schema templates", "services",
+                                                 "already been cleared", "list entry are retained")) {
+                        Assert.assertContains(detail, failure.getMessage());
+                    }
+                } else {
+                    Assert.assertFalse(failure.getMessage().contains("UNIMPLEMENTED"));
+                }
+            }
+            Mockito.verify(meta, Mockito.never()).removeGraphSpaceConfig(Mockito.any());
+            Mockito.verify(meta, Mockito.never()).clearGraphSpaceList(Mockito.any());
+            Mockito.verify(meta, Mockito.never()).notifyGraphSpaceRemove(Mockito.any());
+            if (graphFailure) {
+                Mockito.verify(client, Mockito.never()).deleteGraphSpace(Mockito.any());
+            }
+        } else {
+            manager.dropGraphSpace("shop");
+            org.mockito.InOrder order = Mockito.inOrder(manager, client, meta);
+            order.verify(manager).clearGraphSpace("shop");
+            order.verify(client).deleteGraphSpace("shop");
+            order.verify(meta).removeGraphSpaceConfig("shop");
+            order.verify(meta).clearGraphSpaceList("shop");
+            order.verify(meta).notifyGraphSpaceRemove("shop");
+        }
+    }
 
     private static ExecutorService previousEventExecutor;
     private static ExecutorService previousTaskDbExecutor;

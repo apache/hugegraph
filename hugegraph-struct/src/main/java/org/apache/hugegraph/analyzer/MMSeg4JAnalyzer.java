@@ -56,20 +56,13 @@ public class MMSeg4JAnalyzer implements Analyzer {
                     "the available values are %s", mode, SUPPORT_MODES);
         }
         int index = SUPPORT_MODES.indexOf(mode);
-        switch (index) {
-            case 0:
-                this.seg = new SimpleSeg(DIC);
-                break;
-            case 1:
-                this.seg = new ComplexSeg(DIC);
-                break;
-            case 2:
-                this.seg = new MaxWordSeg(DIC);
-                break;
-            default:
-                throw new AssertionError(String.format(
+        this.seg = switch (index) {
+            case 0 -> new SimpleSeg(DIC);
+            case 1 -> new ComplexSeg(DIC);
+            case 2 -> new MaxWordSeg(DIC);
+            default -> throw new AssertionError(String.format(
                         "Unsupported segment mode '%s'", mode));
-        }
+        };
     }
 
     @Override

@@ -242,18 +242,18 @@ public final class QueryBatch<R> implements AutoCloseable {
     }
 
     public static Object metadataOf(Object iterator, String meta, Object... args) {
-        return iterator instanceof Metadatable ?
-               ((Metadatable) iterator).metadata(meta, args) : null;
+        return iterator instanceof Metadatable metadatable ?
+               metadatable.metadata(meta, args) : null;
     }
 
     public static void closeAll(Object... resources) throws Exception {
         Throwable failure = null;
         for (Object resource : resources) {
-            if (!(resource instanceof AutoCloseable)) {
+            if (!(resource instanceof AutoCloseable closeable)) {
                 continue;
             }
             try {
-                ((AutoCloseable) resource).close();
+                closeable.close();
             } catch (Throwable closing) {
                 if (failure == null) {
                     failure = closing;
@@ -262,8 +262,8 @@ public final class QueryBatch<R> implements AutoCloseable {
                 }
             }
         }
-        if (failure instanceof Exception) {
-            throw (Exception) failure;
+        if (failure instanceof Exception matchedException) {
+            throw matchedException;
         }
         if (failure != null) {
             throw (Error) failure;
@@ -271,10 +271,10 @@ public final class QueryBatch<R> implements AutoCloseable {
     }
 
     public static RuntimeException propagate(Throwable failure) {
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error error) {
+            throw error;
         }
-        return failure instanceof RuntimeException ? (RuntimeException) failure :
+        return failure instanceof RuntimeException runtimeException ? runtimeException :
                new HugeException("Failed to iterate query results", failure);
     }
 }

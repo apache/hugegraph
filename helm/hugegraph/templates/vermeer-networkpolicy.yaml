@@ -1,0 +1,89 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{ include "hugegraph.resolveValues" . }}
+{{- if .Values.vermeer.enabled }}
+{{- $v := .Values.vermeer }}
+{{- $rules := get .Values.networkPolicy "vermeer" | default dict }}
+{{- range $role := list "master" "worker" }}
+{{- if or (eq $role "master") (eq $v.mode "cluster") }}
+{{- $name := include "hugegraph.vermeer.masterName" $ }}
+{{- if eq $role "worker" }}{{- $name = include "hugegraph.vermeer.workerName" $ }}{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hugegraph.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vermeer-{{ $role }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: vermeer-{{ $role }}
+  policyTypes:
+    - Ingress
+    {{- if $.Values.networkPolicy.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    # Internal gRPC and Worker HTTP are never admitted from arbitrary Pods.
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "vermeer-master") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "vermeer-worker") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $v.master.httpPort $v.master.grpcPort $v.worker.grpcPort $v.worker.httpPort) | nindent 8 }}
+    {{- if eq $role "master" }}
+    - from:
+        {{- if $.Values.hubble.enabled }}
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "hubble") | nindent 8 }}
+        {{- end }}
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "test") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $v.master.httpPort) | nindent 8 }}
+    {{- end }}
+    {{- with get $rules "extraIngress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if $.Values.networkPolicy.enabled }}
+  egress:
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "vermeer-master") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "vermeer-worker") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $v.master.httpPort $v.master.grpcPort $v.worker.grpcPort $v.worker.httpPort) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $.Values.pd.ports.grpc $.Values.pd.ports.rest) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "store") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $.Values.store.ports.grpc $.Values.store.ports.rest) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" $ "component" "server") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $.Values.server.port) | nindent 8 }}
+    {{- include "hugegraph.netpol.dns" $ | nindent 4 }}
+    {{- with get $rules "extraEgress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

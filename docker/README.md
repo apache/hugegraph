@@ -285,6 +285,25 @@ Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore t
 
 `docker compose down` keeps named-volume data. `docker compose down -v` intentionally deletes it.
 
+### Container user
+
+The PD, Store and Server images run as the non-root user `hugegraph`, UID/GID `10001:10001`. A new named volume mounted at a directory the image already has (the application directory, `pd_data`, `storage`, `rocksdb-data` or `logs`) starts out owned by that user; one mounted anywhere else, such as a custom `HG_PD_DATA_PATH` or `HG_STORE_DATA_PATH`, starts out owned by root and needs the `chown` below. A host directory used as a bind mount must be writable by UID `10001` (`sudo chown 10001:10001 <dir>`). A mounted file only needs to be readable, except Server configuration files that the entrypoint edits from environment variables, which must be writable by UID `10001`. Use `docker exec -u 0` for root access while debugging.
+
+<details>
+<summary>Upgrading data written by an image that ran as root</summary>
+
+Images built before this change, including 1.7.0 and earlier and older `latest` builds, run as root, so their volumes are owned by root and the new image fails with `Permission denied` on its first write. Stop the topology with `docker compose ... down` (not `down -v`), then change the owner of each data volume once with the new image:
+
+```bash
+docker run --rm -u 0 --entrypoint chown -v <volume>:/data <new-image> -R 10001:10001 /data
+```
+
+List the volumes with `docker volume ls`; Compose prefixes each name with the project name. Then start again with `docker compose ... up -d`. Do not upgrade running containers with a plain `up -d`: Compose reattaches the anonymous volume that holds the previous image's root-owned application directory. Run `down` first, or use `up -d --renew-anon-volumes`.
+
+On Kubernetes, set `fsGroup: 10001` (optionally with `fsGroupChangePolicy: OnRootMismatch`) in the pod security context so the user can write volumes created by older images. The [Helm chart](../helm/hugegraph) sets this for PD and Store unless their `podSecurityContext` sets `fsGroup`, also on releases upgraded with `--reuse-values`; see [Upgrade and verify](../helm/hugegraph/README.md#upgrade-and-verify).
+
+</details>
+
 ### Server service identity
 
 Server image builds containing this configuration mapping accept
@@ -352,7 +371,7 @@ Both Server images (`hugegraph/hugegraph` and `hugegraph/server`) write the Huge
 
 `/hugegraph-server/logs` holds `hugegraph-server.log`, JVM crash logs (`hs_err_pid<pid>_<host>_<launch time>.log`) and out-of-memory heap dumps (`heapdump_<host>_<launch time>/java_pid<pid>.hprof`), where `<launch time>` is the container's local time as `YYYYMMDD-HHMMSS`. Each start gets its own `heapdump_*` directory, so the Server and the JVMs it starts, such as computer jobs, write separate dumps. HotSpot names each dump and crash log after the JVM's PID, so a JVM that reuses the PID of an earlier one from the same start cannot write its dump, and its crash log replaces the earlier one's. The host name (on Kubernetes, the pod name, or `spec.hostname` when that is set) and a `-1`, `-2`, ... counter keep names from clashing; the counter also separates pods that share a host name. If the directory cannot be created, for example on a full volume, the Server still starts and dumps go to `logs/` itself as `java_pid<pid>.hprof`. That is best effort: a full volume may have no room for the dump either, and a restarted container that reuses a PID cannot write over an earlier dump with the same name. If the logs path contains a double quote or `%`, the launcher warns and heap dumps go to `logs/` itself, with no per-launch directory and no crash log default; the `JAVA_TOOL_OPTIONS` opt-out below still applies. A path that contains both quote characters gets no heap dump default at all.
 
-Both images declare `VOLUME /hugegraph-server`, so `docker restart` and a Compose recreate keep the files in that anonymous volume. `docker compose down` leaves the volume behind but the next `up` does not attach it, so the files become hard to reach and keep using disk. A later `docker compose down -v` does not remove that orphaned volume either, since it only removes anonymous volumes of the containers it removes; note the volume name with `docker inspect` before `down` and delete it with `docker volume rm <name>`, or stop with `docker compose down -v` in the first place. Avoid `docker volume prune` for this: it deletes every unused anonymous volume on the Docker host, including other projects' data. Mount a named volume or a bind mount at `/hugegraph-server/logs` to keep the files reachable. Kubernetes starts a new container on every restart and does not turn the image's `VOLUME` into a pod volume, so mount an `emptyDir` or a PersistentVolumeClaim at `/hugegraph-server/logs`. Give each pod its own volume, or a per-pod directory on a shared PVC: crash files get distinct names, but `hugegraph-server.log`, the audit log and the slow-query log have fixed names, and pods sharing them would roll them over for each other. For a per-pod directory, pass the pod name in through the Downward API and use it in `subPathExpr` (the Helm chart sets neither):
+Both images declare `VOLUME /hugegraph-server`, so `docker restart` and a Compose recreate keep the files in that anonymous volume. `docker compose down` leaves the volume behind but the next `up` does not attach it, so the files become hard to reach and keep using disk. A later `docker compose down -v` does not remove that orphaned volume either, since it only removes anonymous volumes of the containers it removes; note the volume name with `docker inspect` before `down` and delete it with `docker volume rm <name>`, or stop with `docker compose down -v` in the first place. Avoid `docker volume prune` for this: it deletes every unused anonymous volume on the Docker host, including other projects' data. Mount a named volume or a bind mount at `/hugegraph-server/logs` to keep the files reachable. Kubernetes starts a new container on every restart and does not turn the image's `VOLUME` into a pod volume, so mount an `emptyDir` or a PersistentVolumeClaim at `/hugegraph-server/logs`; for a PersistentVolumeClaim, set `fsGroup: 10001` in the Server pod security context so the non-root user can write it. Give each pod its own volume, or a per-pod directory on a shared PVC: crash files get distinct names, but `hugegraph-server.log`, the audit log and the slow-query log have fixed names, and pods sharing them would roll them over for each other. For a per-pod directory, pass the pod name in through the Downward API and use it in `subPathExpr` (the Helm chart sets neither):
 
 ```yaml
 env:
@@ -455,6 +474,7 @@ docker build -f hugegraph-server/Dockerfile -t hugegraph-standalone:local .
 | `MAVEN_PROJECTS` | Override the module selection; retain all three distributions required by the shared build and archive cleanup. |
 | `MAVEN_ARGS` | Pass other Maven options. |
 | `RUNTIME_DEPS_EPOCH` | Change the value to refresh cached OS packages without invalidating the Maven build stage. Default: `1`. |
+| `HG_UID`, `HG_GID` | UID and GID of the non-root `hugegraph` user that runs the image. Default: `10001`. The Helm chart's `fsGroup` default assumes `10001`. Bake does not read these from the environment; pass `--set '*.args.HG_UID=<uid>'`. |
 
 <details>
 <summary>Custom modules, package refresh, and cache behavior</summary>

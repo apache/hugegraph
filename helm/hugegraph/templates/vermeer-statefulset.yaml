@@ -1,0 +1,161 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{ include "hugegraph.resolveValues" . }}
+{{- if .Values.vermeer.enabled }}
+{{- include "hugegraph.validateValues" . }}
+{{- $v := .Values.vermeer }}
+{{- $roles := list "master" }}
+{{- if eq $v.mode "cluster" }}{{- $roles = append $roles "worker" }}{{- end }}
+{{- range $role := $roles }}
+{{- $master := eq $role "master" }}
+{{- $worker := or (not $master) (eq $v.mode "standalone") }}
+{{- $roleValues := get $v $role }}
+{{- $name := include "hugegraph.vermeer.masterName" $ }}
+{{- if not $master }}{{- $name = include "hugegraph.vermeer.workerName" $ }}{{- end }}
+{{- $configChecksum := dict }}
+{{- if $master }}
+{{- $_ := set $configChecksum "master" (dict "mode" $v.mode "httpPort" $v.master.httpPort "grpcPort" $v.master.grpcPort) }}
+{{- end }}
+{{- if $worker }}
+{{- $_ := set $configChecksum "worker" (dict "mode" $v.mode "masterGrpcPort" $v.master.grpcPort "httpPort" $v.worker.httpPort "grpcPort" $v.worker.grpcPort) }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hugegraph.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vermeer-{{ $role }}
+spec:
+  serviceName: {{ $name }}{{ if $master }}-internal{{ end }}
+  replicas: {{ if $master }}1{{ else }}{{ $v.worker.replicas }}{{ end }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  {{- if $roleValues.storage.enabled }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: vermeer-{{ $role }}
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: vermeer-{{ $role }}
+        {{- with $v.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        checksum/config: {{ $configChecksum | toJson | sha256sum | quote }}
+        checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" $ | quote }}
+        {{- if $master }}
+        checksum/vermeer-auth: {{ include "hugegraph.vermeer.authChecksum" $ | quote }}
+        checksum/vermeer-admin: {{ include "hugegraph.vermeer.adminChecksum" $ | quote }}
+        {{- end }}
+        {{- if $worker }}
+        {{- if $v.hugegraphCredentials.existingSecret }}
+        {{- $live := lookup "v1" "Secret" $.Release.Namespace $v.hugegraphCredentials.existingSecret | default dict }}
+        checksum/hugegraph-auth: {{ printf "%s|%s|%s" $v.hugegraphCredentials.existingSecret $v.hugegraphCredentials.key (dig "metadata" "resourceVersion" "" $live) | sha256sum | quote }}
+        {{- else if $.Values.server.auth.enabled }}
+        checksum/hugegraph-auth: {{ include "hugegraph.server.authChecksum" $ | quote }}
+        {{- end }}
+        {{- end }}
+        {{- with $v.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      containers:
+        {{- if $master }}
+        {{- include "hugegraph.vermeer.container" (dict "root" $ "role" "master") | nindent 8 }}
+        {{- end }}
+        {{- if $worker }}
+        {{- include "hugegraph.vermeer.container" (dict "root" $ "role" "worker") | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "hugegraph.vermeer.volumes" (dict "root" $ "master" $master "worker" $worker) | nindent 8 }}
+        {{- if not $roleValues.storage.enabled }}
+        - name: {{ $role }}-data
+          emptyDir: {}
+        {{- end }}
+        {{- if and $master $worker }}
+        - name: worker-data
+          {{- if $v.worker.storage.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "hugegraph.vermeer.standaloneWorkerDataName" $ }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+  {{- if $roleValues.storage.enabled }}
+  volumeClaimTemplates:
+    {{- include "hugegraph.vermeer.claim" (dict "role" $role "storage" $roleValues.storage) | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if and (eq $v.mode "standalone") $v.worker.storage.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hugegraph.vermeer.standaloneWorkerDataName" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vermeer-worker
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if eq $v.worker.storage.storageClassName "-" }}
+  storageClassName: ""
+  {{- else if $v.worker.storage.storageClassName }}
+  storageClassName: {{ $v.worker.storage.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $v.worker.storage.size }}
+{{- end }}
+{{- end }}

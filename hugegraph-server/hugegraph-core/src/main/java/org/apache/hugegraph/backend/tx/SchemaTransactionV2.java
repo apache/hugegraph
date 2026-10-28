@@ -466,23 +466,18 @@ public class SchemaTransactionV2 implements ISchemaTransaction {
     protected <T extends SchemaElement> T getSchema(HugeType type, Id id) {
         LOG.debug("SchemaTransaction get {} by id '{}'",
                   type.readableName(), id);
-        switch (type) {
-            case PROPERTY_KEY:
-                return (T) this.schemaMetaManager.getPropertyKey(this.graphSpace,
+        return switch (type) {
+            case PROPERTY_KEY -> (T) this.schemaMetaManager.getPropertyKey(this.graphSpace,
                                                                  this.graph, id);
-            case VERTEX_LABEL:
-                return (T) this.schemaMetaManager.getVertexLabel(this.graphSpace,
+            case VERTEX_LABEL -> (T) this.schemaMetaManager.getVertexLabel(this.graphSpace,
                                                                  this.graph, id);
-            case EDGE_LABEL:
-                return (T) this.schemaMetaManager.getEdgeLabel(this.graphSpace,
+            case EDGE_LABEL -> (T) this.schemaMetaManager.getEdgeLabel(this.graphSpace,
                                                                this.graph, id);
-            case INDEX_LABEL:
-                return (T) this.schemaMetaManager.getIndexLabel(this.graphSpace,
+            case INDEX_LABEL -> (T) this.schemaMetaManager.getIndexLabel(this.graphSpace,
                                                                 this.graph, id);
-            default:
-                throw new AssertionError(String.format(
+            default -> throw new AssertionError(String.format(
                         "Invalid type '%s' for getSchema", type));
-        }
+        };
     }
 
     /**
@@ -497,43 +492,33 @@ public class SchemaTransactionV2 implements ISchemaTransaction {
     protected <T extends SchemaElement> T getSchema(HugeType type, String name) {
         LOG.debug("SchemaTransaction get {} by name '{}'",
                   type.readableName(), name);
-        switch (type) {
-            case PROPERTY_KEY:
-                return (T) this.schemaMetaManager.getPropertyKey(this.graphSpace,
+        return switch (type) {
+            case PROPERTY_KEY -> (T) this.schemaMetaManager.getPropertyKey(this.graphSpace,
                                                                  this.graph, name);
-            case VERTEX_LABEL:
-                return (T) this.schemaMetaManager.getVertexLabel(this.graphSpace,
+            case VERTEX_LABEL -> (T) this.schemaMetaManager.getVertexLabel(this.graphSpace,
                                                                  this.graph, name);
-            case EDGE_LABEL:
-                return (T) this.schemaMetaManager.getEdgeLabel(this.graphSpace,
+            case EDGE_LABEL -> (T) this.schemaMetaManager.getEdgeLabel(this.graphSpace,
                                                                this.graph, name);
-            case INDEX_LABEL:
-                return (T) this.schemaMetaManager.getIndexLabel(this.graphSpace,
+            case INDEX_LABEL -> (T) this.schemaMetaManager.getIndexLabel(this.graphSpace,
                                                                 this.graph, name);
-            default:
-                throw new AssertionError(String.format(
+            default -> throw new AssertionError(String.format(
                         "Invalid type '%s' for getSchema", type));
-        }
+        };
     }
 
     @SuppressWarnings("unchecked")
     protected <T extends SchemaElement> List<T> getAllSchema(HugeType type) {
         LOG.debug("SchemaTransaction getAllSchema {}", type.readableName());
-        switch (type) {
-            case PROPERTY_KEY:
-                return (List<T>) this.schemaMetaManager.getPropertyKeys(this.graphSpace,
+        return switch (type) {
+            case PROPERTY_KEY -> (List<T>) this.schemaMetaManager.getPropertyKeys(this.graphSpace,
                                                                         this.graph);
-            case VERTEX_LABEL:
-                return (List<T>) this.schemaMetaManager.getVertexLabels(this.graphSpace,
+            case VERTEX_LABEL -> (List<T>) this.schemaMetaManager.getVertexLabels(this.graphSpace,
                                                                         this.graph);
-            case EDGE_LABEL:
-                return (List<T>) this.schemaMetaManager.getEdgeLabels(this.graphSpace, this.graph);
-            case INDEX_LABEL:
-                return (List<T>) this.schemaMetaManager.getIndexLabels(this.graphSpace, this.graph);
-            default:
-                throw new AssertionError(String.format(
+            case EDGE_LABEL -> (List<T>) this.schemaMetaManager.getEdgeLabels(this.graphSpace, this.graph);
+            case INDEX_LABEL -> (List<T>) this.schemaMetaManager.getIndexLabels(this.graphSpace, this.graph);
+            default -> throw new AssertionError(String.format(
                         "Invalid type '%s' for getSchema", type));
-        }
+        };
     }
 
     @Override

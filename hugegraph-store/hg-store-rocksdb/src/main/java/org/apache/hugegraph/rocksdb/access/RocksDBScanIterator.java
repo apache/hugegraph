@@ -241,11 +241,11 @@ public class RocksDBScanIterator<T> implements ScanIterator {
         }
         // Automatic exhaustion can initiate close before its owner enters finally.
         // A repeated close must wait for that release and retain any failure, without retrying JNI.
-        if (this.closeFailure instanceof RuntimeException) {
-            throw (RuntimeException) this.closeFailure;
+        if (this.closeFailure instanceof RuntimeException failure) {
+            throw failure;
         }
-        if (this.closeFailure instanceof Error) {
-            throw (Error) this.closeFailure;
+        if (this.closeFailure instanceof Error failure) {
+            throw failure;
         }
     }
 

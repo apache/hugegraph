@@ -23,6 +23,8 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: store
+  annotations:
+    hugegraph.apache.org/metadata-cluster: {{ .Values.metadataCluster | quote }}
 spec:
   serviceName: {{ include "hugegraph.store.name" . }}
   replicas: {{ .Values.store.replicas }}
@@ -76,10 +78,8 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.store.podSecurityContext }}
       securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- include "hugegraph.dataPodSecurityContext" .Values.store.podSecurityContext | nindent 8 }}
       {{- if .Values.store.affinity }}
       affinity:
         {{- toYaml .Values.store.affinity | nindent 8 }}
@@ -145,6 +145,8 @@ spec:
             - name: rest
               containerPort: {{ .Values.store.ports.rest }}
           env:
+            - name: PD_CLUSTER
+              value: {{ .Values.metadataCluster | quote }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:

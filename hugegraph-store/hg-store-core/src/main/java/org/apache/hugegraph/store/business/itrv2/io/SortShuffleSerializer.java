@@ -253,8 +253,8 @@ public class SortShuffleSerializer<T> {
 
             BackendColumn column;
             boolean isVertex = false;
-            if (element instanceof BaseVertex) {
-                column = serializer.writeVertex((BaseVertex) element);
+            if (element instanceof BaseVertex vertex) {
+                column = serializer.writeVertex(vertex);
                 isVertex = true;
             } else {
                 column = serializer.writeEdge((BaseEdge) element);

@@ -348,8 +348,7 @@ public class API {
                 measures.put(key, new MutableLong(value));
             } else if (current instanceof MutableLong) {
                 ((MutableLong) measures.computeIfAbsent(key, MutableLong::new)).add(value);
-            } else if (current instanceof Long) {
-                Long currentLong = (Long) current;
+            } else if (current instanceof Long currentLong) {
                 measures.put(key, new MutableLong(currentLong + value));
             } else {
                 throw new NotSupportedException("addCount() method's 'value' datatype must be " +

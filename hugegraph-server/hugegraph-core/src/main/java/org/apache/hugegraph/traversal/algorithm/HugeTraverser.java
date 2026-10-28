@@ -296,8 +296,8 @@ public class HugeTraverser {
 
     public static List<HugeEdge> pathEdges(Iterator<Edge> iterator, HugeEdge edge) {
         List<HugeEdge> edges = new ArrayList<>();
-        if (iterator instanceof NestedIterator) {
-            edges = ((NestedIterator) iterator).pathEdges();
+        if (iterator instanceof NestedIterator nestedIterator) {
+            edges = nestedIterator.pathEdges();
         }
         edges.add(edge);
         return edges;
@@ -734,10 +734,9 @@ public class HugeTraverser {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Node)) {
+            if (!(object instanceof Node other)) {
                 return false;
             }
-            Node other = (Node) object;
             return Objects.equals(this.id, other.id) &&
                    Objects.equals(this.parent, other.parent);
         }

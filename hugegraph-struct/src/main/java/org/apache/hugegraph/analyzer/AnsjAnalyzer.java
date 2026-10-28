@@ -56,24 +56,14 @@ public class AnsjAnalyzer implements Analyzer {
 
     @Override
     public Set<String> segment(String text) {
-        Result terms;
-        switch (this.analysis) {
-            case "BaseAnalysis":
-                terms = BaseAnalysis.parse(text);
-                break;
-            case "ToAnalysis":
-                terms = ToAnalysis.parse(text);
-                break;
-            case "NlpAnalysis":
-                terms = NlpAnalysis.parse(text);
-                break;
-            case "IndexAnalysis":
-                terms = IndexAnalysis.parse(text);
-                break;
-            default:
-                throw new AssertionError(String.format(
+        Result terms = switch (this.analysis) {
+            case "BaseAnalysis" -> BaseAnalysis.parse(text);
+            case "ToAnalysis" -> ToAnalysis.parse(text);
+            case "NlpAnalysis" -> NlpAnalysis.parse(text);
+            case "IndexAnalysis" -> IndexAnalysis.parse(text);
+            default -> throw new AssertionError(String.format(
                         "Unsupported segment mode '%s'", this.analysis));
-        }
+        };
 
         assert terms != null;
         Set<String> result = InsertionOrderUtil.newSet();

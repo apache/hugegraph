@@ -180,8 +180,8 @@ public class RaftBackendStoreProvider implements BackendStoreProvider {
         } catch (RuntimeException | Error error) {
             failure = CloseFailure.collect(failure, error);
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;

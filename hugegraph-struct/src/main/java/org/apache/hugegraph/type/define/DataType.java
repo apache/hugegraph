@@ -121,27 +121,16 @@ public enum DataType implements SerialEnum {
 
         Number number;
         try {
-            switch (this) {
-                case BYTE:
-                    number = Byte.valueOf(value.toString());
-                    break;
-                case INT:
-                    number = Integer.valueOf(value.toString());
-                    break;
-                case LONG:
-                    number = Long.valueOf(value.toString());
-                    break;
-                case FLOAT:
-                    number = Float.valueOf(value.toString());
-                    break;
-                case DOUBLE:
-                    number = Double.valueOf(value.toString());
-                    break;
-                default:
-                    throw new AssertionError(String.format(
+            number = switch (this) {
+                case BYTE -> Byte.valueOf(value.toString());
+                case INT -> Integer.valueOf(value.toString());
+                case LONG -> Long.valueOf(value.toString());
+                case FLOAT -> Float.valueOf(value.toString());
+                case DOUBLE -> Double.valueOf(value.toString());
+                default -> throw new AssertionError(String.format(
                               "Number type only contains Byte, Integer, " +
                               "Long, Float, Double, but got %s", this.clazz()));
-            }
+            };
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(String.format(
                       "Can't read '%s' as %s: %s",
@@ -154,16 +143,16 @@ public enum DataType implements SerialEnum {
         if (!this.isDate()) {
             return null;
         }
-        if (value instanceof Date) {
-            return (Date) value;
-        } else if (value instanceof OffsetDateTime) {
-            return Date.from(((OffsetDateTime) value).toInstant());
-        } else if (value instanceof Integer) {
-            return new Date(((Number) value).intValue());
-        } else if (value instanceof Long) {
-            return new Date(((Number) value).longValue());
-        } else if (value instanceof String) {
-            return DateUtil.parse((String) value);
+        if (value instanceof Date date) {
+            return date;
+        } else if (value instanceof OffsetDateTime dateTime) {
+            return Date.from(dateTime.toInstant());
+        } else if (value instanceof Integer number) {
+            return new Date(number.intValue());
+        } else if (value instanceof Long number) {
+            return new Date(number.longValue());
+        } else if (value instanceof String string) {
+            return DateUtil.parse(string);
         }
         return null;
     }
@@ -172,10 +161,10 @@ public enum DataType implements SerialEnum {
         if (!this.isUUID()) {
             return null;
         }
-        if (value instanceof UUID) {
-            return (UUID) value;
-        } else if (value instanceof String) {
-            return StringEncoding.uuid((String) value);
+        if (value instanceof UUID uuid) {
+            return uuid;
+        } else if (value instanceof String string) {
+            return StringEncoding.uuid(string);
         }
         return null;
     }
@@ -184,23 +173,21 @@ public enum DataType implements SerialEnum {
         if (!this.isBlob()) {
             return null;
         }
-        if (value instanceof Blob) {
-            return (Blob) value;
-        } else if (value instanceof byte[]) {
-            return Blob.wrap((byte[]) value);
-        } else if (value instanceof ByteBuffer) {
-            return Blob.wrap(((ByteBuffer) value).array());
-        } else if (value instanceof BytesBuffer) {
-            return Blob.wrap(((BytesBuffer) value).bytes());
-        } else if (value instanceof String) {
+        if (value instanceof Blob blob) {
+            return blob;
+        } else if (value instanceof byte[] bytes) {
+            return Blob.wrap(bytes);
+        } else if (value instanceof ByteBuffer buffer) {
+            return Blob.wrap(buffer.array());
+        } else if (value instanceof BytesBuffer buffer) {
+            return Blob.wrap(buffer.bytes());
+        } else if (value instanceof String str) {
             // Only base64 string or hex string accepted
-            String str = ((String) value);
             if (str.startsWith("0x")) {
                 return Blob.wrap(Bytes.fromHex(str.substring(2)));
             }
             return Blob.wrap(StringEncoding.decodeBase64(str));
-        } else if (value instanceof List) {
-            List<?> values = (List<?>) value;
+        } else if (value instanceof List<?> values) {
             byte[] bytes = new byte[values.size()];
             for (int i = 0; i < bytes.length; i++) {
                 Object v = values.get(i);

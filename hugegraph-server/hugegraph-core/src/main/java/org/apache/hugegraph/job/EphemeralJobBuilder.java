@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.job;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
@@ -33,7 +35,7 @@ public class EphemeralJobBuilder<V> {
     private EphemeralJob<V> job;
 
     // Use negative task id for ephemeral task
-    private static int ephemeralTaskId = -1;
+    private static final AtomicInteger EPHEMERAL_TASK_ID = new AtomicInteger(-1);
 
     public static <T> EphemeralJobBuilder<T> of(final HugeGraph graph) {
         return new EphemeralJobBuilder<>(graph);
@@ -76,9 +78,7 @@ public class EphemeralJobBuilder<V> {
     }
 
     private Id genTaskId() {
-        if (ephemeralTaskId >= 0) {
-            ephemeralTaskId = -1;
-        }
-        return IdGenerator.of(ephemeralTaskId--);
+        int id = EPHEMERAL_TASK_ID.getAndUpdate(current -> current == Integer.MIN_VALUE ? -1 : current - 1);
+        return IdGenerator.of(id);
     }
 }

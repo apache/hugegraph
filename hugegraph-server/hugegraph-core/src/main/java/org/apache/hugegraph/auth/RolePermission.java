@@ -107,10 +107,9 @@ public class RolePermission {
 
     @Override
     public boolean equals(Object object) {
-        if (!(object instanceof RolePermission)) {
+        if (!(object instanceof RolePermission other)) {
             return false;
         }
-        RolePermission other = (RolePermission) object;
         return Objects.equals(this.roles, other.roles);
     }
 
@@ -129,8 +128,8 @@ public class RolePermission {
 
     public static RolePermission fromJson(Object json) {
         RolePermission role;
-        if (json instanceof String) {
-            role = JsonUtil.fromJson((String) json, RolePermission.class);
+        if (json instanceof String string) {
+            role = JsonUtil.fromJson(string, RolePermission.class);
         } else {
             // Optimized json with RolePermission object
             E.checkArgument(json instanceof RolePermission,

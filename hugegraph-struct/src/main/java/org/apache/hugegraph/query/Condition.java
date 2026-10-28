@@ -424,11 +424,11 @@ public abstract class Condition {
         private static boolean equals(final Object first,
                                       final Object second) {
             assert second != null;
-            if (first instanceof Id) {
+            if (first instanceof Id id) {
                 if (second instanceof String) {
-                    return second.equals(((Id) first).asString());
+                    return second.equals(id.asString());
                 } else if (second instanceof Long) {
-                    return second.equals(((Id) first).asLong());
+                    return second.equals(id.asLong());
                 }
             } else if (second instanceof Number) {
                 return compare(first, second) == 0;
@@ -452,13 +452,13 @@ public abstract class Condition {
          */
         private static int compare(final Object first, final Object second) {
             assert second != null;
-            if (second instanceof Number) {
+            if (second instanceof Number number) {
                 return NumericUtil.compareNumber(first == null ? 0 : first,
-                        (Number) second);
-            } else if (second instanceof Date) {
-                return compareDate(first, (Date) second);
-            } else if (second instanceof Boolean) {
-                return compareBoolean(first, (Boolean) second);
+                                                 number);
+            } else if (second instanceof Date date) {
+                return compareDate(first, date);
+            } else if (second instanceof Boolean bool) {
+                return compareBoolean(first, bool);
             }
 
             throw new IllegalArgumentException(String.format(
@@ -471,8 +471,8 @@ public abstract class Condition {
             if (first == null) {
                 first = DateUtil.DATE_ZERO;
             }
-            if (first instanceof Date) {
-                return ((Date) first).compareTo(second);
+            if (first instanceof Date date) {
+                return date.compareTo(second);
             }
 
             throw new IllegalArgumentException(String.format(
@@ -482,8 +482,8 @@ public abstract class Condition {
         }
 
         private static int compareBoolean(Object first, Boolean second) {
-            if (first instanceof Boolean) {
-                return Boolean.compare((Boolean) first, second);
+            if (first instanceof Boolean bool) {
+                return Boolean.compare(bool, second);
             }
 
             throw new IllegalArgumentException(String.format(
@@ -645,10 +645,9 @@ public abstract class Condition {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof BinCondition)) {
+            if (!(object instanceof BinCondition other)) {
                 return false;
             }
-            BinCondition other = (BinCondition) object;
             return this.type().equals(other.type()) &&
                     this.left().equals(other.left()) &&
                     this.right().equals(other.right());
@@ -774,10 +773,9 @@ public abstract class Condition {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Not)) {
+            if (!(object instanceof Not other)) {
                 return false;
             }
-            Not other = (Not) object;
             return this.type().equals(other.type()) &&
                     this.condition.equals(other.condition());
         }
@@ -870,10 +868,9 @@ public abstract class Condition {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Relation)) {
+            if (!(object instanceof Relation other)) {
                 return false;
             }
-            Relation other = (Relation) object;
             return this.relation().equals(other.relation()) &&
                     this.key().equals(other.key()) &&
                     this.value().equals(other.value());

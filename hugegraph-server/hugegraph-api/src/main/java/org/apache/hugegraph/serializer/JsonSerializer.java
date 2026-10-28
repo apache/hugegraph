@@ -127,8 +127,8 @@ public class JsonSerializer implements Serializer {
             // Write page
             if (paging) {
                 String page;
-                if (iter instanceof GraphTraversal<?, ?>) {
-                    page = TraversalUtil.page((GraphTraversal<?, ?>) iter);
+                if (iter instanceof GraphTraversal<?, ?> graphTraversal) {
+                    page = TraversalUtil.page(graphTraversal);
                 } else if (iter instanceof Metadatable) {
                     page = PageInfo.pageInfo(iter);
                 } else {
@@ -177,12 +177,12 @@ public class JsonSerializer implements Serializer {
         SchemaElement schemaElement = taskWithSchema.schemaElement();
         String type;
         String schema;
-        if (schemaElement instanceof PropertyKey) {
+        if (schemaElement instanceof PropertyKey matchedPropertyKey) {
             type = "property_key";
-            schema = this.writePropertyKey((PropertyKey) schemaElement);
-        } else if (schemaElement instanceof IndexLabel) {
+            schema = this.writePropertyKey(matchedPropertyKey);
+        } else if (schemaElement instanceof IndexLabel matchedIndexLabel) {
             type = "index_label";
-            schema = this.writeIndexlabel((IndexLabel) schemaElement);
+            schema = this.writeIndexlabel(matchedIndexLabel);
         } else {
             throw new HugeException("Invalid schema element '%s' in " +
                                     "TaskWithSchema, only support " +

@@ -9,6 +9,8 @@ are not supported.
 Provide a default StorageClass or prepare matching PVs. The default installation
 needs **7 volumes**: 3 × 10 GiB for PD, 3 × 50 GiB for Store, and 1 × 1 GiB
 for Hubble. The chart creates PVCs; it does not create a storage provisioner.
+SeaTunnel and Vermeer are **disabled by default**, including in the single-node
+and cluster presets. Optional components add resources only when enabled.
 
 ## Install a published Chart
 
@@ -81,6 +83,63 @@ helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
 
 Inactive credential values may remain in the values file when auth is disabled.
 
+### Optional components
+
+| Component | Default | Enable when needed |
+|---|---|---|
+| Hubble | Enabled | `hubble.enabled=false` selects API-only deployment |
+| SeaTunnel | Disabled | `seatunnel.enabled=true` adds data import/export and its native UI |
+| Vermeer | Disabled | `vermeer.enabled=true` adds graph computation, Hubble integration and its native UI |
+
+<details>
+<summary>SeaTunnel: optional import, export and migration</summary>
+
+Set `seatunnel.enabled=true` to start one long-running hybrid member alongside HugeGraph;
+set `seatunnel.mode=cluster` to use multiple members of the same native StatefulSet
+(two by default). SeaTunnel is disabled by default and its topology is independent
+of the HugeGraph single-/multi-node presets. Both modes include the engine's task UI.
+The native HTTP Service remains ClusterIP in both easy and strict mode.
+Use an authorized port-forward when native administration is needed.
+
+HTTP and member/CLI port 5801 are restricted to necessary same-release callers
+in both modes, including when the chart-wide policy flag is disabled. Strict
+additionally limits egress. Actual isolation needs a supporting CNI and trusted
+namespace RBAC.
+
+The chart injects the same-release Server address, GraphSpace and administrator
+Secret references into the mounted Source/Sink examples. Create the target graph
+before submitting them manually; Helm does not create graphs or import data.
+UI and REST submission use a separate native HTTP Basic administrator account
+with a newly generated 6-character password in `easy` or 16 characters in `strict`; online upgrades reuse the
+existing Secret, including credentials created by older releases. Container
+security and scheduling options follow the other components; see the
+[SeaTunnel deployment guide](docs/seatunnel.md) for configuration and limits.
+
+</details>
+
+<details>
+<summary>Vermeer: optional graph computation with Hubble</summary>
+
+Enable Vermeer with `--set vermeer.enabled=true`. The default
+`vermeer.mode=standalone` runs one Master and one Worker as two containers in
+one Pod. Set `vermeer.mode=cluster` for one Master Pod and multiple Worker Pods
+(`vermeer.worker.replicas=3` by default). Both HugeGraph presets leave Vermeer
+disabled; choose the compute topology explicitly when enabling it.
+
+With Hubble enabled in its default PD mode, the chart configures the internal
+Master URL and service token automatically. Sign in to Hubble as the HugeGraph
+administrator, select an HStore graph, then load it and run an algorithm. The
+existing flow includes reload, task status/cancellation, paginated results and
+unload; it does not write results back into HugeGraph properties.
+
+Native Vermeer UI/API stays private behind ClusterIP in both modes. Optional
+administration uses port-forward and a separate generated password: 6 characters in `easy`, 16 in `strict`;
+Hubble needs no manual token configuration. Both engines always authenticate
+access, and their native HTTP/RPC policies allow only required internal callers.
+See the [Vermeer deployment guide](docs/vermeer.md) for administration and recovery.
+
+</details>
+
 ### Internal image registry
 
 Mirror the four component images (`hugegraph/pd`, `hugegraph/store`,
@@ -96,6 +155,11 @@ prefix. Set `imagePullSecrets` if the registry needs credentials.
 Store's wait init container and Helm test reuse the Store and Server images,
 which already contain `curl`; no separate curl image is needed by default.
 See the [complete registry example](examples/values-internal-registry.yaml).
+When enabled, also mirror `apache/seatunnel` and/or `hugegraph/vermeer` at the
+configured versions. Vermeer token initialization reuses its own image.
+The optional Vermeer image is pinned to the officially published Linux
+amd64/arm64 index. See [verified image and custom overrides](docs/vermeer.md#image-compatibility)
+for its tag, digest, source and publishing run. Normal enablement needs no image override.
 
 ### Storage
 
@@ -117,6 +181,18 @@ For a **new temporary installation**, add `--set persistence.enabled=false`
 to use `emptyDir`. Component storage flags override that global setting.
 PVC failures never cause an automatic fallback. Do not switch initialized
 PD/Store data between persistent and temporary storage.
+Vermeer adds separate Master and Worker data claims: two in standalone mode,
+or one Master claim plus one per Worker in cluster mode. Its storage flags
+inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and-recovery).
+
+### PD metadata namespace
+
+`metadataCluster` defaults to `hg-test`, preserving the namespace used by existing
+Server images. The chart gives Server and Store the same value so Store scans
+can find the Server's Schema. This is separate from a graph space or Raft group.
+Changing it does not migrate metadata; upgrades reject changes to a recorded
+namespace. See [metadata namespace adoption](docs/operations.md#pd-metadata-namespace)
+before upgrading a deployment that used custom metadata settings.
 
 ### Server service identity
 
@@ -160,13 +236,21 @@ still need verification with a running Linux cluster. See the
 
 ## Modes and entry points
 
+`values-single.yaml` and `values-cluster.yaml` select the HugeGraph topology.
+The independent `vermeer.mode` and `seatunnel.mode` select optional engine
+topologies; none of these presets enables an optional engine automatically.
+
 `mode: easy` is the default. `mode: strict` changes Server/Hubble to ClusterIP
-and enables NetworkPolicy; authentication, Hubble and persistence stay enabled.
+and enables full NetworkPolicy isolation; authentication, Hubble and persistence stay enabled.
 Use `--set mode=strict` or `-f helm/hugegraph/values-strict.yaml`.
 
 **Explicit component value > global value > mode default.** An explicit `false`
 is preserved; null component values inherit. The global settings are
-`persistence.enabled` and `global.imageRegistry`. No mode requires HTTPS.
+`persistence.enabled` and `global.imageRegistry`. SeaTunnel and Vermeer native
+Services are always ClusterIP and authenticated;
+their HTTP/RPC ingress stays restricted in both modes. No mode requires HTTPS.
+
+Server/Hubble entry choices:
 
 | Entry | Access | When to use it |
 |---|---|---|
@@ -184,7 +268,7 @@ Omission or `0` allocates automatically. Kubernetes validates the actual cluster
 range; the chart does not force `30000–32767`.
 
 A [hostless HTTP Ingress example](examples/values-http-ingress.yaml) is available.
-With NetworkPolicy enabled, add native rules for actual clients and controllers;
+With base-service NetworkPolicy enabled, add rules for actual clients and controllers;
 empty external rule lists are valid but can block access. Explicit Service and
 policy values override either mode. Legacy exposure acknowledgement fields are
 accepted for compatibility and no longer gate rendering.
@@ -199,6 +283,9 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 | `mode` | Entry and policy defaults | `easy` |
 | `pd.replicas` / `store.replicas` / `server.replicas` | Component replicas | `3` / `3` / `3` |
 | `hubble.enabled` | Install the UI | `true` |
+| `seatunnel.enabled` / `vermeer.enabled` | Install optional data/computation engines | `false` / `false` |
+| `vermeer.mode` | One Pod with two containers, or separate Master/Worker Pods | `standalone` |
+| `vermeer.worker.replicas` | Worker Pods in Vermeer cluster mode | `3` |
 | `server.auth.enabled` | Server authentication | `true` |
 | `server.service.type` / `hubble.service.type` | Explicit entry type; null inherits mode | resolved `NodePort` |
 | `pd.service.type` | PD client entry type | `ClusterIP` |
@@ -224,7 +311,7 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 - `values-single.yaml`: 1 PD + 1 Store + 1 Server, with Hubble and authentication.
 - `values-cluster.yaml`: required PD/Store anti-affinity, resources and controlled
   Store updates. NetworkPolicy inherits mode; the preset is a capacity starting point.
-- All client Services support native `externalTrafficPolicy`, `loadBalancerClass`,
+- Base PD/Server/Hubble client Services support native `externalTrafficPolicy`, `loadBalancerClass`,
   `loadBalancerIP`, `loadBalancerSourceRanges`, `externalIPs` and
   `allocateLoadBalancerNodePorts`, subject to cluster/controller support.
 - Resources, JVM options, scheduling, probes, HPA/PDB, metadata and external
@@ -246,7 +333,62 @@ helm test hugegraph -n hugegraph --logs --timeout 5m
 An easy-mode upgrade that inherits Server/Hubble entry types prints a short
 NodePort-default notice in NOTES; explicitly configured entry types are preserved.
 To adopt new defaults, use `--reset-values` with a reviewed values file retaining
-all settings your release needs. Older explicit helper images also remain under
+all settings your release needs.
+
+PD, Store and Server images built from this version run as UID/GID `10001`. The
+PD and Store pods get `fsGroup: 10001` (with `fsGroupChangePolicy: OnRootMismatch`)
+unless their `podSecurityContext` sets `fsGroup`, also when `--reuse-values` keeps
+an older release's empty value, so that user can write PVCs created by older
+images, which ran as root.
+
+Switch PD and Store to images from this version in the same rollout that first
+applies `fsGroup`, so the kubelet changes the volume ownership right before the
+`10001` image starts. Do not run images that still run as root with this chart
+first, for example the published `latest` before it moves to this version: files
+they create stay owned by root, and `OnRootMismatch` checks only the volume root,
+so it does not fix them later. Pin `pd.image` and `store.image` to a build from
+this version rather than relying on `latest`. A non-empty `image.digest` wins
+over `image.tag`, and `--reuse-values` keeps an existing digest, so a release
+pinned by digest must change the digest, not only the tag.
+
+If a release already ran root images with `fsGroup` set, roll out the first
+`10001` image together with a one-time recursive ownership change. Set the images
+in the same command, so the recursive change runs for the `10001` image rather
+than for a pinned root image. The example clears any reused digest so the tag
+applies; a release pinned by digest sets `pd.image.digest` and
+`store.image.digest` to the digests of this version's images instead:
+
+```bash
+helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
+  --set pd.image.tag=<this-version> \
+  --set store.image.tag=<this-version> \
+  --set-string pd.image.digest= \
+  --set-string store.image.digest= \
+  --set pd.podSecurityContext.fsGroupChangePolicy=Always \
+  --set store.podSecurityContext.fsGroupChangePolicy=Always \
+  --wait --timeout 15m
+```
+
+Before switching the policy back, check that every PD and Store Pod runs the
+`10001` image you set, not an older root image:
+
+```bash
+kubectl get pods -n hugegraph \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+```
+
+`--reuse-values` keeps `Always`, which walks the whole volume on every Pod
+start, so set the policy back once those Pods are running:
+
+```bash
+helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
+  --set pd.podSecurityContext.fsGroupChangePolicy=OnRootMismatch \
+  --set store.podSecurityContext.fsGroupChangePolicy=OnRootMismatch \
+  --wait --timeout 15m
+```
+
+See [Storage and upgrades](docs/operations.md#storage-and-upgrades) for volumes
+the kubelet cannot change. Older explicit helper images also remain under
 value reuse; clear `store.waitImage` and `server.waitImage` to reuse component images.
 
 The admin Secret is an **initial credential**. Changing it alone does not rotate

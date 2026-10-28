@@ -220,9 +220,8 @@ public class KvWatchSubject {
                     }
                     break;
                 } catch (Exception e) {
-                    if (e instanceof StatusRuntimeException &&
-                        ((StatusRuntimeException) e).getStatus().getCode()
-                                                    .equals(Status.Code.CANCELLED)) {
+                    if (e instanceof StatusRuntimeException failure &&
+                        failure.getStatus().getCode().equals(Status.Code.CANCELLED)) {
                         break;
                     }
                     try {
@@ -247,8 +246,8 @@ public class KvWatchSubject {
             } else {
                 // todo: delete records via client
                 var store = kvService.getMeta().getStore();
-                if (store instanceof RaftKVStore) {
-                    ((RaftKVStore) store).doRemoveByPrefix(kvService.getStoreKey(clientKey));
+                if (store instanceof RaftKVStore raftStore) {
+                    raftStore.doRemoveByPrefix(kvService.getStoreKey(clientKey));
                 }
             }
 

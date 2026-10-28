@@ -122,15 +122,6 @@ translator failure; runtime errors such as `Unsupported predicate` and
 `CONTAINS query ... is not supported` also fall back.
 There is no `HugeGraph.Cypher.MissingParameter` contract.
 
-This contract repairs the unreleased proposal in
-[Server #3241](https://github.com/apache/hugegraph/pull/3241). The paired website
-work is [Doc #499](https://github.com/apache/hugegraph-doc/pull/499); its author
-must incorporate this response contract before coordinated publication.
-Parameterized POST requests are already provided by merged
-[Server #3289](https://github.com/apache/hugegraph/pull/3289).
-The earlier [bound-query fork #238](https://github.com/hugegraph/hugegraph/pull/238)
-is a historical reference; use the current request contract above.
-
 ## Temporal functions
 
 The built-in translator has no temporal functions of its own. The Server folds

@@ -85,6 +85,11 @@ the resulting behavior, relevant validation, and documentation status. Link the 
 issue when applicable. A short example or diagram is useful when it clarifies the change;
 commit histories and raw test logs are unnecessary.
 
+Before requesting merge, inspect the complete PR diff and changed-file list.
+Remove one-off patch/staging workflows, local logs, generated reports and temporary
+files. Keep review coordination, validation-run links and pending PR references in
+the PR discussion; repository documentation should describe the resulting behavior.
+
 Address review findings within the agreed scope and validate the affected paths again.
 Resolve a discussion after its issue is fixed or clarified. Inspect failing CI jobs before
 retrying; a rerun is appropriate for a temporary infrastructure failure, not a reproducible bug.

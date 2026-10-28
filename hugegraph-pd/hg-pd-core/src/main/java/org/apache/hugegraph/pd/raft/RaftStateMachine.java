@@ -93,6 +93,10 @@ public class RaftStateMachine extends StateMachineAdapter {
         taskHandlers.add(handler);
     }
 
+    public void removeTaskHandler(RaftTaskHandler handler) {
+        taskHandlers.remove(handler);
+    }
+
     public void addStateListener(RaftStateListener listener) {
         stateListeners.add(listener);
     }

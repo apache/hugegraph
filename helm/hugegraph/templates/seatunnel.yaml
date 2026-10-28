@@ -1,0 +1,249 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements. See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to You under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License. You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Based on Apache SeaTunnel v3.0.0 hybrid Kubernetes resources:
+https://github.com/apache/seatunnel/blob/v3.0.0/docs/zh/getting-started/kubernetes/hybrid-cluster-mode.md
+Use its DNS discovery alternative, so Kubernetes API RBAC is unnecessary.
+*/}}
+
+{{- define "hugegraph.seatunnel.config" -}}
+{{- $name := include "hugegraph.seatunnel.name" . -}}
+{{- $dns := printf "%s-headless.%s.svc" $name .Release.Namespace -}}
+{{- $data := dict -}}
+{{- $hazelcast := dict "hazelcast" (dict
+  "cluster-name" $name
+  "network" (dict
+    "port" (dict "auto-increment" false "port" 5801)
+    "join" (dict "kubernetes" (dict "enabled" true "service-dns" $dns "service-port" 5801 "service-dns-timeout" 10)))
+  "properties" (dict "hazelcast.logging.type" "log4j2")) -}}
+{{- $_ := set $data "hazelcast.yaml" ($hazelcast | toYaml) -}}
+{{- $client := dict "hazelcast-client" (dict
+  "cluster-name" $name
+  "properties" (dict "hazelcast.logging.type" "log4j2")
+  "connection-strategy" (dict "connection-retry" (dict "cluster-connect-timeout-millis" 7000))
+  "network" (dict "cluster-members" (list (printf "%s:5801" $dns)))) -}}
+{{- $_ := set $data "hazelcast-client.yaml" ($client | toYaml) -}}
+{{- $engine := dict "seatunnel" (dict "engine" (dict
+  "backup-count" (ternary 0 1 (eq .Values.seatunnel.mode "standalone"))
+  "history-job-expire-minutes" 1440
+  "classloader-cache-mode" true
+  "slot-service" (dict "dynamic-slot" true)
+  "checkpoint" (dict "interval" 180000 "timeout" 30000 "storage" (dict
+    "type" "hdfs" "max-retained" 3 "plugin-config" (dict
+      "namespace" "/tmp/seatunnel/checkpoint/" "storage.type" "hdfs" "fs.defaultFS" "file:///tmp/")))
+  "http" (dict "enable-http" true "port" 8080 "enable-dynamic-port" false))) -}}
+{{- $_ := set $data "seatunnel.yaml" ($engine | toYaml) -}}
+{{/* The upstream script appends jvm_options after JAVA_OPTS; set heap in that file. */}}
+{{- $_ := set $data "jvm_options" (.Values.seatunnel.javaOpts | replace " " "\n") -}}
+{{- range $path, $_ := .Files.Glob "examples/seatunnel/hugegraph-*.conf" -}}
+{{- $_ := set $data (base $path) ($.Files.Get $path) -}}
+{{- end -}}
+{{- range $filename, $content := .Values.seatunnel.config -}}
+{{- $_ := set $data $filename $content -}}
+{{- end -}}
+{{- toYaml $data -}}
+{{- end -}}
+
+{{- if (.Values.seatunnel | default dict).enabled }}
+{{- include "hugegraph.resolveValues" . }}
+{{- include "hugegraph.validateValues" . }}
+{{- $name := include "hugegraph.seatunnel.name" . }}
+{{- $config := omit (include "hugegraph.seatunnel.config" . | fromYaml) "seatunnel.yaml" }}
+{{- $svc := .Values.seatunnel.service }}
+{{- $env := list
+  (dict "name" "SEATUNNEL_HOME" "value" "/opt/seatunnel")
+  (dict "name" "HG_HOST" "value" (printf "%s.%s.svc" (include "hugegraph.server.name" .) .Release.Namespace))
+  (dict "name" "HG_PORT" "value" (.Values.server.port | toString))
+  (dict "name" "HG_PROTOCOL" "value" "http")
+  (dict "name" "HG_USERNAME" "value" "admin")
+  (dict "name" "HG_GRAPH_SPACE" "value" .Values.server.graphSpace)
+  (dict "name" "HG_GRAPH_NAME" "value" "graph_a") }}
+{{- $password := dict "name" "HG_PASSWORD" "value" "" }}
+{{- if .Values.server.auth.enabled }}
+{{- $password = dict "name" "HG_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict
+  "name" (include "hugegraph.server.authSecretName" .)
+  "key" (include "hugegraph.server.authSecretKey" .))) }}
+{{- end }}
+{{- $env = append $env $password }}
+{{- $overrides := dict }}
+{{- range .Values.seatunnel.env }}
+{{- $_ := set $overrides .name true }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-configs
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+data:
+  {{- toYaml $config | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: hazelcast
+      port: 5801
+      targetPort: hazelcast
+  selector:
+    {{- include "hugegraph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    {{- include "hugegraph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seatunnel
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: {{ ternary 1 (int .Values.seatunnel.replicas) (eq .Values.seatunnel.mode "standalone") }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: seatunnel
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: seatunnel
+      annotations:
+        checksum/config: {{ $config | toYaml | sha256sum }}
+        checksum/auth: {{ include "hugegraph.seatunnel.engineConfig" . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.seatunnel.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.seatunnel.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.seatunnel.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.seatunnel.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.seatunnel.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: seatunnel
+          image: {{ include "hugegraph.image" (dict "image" .Values.seatunnel.image "appVersion" "3.0.0") | quote }}
+          imagePullPolicy: {{ .Values.seatunnel.image.pullPolicy }}
+          {{- with .Values.seatunnel.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The default upstream role is hybrid; an explicit -r is unnecessary.
+          command: ["/opt/seatunnel/bin/seatunnel-cluster.sh"]
+          env:
+            {{- range $env }}
+            {{- if not (hasKey $overrides .name) }}
+            {{- toYaml (list .) | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.seatunnel.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: hazelcast
+              containerPort: 5801
+          {{- with .Values.seatunnel.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: hazelcast
+            periodSeconds: 30
+            timeoutSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/opt/seatunnel/bin/stop-seatunnel-cluster.sh"]
+          volumeMounts:
+            - name: seatunnel-auth
+              mountPath: /opt/seatunnel/config/seatunnel.yaml
+              subPath: seatunnel.yaml
+            {{- range $filename, $_ := $config }}
+            - name: seatunnel-configs
+              mountPath: /opt/seatunnel/config/{{ $filename }}
+              subPath: {{ $filename }}
+            {{- end }}
+      volumes:
+        - name: seatunnel-auth
+          secret:
+            secretName: {{ include "hugegraph.seatunnel.authSecretName" . }}
+            items:
+              - key: seatunnel.yaml
+                path: seatunnel.yaml
+        - name: seatunnel-configs
+          configMap:
+            name: {{ $name }}-configs
+{{- end }}

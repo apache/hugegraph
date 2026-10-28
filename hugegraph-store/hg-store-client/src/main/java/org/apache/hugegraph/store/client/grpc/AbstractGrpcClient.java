@@ -19,13 +19,10 @@ package org.apache.hugegraph.store.client.grpc;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 
-import org.apache.hugegraph.store.client.util.ExecutorPool;
 import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
 import org.apache.hugegraph.store.term.HgPair;
 
@@ -47,12 +44,6 @@ public abstract class AbstractGrpcClient {
             new ConcurrentHashMap<>();
     private final Map<String, HgPair<ManagedChannel, AbstractAsyncStub>[]> asyncStubs =
             new ConcurrentHashMap<>();
-    private final ThreadPoolExecutor executor;
-
-    {
-        executor = ExecutorPool.createExecutor("common", 60, concurrency, concurrency);
-    }
-
     public AbstractGrpcClient() {
 
     }
@@ -62,30 +53,37 @@ public abstract class AbstractGrpcClient {
         if ((tc = channels.get(target)) == null) {
             synchronized (channels) {
                 if ((tc = channels.get(target)) == null) {
+                    ManagedChannel[] value = new ManagedChannel[concurrency];
                     try {
-                        ManagedChannel[] value = new ManagedChannel[concurrency];
-                        CountDownLatch latch = new CountDownLatch(concurrency);
+                        // Keep lazy initialization on the calling thread. Offloading a
+                        // customizable channel builder loses the caller's security context.
                         for (int i = 0; i < concurrency; i++) {
-                            int fi = i;
-                            executor.execute(() -> {
-                                try {
-                                    value[fi] = createChannel(target);
-                                } catch (Exception e) {
-                                    throw new RuntimeException(e);
-                                } finally {
-                                    latch.countDown();
-                                }
-                            });
+                            value[i] = createChannel(target);
                         }
-                        latch.await();
                         channels.put(target, tc = value);
-                    } catch (Exception e) {
+                    } catch (RuntimeException e) {
+                        closeChannels(value, e);
                         throw new RuntimeException(e);
+                    } catch (Error e) {
+                        closeChannels(value, e);
+                        throw e;
                     }
                 }
             }
         }
         return tc;
+    }
+
+    private static void closeChannels(ManagedChannel[] value, Throwable failure) {
+        for (ManagedChannel channel : value) {
+            if (channel != null) {
+                try {
+                    channel.shutdownNow();
+                } catch (RuntimeException | Error closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+        }
     }
 
     public abstract AbstractBlockingStub getBlockingStub(ManagedChannel channel);
@@ -152,7 +150,7 @@ public abstract class AbstractGrpcClient {
                 ManagedChannel[] currentChannels = channels;
                 HgPair<ManagedChannel, AbstractAsyncStub>[] value =
                         new HgPair[concurrency];
-                IntStream.range(0, concurrency).parallel().forEach(i -> {
+                IntStream.range(0, concurrency).forEach(i -> {
                     ManagedChannel channel = currentChannels[i];
                     AbstractAsyncStub stub = getAsyncStub(channel);
                     value[i] = new HgPair<>(channel, stub);

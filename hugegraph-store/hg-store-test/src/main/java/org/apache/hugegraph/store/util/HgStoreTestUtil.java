@@ -403,9 +403,9 @@ public class HgStoreTestUtil {
                 break;
             }
         }
-        if (iterator instanceof Closeable) {
+        if (iterator instanceof Closeable closeable) {
             try {
-                ((Closeable) iterator).close();
+                closeable.close();
             } catch (Exception e) {
                 e.printStackTrace();
             }

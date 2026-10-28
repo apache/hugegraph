@@ -206,17 +206,13 @@ public class StoreAPIReadyTest {
         return (Node) Proxy.newProxyInstance(
                 Node.class.getClassLoader(), new Class<?>[]{Node.class},
                 (proxy, method, args) -> {
-                    switch (method.getName()) {
-                        case "toString":
-                            return "untouchable raft node";
-                        case "hashCode":
-                            return System.identityHashCode(proxy);
-                        case "equals":
-                            return proxy == args[0];
-                        default:
-                            throw new AssertionError("the ready path must not touch the raft " +
-                                                     "node, it called " + method.getName());
-                    }
+                    return switch (method.getName()) {
+                        case "toString" -> "untouchable raft node";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == args[0];
+                        default -> throw new AssertionError("the ready path must not touch the raft " +
+                                                 "node, it called " + method.getName());
+                    };
                 });
     }
 }

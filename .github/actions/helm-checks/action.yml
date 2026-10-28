@@ -38,10 +38,26 @@ runs:
       helm lint helm/hugegraph -f helm/hugegraph/values-single.yaml
       helm lint helm/hugegraph -f helm/hugegraph/values-cluster.yaml
       helm lint helm/hugegraph -f helm/hugegraph/values-strict.yaml
+      helm lint helm/hugegraph -f helm/hugegraph/examples/values-seatunnel-standalone.yaml
+      helm lint helm/hugegraph -f helm/hugegraph/examples/values-seatunnel-cluster.yaml
+      helm lint helm/hugegraph --set vermeer.enabled=true
+      helm lint helm/hugegraph --set vermeer.enabled=true --set vermeer.mode=cluster --set mode=strict
 
   - name: packaged chart regression
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_package.py' -v
+
+  - name: SeaTunnel integration regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_seatunnel.py' -v
+
+  - name: Vermeer integration regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_vermeer*.py' -v
+
+  - name: Shared metadata namespace regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_metadata_cluster.py' -v
 
   - name: helm unittest
     shell: 'bash -e {0}'
@@ -56,7 +72,9 @@ runs:
   - name: helm template
     shell: 'bash -e {0}'
     run: |
-      for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml"; do
+      for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml" \
+        "-f helm/hugegraph/examples/values-seatunnel-standalone.yaml" "-f helm/hugegraph/examples/values-seatunnel-cluster.yaml" \
+        "--set vermeer.enabled=true" "--set vermeer.enabled=true --set vermeer.mode=cluster --set mode=strict"; do
         # shellcheck disable=SC2086 # $preset intentionally splits into flags
         helm template ci helm/hugegraph $preset > /dev/null
       done
@@ -493,7 +511,9 @@ runs:
       curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
       echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kc.tar.gz" | sha256sum -c -
       tar -xzf /tmp/kc.tar.gz -C /tmp
-      for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml"; do
+      for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml" \
+        "-f helm/hugegraph/examples/values-seatunnel-standalone.yaml" "-f helm/hugegraph/examples/values-seatunnel-cluster.yaml" \
+        "--set vermeer.enabled=true" "--set vermeer.enabled=true --set vermeer.mode=cluster --set mode=strict"; do
         # shellcheck disable=SC2086 # $preset intentionally splits into flags
         helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
       done
@@ -527,7 +547,13 @@ runs:
       cp -R helm/hugegraph "$LEGACY_ROOT/chart"
       cp helm/hugegraph/testdata/values-pre-hardening.yaml "$LEGACY_ROOT/chart/values.yaml"
       helm template legacy "$LEGACY_ROOT/chart" > /dev/null
-      helm template legacy "$LEGACY_ROOT/chart" --is-upgrade > /dev/null
+      LEGACY_UPGRADE=$(helm template legacy "$LEGACY_ROOT/chart" --is-upgrade)
+      # The non-root PD and Store images need fsGroup on their data volumes
+      # even when the reused values predate that default.
+      [ "$(grep -c 'fsGroup: 10001' <<<"$LEGACY_UPGRADE")" -eq 2 ] || {
+        echo "PD and Store must keep fsGroup 10001 under --reuse-values"
+        exit 1
+      }
 
   - name: helm package
     shell: 'bash -e {0}'

@@ -17,8 +17,13 @@
 
 package org.apache.hugegraph.job.algorithm;
 
+import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.config.CoreOptions;
@@ -115,6 +120,57 @@ public class AlgorithmConsumerLifecycleTest {
         }
     }
 
+    @Test(timeout = 15000)
+    public void testInterruptedProducerFailsTraversalAndClosesCursor() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch lastRead = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicInteger processed = new AtomicInteger();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        // One active item and a full worker queue leave the last item unaccepted.
+        TestCursor cursor = new TestCursor(Consumers.QUEUE_WORKER_SIZE + 3);
+        cursor.lastRead = lastRead::countDown;
+        TestTraverser traverser = new TestTraverser(newJob(), cursor);
+        Thread producer = new Thread(() -> {
+            try {
+                traverser.traverse(null, null, vertex -> {
+                    processed.incrementAndGet();
+                    entered.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, completed::countDown);
+            } catch (Throwable e) {
+                failure.set(e);
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        }, "algorithm-producer-interrupt-test");
+        try {
+            producer.start();
+            Assert.assertTrue(entered.await(5L, TimeUnit.SECONDS));
+            Assert.assertTrue(lastRead.await(5L, TimeUnit.SECONDS));
+            producer.interrupt();
+            producer.join(5000L);
+            Assert.assertFalse(producer.isAlive());
+            Assert.assertTrue(failure.get() instanceof HugeException);
+            Assert.assertTrue(HugeException.rootCause(failure.get()) instanceof InterruptedException);
+            Assert.assertTrue(interrupted.get());
+            Assert.assertEquals(1, cursor.closes);
+            Assert.assertTrue(completed.await(5L, TimeUnit.SECONDS));
+            Assert.assertEquals(1, processed.get());
+        } finally {
+            release.countDown();
+            producer.interrupt();
+            producer.join(5000L);
+            traverser.executor.shutdownNow();
+            Assert.assertTrue(traverser.executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static UserJob<Object> newJob() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
@@ -160,10 +216,19 @@ public class AlgorithmConsumerLifecycleTest {
     private static final class TestCursor implements CloseableIterator<Vertex> {
 
         private final Vertex vertex = Mockito.mock(Vertex.class);
-        private final Iterator<Vertex> vertices = List.of(this.vertex).iterator();
+        private final Iterator<Vertex> vertices;
+        private Runnable lastRead;
         private RuntimeException readFailure;
         private RuntimeException closeFailure;
         private int closes;
+
+        private TestCursor() {
+            this(1);
+        }
+
+        private TestCursor(int count) {
+            this.vertices = Collections.nCopies(count, this.vertex).iterator();
+        }
 
         @Override
         public boolean hasNext() {
@@ -175,7 +240,11 @@ public class AlgorithmConsumerLifecycleTest {
 
         @Override
         public Vertex next() {
-            return this.vertices.next();
+            Vertex next = this.vertices.next();
+            if (!this.vertices.hasNext() && this.lastRead != null) {
+                this.lastRead.run();
+            }
+            return next;
         }
 
         @Override

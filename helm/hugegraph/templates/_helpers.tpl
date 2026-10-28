@@ -19,9 +19,31 @@
 {{- define "hugegraph.resolveValues" -}}
 {{- if not (get .Values "__hugegraphResolved") -}}
 {{- $_ := set .Values "__hugegraphResolved" true -}}
+{{/* Old official Server images use hg-test when no cluster is configured. */}}
+{{- if not (hasKey .Values "metadataCluster") -}}
+{{- $_ := set .Values "metadataCluster" "hg-test" -}}
+{{- end -}}
 {{- $legacy := not (hasKey .Values "mode") -}}
 {{- if not (hasKey .Values "hubble") -}}
 {{- $_ := set .Values "hubble" (dict "enabled" false "service" dict "persistence" dict) -}}
+{{- end -}}
+{{- if not (hasKey .Values "seatunnel") -}}
+{{- $_ := set .Values "seatunnel" (dict "enabled" false "service" dict) -}}
+{{- end -}}
+{{- if not (hasKey .Values "vermeer") -}}
+{{- $_ := set .Values "vermeer" (dict "enabled" false "service" dict) -}}
+{{- end -}}
+{{/* --reuse-values can combine an old release with only vermeer.enabled=true.
+Fail before dereferencing missing blocks; keep values.yaml the sole defaults source. */}}
+{{- if .Values.vermeer.enabled -}}
+{{- range $key := list "mode" "image" "auth" "hugegraphCredentials" "master" "worker" "probes" "terminationGracePeriodSeconds" "podLabels" "podAnnotations" -}}
+{{- if not (hasKey $.Values.vermeer $key) -}}
+{{- fail (printf "vermeer is missing new chart defaults (%s): legacy --reuse-values does not import newly added settings. Export and review existing effective values with helm get values --all -o yaml, then upgrade with -f existing-values.yaml --set vermeer.enabled=true without --reuse-values so Helm merges the new defaults" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.vermeer.enabled (not (hasKey .Values.vermeer.auth "admin")) -}}
+{{- fail "vermeer.auth.admin is missing new chart defaults: export and review existing effective values, then upgrade with -f existing-values.yaml without --reuse-values so Helm imports the admin login defaults" -}}
 {{- end -}}
 {{- $strict := eq (.Values.mode | default "easy") "strict" -}}
 {{- $serviceType := ternary "ClusterIP" "NodePort" (or $strict $legacy) -}}
@@ -32,6 +54,14 @@
 {{- $typeInherited := or (not (hasKey $svc "type")) (eq (get $svc "type" | toString) "<nil>") -}}
 {{- $_ := set $component "__serviceTypeInherited" $typeInherited -}}
 {{- if $typeInherited -}}{{- $_ := set $svc "type" $serviceType -}}{{- end -}}
+{{- end -}}
+{{- range $comp := list "seatunnel" "vermeer" -}}
+{{- $component := get $.Values $comp -}}
+{{- $svc := get $component "service" | default dict -}}
+{{- $_ := set $component "service" $svc -}}
+{{- if or (not (hasKey $svc "type")) (eq (get $svc "type" | toString) "<nil>") -}}
+{{- $_ := set $svc "type" "ClusterIP" -}}
+{{- end -}}
 {{- end -}}
 {{- $np := .Values.networkPolicy | default dict -}}
 {{- $_ := set .Values "networkPolicy" $np -}}
@@ -45,10 +75,18 @@
 {{- $_ := set $component $key $storage -}}
 {{- if or (not (hasKey $storage "enabled")) (eq (get $storage "enabled" | toString) "<nil>") -}}{{- $_ := set $storage "enabled" $persistent -}}{{- end -}}
 {{- end -}}
+{{- if .Values.vermeer.enabled -}}
+{{- range $role := list "master" "worker" -}}
+{{- $storage := get (get $.Values.vermeer $role) "storage" -}}
+{{- if or (not (hasKey $storage "enabled")) (eq (get $storage "enabled" | toString) "<nil>") -}}
+{{- $_ := set $storage "enabled" $persistent -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $registry := trimSuffix "/" (get (.Values.global | default dict) "imageRegistry" | default "") -}}
 {{- if contains "://" $registry -}}{{- fail "global.imageRegistry must be a registry host/path without http:// or https://" -}}{{- end -}}
 {{- if $registry -}}
-{{- range $comp := list "pd" "store" "server" "hubble" -}}
+{{- range $comp := list "pd" "store" "server" "hubble" "seatunnel" "vermeer" -}}
 {{- $image := get (get $.Values $comp) "image" | default dict -}}
 {{- if $image -}}
 {{- $_ := set $image "repository" (include "hugegraph.registryImage" (dict "reference" $image.repository "registry" $registry)) -}}
@@ -158,6 +196,22 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- printf "%s-hubble-data" (include "hugegraph.fullname" . | trunc 51 | trimSuffix "-") }}
 {{- end }}
 
+{{/*
+PD and Store pod securityContext. The images run as UID/GID 10001, so their data
+volumes need fsGroup 10001. Apply it here as well as in values.yaml: --reuse-values
+keeps a pre-existing release's empty value. An explicit fsGroup is kept as set.
+*/}}
+{{- define "hugegraph.dataPodSecurityContext" -}}
+{{- $context := deepCopy (. | default dict) -}}
+{{- if not (hasKey $context "fsGroup") -}}
+{{- $_ := set $context "fsGroup" 10001 -}}
+{{- if not (hasKey $context "fsGroupChangePolicy") -}}
+{{- $_ := set $context "fsGroupChangePolicy" "OnRootMismatch" -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $context -}}
+{{- end }}
+
 {{- define "hugegraph.test.name" -}}
 {{- printf "%s-test-connection" (include "hugegraph.fullname" . | trunc 47 | trimSuffix "-") }}
 {{- end }}
@@ -217,7 +271,7 @@ next render finds the Secret through lookup instead).
 {{- define "hugegraph.generatedCredential" -}}
 {{- if not (hasKey .root.Values "__generatedCredentials") -}}{{- $_ := set .root.Values "__generatedCredentials" dict -}}{{- end -}}
 {{- $memo := get .root.Values "__generatedCredentials" -}}
-{{- if not (hasKey $memo .name) -}}{{- $_ := set $memo .name (randAlphaNum 32) -}}{{- end -}}
+{{- if not (hasKey $memo .name) -}}{{- $_ := set $memo .name (randAlphaNum (int (get . "length" | default 32))) -}}{{- end -}}
 {{- get $memo .name -}}
 {{- end }}
 
@@ -734,6 +788,28 @@ Cross-field validation that JSON Schema draft-07 cannot express.
 */}}
 {{- define "hugegraph.validateValues" -}}
 {{- include "hugegraph.resolveValues" . -}}
+{{- include "hugegraph.nativeServices.validate" . -}}
+{{- include "hugegraph.metadataCluster.validate" . -}}
+{{- include "hugegraph.vermeer.validate" . -}}
+{{- if (.Values.seatunnel | default dict).enabled -}}
+{{- if not (has .Values.seatunnel.mode (list "standalone" "cluster")) -}}
+{{- fail "seatunnel.mode must be standalone or cluster" -}}
+{{- end -}}
+{{- if and (eq .Values.seatunnel.mode "cluster") (lt (int .Values.seatunnel.replicas) 2) -}}
+{{- fail "seatunnel.replicas must be at least 2 in cluster mode" -}}
+{{- end -}}
+{{- end -}}
+
+{{- include "hugegraph.resolveValues" . -}}
+{{- if (.Values.seatunnel | default dict).enabled -}}
+{{- $svc := .Values.seatunnel.service -}}
+{{- range $key := list "username" "password" -}}
+{{- $value := get ($.Values.seatunnel.auth | default dict) $key | default "" -}}
+{{- if or (ne $value (trim $value)) (contains "${" $value) -}}
+{{- fail (printf "seatunnel.auth.%s cannot contain ${...} placeholders or leading/trailing whitespace: native Engine YAML expands or trims them" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $startupBudget := include "hugegraph.server.startupProbeBudget" . | int -}}
 {{- if lt $startupBudget (add (int .Values.server.storageWaitTimeoutSeconds) 120) -}}
 {{- fail "server.probes.startup.failureThreshold and periodSeconds must leave at least server.storageWaitTimeoutSeconds + 120 seconds to wait for storage and start Server; increase the probe budget or reduce server.storageWaitTimeoutSeconds" -}}
@@ -952,9 +1028,9 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 */}}
 {{- $reservedEnv := dict
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
-      "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "POD_IP" "HG_SERVER_SERVICE_ID" "HG_SERVER_GRAPHSPACE" "SERVICE_ID" "GRAPH_SPACE" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_DEPLOY_IN_K8S" "HG_SERVER_STARTUP_TIMEOUT_S" "WAIT_STORAGE_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
-      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
+      "store" (list "PD_CLUSTER" "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "HG_SERVER_CLUSTER" "POD_IP" "HG_SERVER_SERVICE_ID" "HG_SERVER_GRAPHSPACE" "SERVICE_ID" "GRAPH_SPACE" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_DEPLOY_IN_K8S" "HG_SERVER_STARTUP_TIMEOUT_S" "WAIT_STORAGE_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
 {{- range $entry := get $componentValues "extraEnv" | default list -}}
@@ -1028,6 +1104,22 @@ resolver (CoreDNS in any namespace, NodeLocal DNSCache).
 {{- join "\n" $rules -}}
 {{- end }}
 
+{{/* Native SeaTunnel resources belong to this HugeGraph release. */}}
+{{- define "hugegraph.seatunnel.name" -}}
+{{- printf "%s-seatunnel" (include "hugegraph.fullname" . | trunc 44 | trimSuffix "-") -}}
+{{- end }}
+
+{{- define "hugegraph.netpol.seatunnelLabels" -}}
+{{ include "hugegraph.selectorLabels" . }}
+app.kubernetes.io/component: seatunnel
+{{- end }}
+
+{{- define "hugegraph.netpol.seatunnelPeer" -}}
+- podSelector:
+    matchLabels:
+      {{- include "hugegraph.netpol.seatunnelLabels" . | nindent 6 }}
+{{- end }}
+
 {{- define "hugegraph.netpol.dns" -}}
 - ports:
     - protocol: UDP
@@ -1076,4 +1168,245 @@ over tag; otherwise fall back to tag, then to the chart appVersion. Takes a dict
 {{- else -}}
 {{- printf "%s:%s" $img.repository (default .appVersion $img.tag) -}}
 {{- end -}}
+{{- end }}
+
+{{/* Native Vermeer identities stay stable across standalone/cluster mode changes. */}}
+{{- define "hugegraph.vermeer.masterName" -}}
+{{- printf "%s-vermeer-master" (include "hugegraph.fullname" . | trunc 39 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.workerName" -}}
+{{- printf "%s-vermeer-worker" (include "hugegraph.fullname" . | trunc 44 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.configName" -}}
+{{- printf "%s-vermeer-config" (include "hugegraph.fullname" . | trunc 48 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.standaloneWorkerDataName" -}}
+{{- printf "%s-vermeer-standalone-worker-data" (include "hugegraph.fullname" . | trunc 31 | trimSuffix "-") -}}
+{{- end }}
+{{/* Stable signing factor and rollout checksum; external Secrets contribute their revision. */}}
+{{- define "hugegraph.vermeer.authSecretName" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- $existing := get $auth "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $existing -}}
+{{- else -}}
+{{- printf "%s-vermeer-auth" (.Release.Name | trunc 50 | trimSuffix "-") -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authSecretKey" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- get $auth "key" | default "token-factor" -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authSecretValue" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- $value := get $auth "value" | default "" -}}
+{{- if $value -}}
+{{- $value | b64enc -}}
+{{- else -}}
+{{- $name := include "hugegraph.vermeer.authSecretName" . -}}
+{{- $key := include "hugegraph.vermeer.authSecretKey" . -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- include "hugegraph.generatedCredential" (dict "root" . "name" "vermeer-auth") | b64enc -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authChecksum" -}}
+{{- $parts := list (include "hugegraph.vermeer.authSecretName" .) (include "hugegraph.vermeer.authSecretKey" .) -}}
+{{- $authCfg := get .Values.vermeer "auth" | default dict -}}
+{{- $inline := get $authCfg "value" | default "" -}}
+{{- $existing := get $authCfg "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $existing -}}
+{{- if $secret -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $secret) -}}{{- end -}}
+{{- else if $inline -}}
+{{- $parts = append $parts (sha256sum $inline) -}}
+{{- else -}}
+{{- $parts = append $parts (include "hugegraph.vermeer.authSecretValue" . | b64dec | sha256sum) -}}
+{{- end -}}
+{{- join "|" $parts | sha256sum -}}
+{{- end }}
+
+
+{{- define "hugegraph.vermeer.validate" -}}
+{{- if (.Values.vermeer | default dict).enabled -}}
+{{- $v := .Values.vermeer -}}
+{{- $admin := $v.auth.admin -}}
+{{- if and (not $admin.existingSecret) (not $admin.password) (not $admin.autoGenerate) -}}
+{{- fail "vermeer.auth.admin requires existingSecret, password, or autoGenerate=true" -}}
+{{- end -}}
+{{- if and $admin.password (or (eq (trim $admin.password) "") (contains "\n" $admin.password) (contains "\r" $admin.password)) -}}
+{{- fail "vermeer.auth.admin.password must be one nonblank UTF-8 line; whitespace is preserved" -}}
+{{- end -}}
+{{- if and .Values.hubble.enabled (ne (.Values.hubble.mode | default "pd") "pd") -}}
+{{- fail "vermeer.enabled with Hubble requires hubble.mode=pd for graph-space discovery; disable Hubble to use Vermeer independently" -}}
+{{- end -}}
+{{- if .Values.hubble.enabled -}}
+{{- $hubbleContainer := .Values.hubble.securityContext | default dict -}}
+{{- $hubblePod := .Values.hubble.podSecurityContext | default dict -}}
+{{- $nonRoot := get $hubblePod "runAsNonRoot" | default false -}}
+{{- if hasKey $hubbleContainer "runAsNonRoot" -}}{{- $nonRoot = get $hubbleContainer "runAsNonRoot" -}}{{- end -}}
+{{- if and $nonRoot (le (int (include "hugegraph.hubble.vermeerUid" .)) 0) -}}
+{{- fail "Vermeer token files require an explicit positive hubble.securityContext.runAsUser or hubble.podSecurityContext.runAsUser when runAsNonRoot=true" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has $v.mode (list "standalone" "cluster")) -}}
+{{- fail "vermeer.mode must be standalone or cluster" -}}
+{{- end -}}
+{{- if ne .Values.server.backend "hstore" -}}
+{{- fail "vermeer.enabled requires server.backend=hstore" -}}
+{{- end -}}
+{{- if and (not $v.auth.existingSecret) (not $v.auth.value) (not $v.auth.autoGenerate) -}}
+{{- fail "vermeer.auth requires existingSecret, value, or autoGenerate=true" -}}
+{{- end -}}
+{{- if and (not $v.image.tag) (not $v.image.digest) -}}
+{{- fail "vermeer.image needs a tag or digest matching the file-credential and token-helper interface" -}}
+{{- end -}}
+{{- $ports := list (int $v.master.httpPort) (int $v.master.grpcPort) (int $v.worker.httpPort) (int $v.worker.grpcPort) -}}
+{{- if ne (len (uniq $ports)) 4 -}}
+{{- fail "vermeer master and worker HTTP/gRPC ports must be distinct" -}}
+{{- end -}}
+{{- range $reserved := list "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" -}}
+{{- if hasKey $v.podLabels $reserved -}}
+{{- fail (printf "vermeer.podLabels must not set %s" $reserved) -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $_ := $v.podAnnotations -}}
+{{- if hasPrefix "checksum/" $key -}}{{- fail "vermeer.podAnnotations must not set checksum/ annotations" -}}{{- end -}}
+{{- end -}}
+{{- range $role := list "master" "worker" -}}
+{{- range $entry := (get $v $role).extraEnv -}}
+{{- if has $entry.name (list "POD_IP" "VERMEER_AUTH_TOKEN_FACTOR_FILE" "VERMEER_ADMIN_PASSWORD_FILE" "VERMEER_PD_PASSWORD_FILE" "VERMEER_PD_PEERS" "VERMEER_HUGEGRAPH_USERNAME" "VERMEER_HUGEGRAPH_PASSWORD_FILE" "VERMEER_HUGEGRAPH_CREDENTIALS_FILE") -}}
+{{- fail (printf "vermeer.%s.extraEnv must not set chart-managed variable %s" $role $entry.name) -}}
+{{- end -}}
+{{- end -}}
+{{- if $.Release.IsUpgrade -}}
+{{- $name := include "hugegraph.vermeer.masterName" $ -}}
+{{- if eq $role "worker" -}}{{- $name = include "hugegraph.vermeer.workerName" $ -}}{{- end -}}
+{{- $live := lookup "apps/v1" "StatefulSet" $.Release.Namespace $name -}}
+{{- if $live -}}
+{{- $wasPersistent := false -}}
+{{- range $claim := dig "spec" "volumeClaimTemplates" list $live -}}
+{{- if eq (dig "metadata" "name" "" $claim) (printf "%s-data" $role) -}}{{- $wasPersistent = true -}}{{- end -}}
+{{- end -}}
+{{- if ne $wasPersistent (get (get $v $role) "storage").enabled -}}
+{{- fail (printf "vermeer.%s.storage.enabled cannot change on an initialized release; migrate retained data into a fresh workload" $role) -}}
+{{- end -}}
+{{- if eq $role "master" -}}
+{{- range $volume := dig "spec" "template" "spec" "volumes" list $live -}}
+{{- if and (eq $v.mode "standalone") (eq (get $volume "name") "worker-data") -}}
+{{- $workerPersistent := hasKey $volume "persistentVolumeClaim" -}}
+{{- if ne $workerPersistent $v.worker.storage.enabled -}}
+{{- fail "vermeer.worker.storage.enabled cannot change on an initialized standalone release; migrate retained data first" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Server owns the initialized namespace; Store must use that same PD key prefix. */}}
+{{- define "hugegraph.metadataCluster.validate" -}}
+{{- if regexMatch "(^|[[:space:]\"'])-Dpd[.]cluster(=|[[:space:]\"']|$)" (.Values.store.javaOpts | default "") -}}
+{{- fail "store.javaOpts must not set -Dpd.cluster; use shared metadataCluster so Server and Store read the same PD metadata namespace" -}}
+{{- end -}}
+{{- if .Release.IsUpgrade -}}
+{{- $live := lookup "apps/v1" "Deployment" .Release.Namespace (include "hugegraph.server.name" .) -}}
+{{- if $live -}}
+{{- $desired := .Values.metadataCluster -}}
+{{- $record := dig "metadata" "annotations" "hugegraph.apache.org/metadata-cluster" "" $live -}}
+{{- if and $record (ne $record $desired) -}}
+{{- fail "metadataCluster cannot change from the recorded Server metadata namespace: changing PD keys does not migrate existing metadata; retain the initialized value" -}}
+{{- end -}}
+{{- $observed := dict "explicit" false "unknown" false -}}
+{{- range $container := dig "spec" "template" "spec" "containers" list $live -}}
+{{- if eq (get $container "name") "server" -}}
+{{- range $entry := get $container "env" | default list -}}
+{{- if eq (get $entry "name") "HG_SERVER_CLUSTER" -}}
+{{- $_ := set $observed "explicit" true -}}
+{{- if hasKey $entry "valueFrom" -}}
+{{- $_ := set $observed "unknown" true -}}
+{{- else if ne (get $entry "value" | default "") $desired -}}
+{{- fail "metadataCluster cannot change from the existing Server HG_SERVER_CLUSTER value: changing PD keys does not migrate existing metadata; retain the initialized value" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not $record) (or (get $observed "unknown") (and (not (get $observed "explicit")) (ne $desired "hg-test"))) -}}
+{{- fail "metadataCluster adoption cannot verify the legacy Server namespace. First inspect the existing Server logs/configuration and record that same verified value in its hugegraph.apache.org/metadata-cluster Deployment annotation; then retain it as metadataCluster. This records existing metadata and does not migrate PD keys" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Native engines have no public Service entry, regardless of easy/strict mode. */}}
+{{- define "hugegraph.nativeServices.validate" -}}
+{{- range $component := list "seatunnel" "vermeer" -}}
+{{- $values := get $.Values $component | default dict -}}
+{{- if get $values "enabled" -}}
+{{- $svc := get $values "service" | default dict -}}
+{{- if ne (get $svc "type") "ClusterIP" -}}
+{{- fail (printf "%s.service must remain ClusterIP; native engines are accessed through authenticated internal callers or port-forward" $component) -}}
+{{- end -}}
+{{- if and (hasKey $svc "nodePort") (ne (get $svc "nodePort") nil) -}}
+{{- fail (printf "%s.service.nodePort is not supported for internal native engines" $component) -}}
+{{- end -}}
+{{- range $field := list "externalIPs" "externalTrafficPolicy" "loadBalancerClass" "loadBalancerIP" "loadBalancerSourceRanges" "allocateLoadBalancerNodePorts" -}}
+{{- if hasKey $svc $field -}}
+{{- fail (printf "%s.service.%s is not supported for internal native engines" $component $field) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Native UI password is distinct from the internal HMAC signing factor. */}}
+{{- define "hugegraph.vermeer.adminSecretName" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- if $admin.existingSecret -}}{{- $admin.existingSecret -}}
+{{- else -}}{{- printf "%s-vermeer-admin" (.Release.Name | trunc 49 | trimSuffix "-") -}}{{- end -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminSecretKey" -}}
+{{- .Values.vermeer.auth.admin.key | default "password" -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminSecretValue" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- $name := include "hugegraph.vermeer.adminSecretName" . -}}
+{{- $key := include "hugegraph.vermeer.adminSecretKey" . -}}
+{{- if $admin.existingSecret -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}{{- get (get $secret "data") $key -}}{{- end -}}
+{{- else if $admin.password -}}
+{{- $admin.password | b64enc -}}
+{{- else -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- $length := ternary 16 6 (eq (.Values.mode | default "easy") "strict") -}}
+{{- include "hugegraph.generatedCredential" (dict "root" . "name" "vermeer-admin" "length" $length) | b64enc -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminChecksum" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- $parts := list (include "hugegraph.vermeer.adminSecretName" .) (include "hugegraph.vermeer.adminSecretKey" .) -}}
+{{- if $admin.existingSecret -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $admin.existingSecret -}}
+{{- if $secret -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $secret) -}}{{- end -}}
+{{- else if $admin.password -}}
+{{- $parts = append $parts (sha256sum $admin.password) -}}
+{{- else -}}
+{{- $parts = append $parts (include "hugegraph.vermeer.adminSecretValue" . | b64dec | sha256sum) -}}
+{{- end -}}
+{{- join "|" $parts | sha256sum -}}
 {{- end }}

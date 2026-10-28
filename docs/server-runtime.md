@@ -30,6 +30,30 @@ component files. CI checks positive-test and startup logs for Java module-access
 errors and unsupported JVM options, including errors printed without failing the
 operation.
 
+### Gremlin and HStore transport reconnection
+
+The Gremlin security manager permits reads of the gRPC shaded Netty boolean property
+`io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator` and the DNS cache setting
+`networkaddress.cache.ttl`. gRPC reads these settings when it builds a DNS resolver or
+rebuilds a transport, including after a PD or Store restart during a Gremlin request.
+Gremlin cannot set or clear these system properties. It also cannot change the separate
+JDK security property `networkaddress.cache.ttl` through `java.security.Security.setProperty`.
+Trusted code outside Gremlin can still configure these settings. Sensitive system
+properties such as `user.home` remain unreadable from Gremlin.
+
+HStore constructs each target's lazy channel and stub pools on the calling thread so
+initialization retains the caller's Gremlin security context. The client publishes
+the pool after all channels are constructed. If construction throws a runtime exception
+or an error, it closes the partial pool and reports the failure; a subsequent request can retry.
+Cleanup failures are retained as suppressed exceptions, and an original error is rethrown
+unchanged. RPC transport work remains asynchronous. This change does not grant Gremlin permission to create
+threads or thread groups.
+
+The shared gRPC framework and provider discovery initialize during normal PD/framework
+bootstrap before Server accepts Gremlin requests. This does not initialize the pools
+for every future Store target. Unit checks that obtain a stub verify lazy pool
+construction; a successful RPC and its readback are separate runtime checks.
+
 ### Launcher GC options
 
 Use `bin/start-hugegraph.sh -g g1` (or `-g G1`) to select G1 explicitly.
@@ -920,6 +944,13 @@ configuration write, not a required automatic migration. Until then PD
 `GET /graph-spaces` can report mixed limit units. Storage enforcement reads the
 Server configuration and is unaffected by the stale PD reporting field.
 
+Each Server refreshes its cached graph-space configuration on metadata ADD and
+UPDATE notifications. This includes quota edits, whose REST path can emit ADD for
+an existing space. Notifications carry the space name; the receiver reads current
+metadata so delayed or repeated events do not restore earlier limits. Refresh follows
+asynchronous metadata delivery, not a synchronous consistency guarantee. Upgrade all
+Server replicas to receive these refreshes when requests are routed among them.
+
 After a graph space is deleted, each Server evicts its cached space and service
 entries on the metadata removal event. Peers do not repeat destructive backend
 cleanup or delete shared metadata when handling that notification. A delayed event
@@ -945,7 +976,7 @@ that field. Responses retain the raw zero marker so editing clients can preserve
 The bootstrapped `DEFAULT` space keeps explicit compute limits of 128 cores / 128 GB;
 existing positive compute limits are not converted to inheritance.
 Upgrade the Java client together with the Server before sending partial space
-updates (paired [Toolchain change](https://github.com/apache/hugegraph-toolchain/pull/834)).
+updates. The client must preserve the distinction between omitted fields and explicit zeros.
 Older clients send zero for omitted compute fields; the new Server interprets an
 explicit zero as restoring inheritance and cannot distinguish that from an omitted
 SDK property. Until clients are upgraded, use read-modify-write and explicitly send
@@ -954,12 +985,56 @@ When OLTP and OLAP share a Kubernetes namespace, their quotas are added together
 separate namespaces receive the respective resource limits.
 
 The graph-count limit is enforced: after 100 graphs, creating another graph fails with
-`reach graph limit`. Storage enforcement currently reads Server configuration only under
-`HUGEGRAPH/hg/GRAPHSPACE/CONF/` (Server `cluster=hg`; its default is `hg-test`). When
-usage exceeds the configured storage limit there, PD marks the space's graphs
+`reach graph limit`. Storage enforcement reads Server configuration under
+`HUGEGRAPH/<pd.server-cluster>/GRAPHSPACE/CONF/`. Set `pd.server-cluster` in every PD
+node's `conf/application.yml` to the Server `cluster` in `rest-server.properties`.
+The PD setting defaults to `hg` for compatibility; the Server default is `hg-test`,
+so deployments using that default must set `pd.server-cluster: hg-test`. This is a
+metadata namespace, not the numeric `pd.cluster_id`. Changing it does not migrate
+existing metadata or modify the Server configuration. When usage exceeds the
+configured storage limit, PD marks the space's graphs
 `ReadOnly`; the next check restores `ReadWrite` once usage is within the limit.
 CPU and memory limits configure Kubernetes namespace quotas when `server.use_k8s=true`;
 they do not impose process limits in other deployments.
+
+Deleting a graph space also removes its exact PD storage-limit/usage record after
+all its graphs have been removed. An empty space that still exists retains its limit
+and reports zero usage. Cleanup is idempotent; if PD cleanup fails, the Server keeps
+the space configuration and list entry, and reports the failure so deletion can be
+retried. By that stage, graphs, graph-space authorization, schema templates and
+services have already been cleared. This is not a transaction: retrying does not
+restore any of those resources. PD rejects cleanup while the space still has graph
+metadata and rechecks current graphs before recreating a missing usage record, so an
+older quota collection cannot recreate a deleted space's statistics. This does not
+purge records left by deletions before the upgrade. Upgrade PD before Server: older
+PD versions do not implement the new `DeleteGraphSpace` RPC. An `UNIMPLEMENTED`
+response arrives after the clearing steps above, retains the remaining space
+configuration/list entry, and prevents completion until all PD nodes are upgraded.
+Do not start space deletion during a Server-first rolling upgrade before PD
+supports this RPC. No unsupported-RPC response silently skips statistics cleanup.
+This cleanup does not serialize graph
+creation with space deletion across Server replicas; avoid creating graphs in a space
+while deleting it.
+
+If cleanup is refused, the Server response includes the PD reason, remaining
+record count and up to ten PD graph names (each limited to 128 characters).
+Inspect PD's authenticated `GET /v1/partitionsAndStats` diagnostic endpoint. The
+keys of its `partitions` object retain every full PD graph identifier, including
+records with no partitions. This supplies the full names omitted or truncated in
+the bounded error message. `GET /v1/graphs` lists only `/g` records and is not a
+complete inventory for this check: schema `/m` records can also block cleanup.
+Compare all matching identifiers with the Server's graph configuration. For
+example, `shop/old/g` and `shop/old/m` belong to graph `old` in space `shop`, with
+data and schema backend suffixes respectively. Earlier failed graph drops can
+leave a PD record after its Server configuration is gone;
+retrying space deletion alone does not remove that record.
+
+Confirm ownership and any data that must be retained before recovery. For a
+confirmed obsolete graph, use the normal Server graph APIs to recreate the
+missing graph configuration with its original space, graph name and backend,
+then drop that graph normally and retry space deletion. A graph owned by another
+Server must be removed through that owner instead. The cleanup operation does
+not guess ownership or delete remaining graph data automatically.
 
 An administrator can raise limits with `PUT /graphspaces/DEFAULT`, for example:
 

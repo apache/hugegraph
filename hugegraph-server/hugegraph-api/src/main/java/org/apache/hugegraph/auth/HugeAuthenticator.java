@@ -203,11 +203,9 @@ public interface HugeAuthenticator extends Authenticator {
             if (this == object) {
                 return true;
             }
-            if (!(object instanceof User)) {
+            if (!(object instanceof User other)) {
                 return false;
             }
-
-            User other = (User) object;
             return this.username().equals(other.username()) &&
                    this.role().equals(other.role());
         }
@@ -356,8 +354,8 @@ public interface HugeAuthenticator extends Authenticator {
             if (resourceObject != null) {
                 SchemaDefine.AuthElement element =
                         (SchemaDefine.AuthElement) resourceObject.operated();
-                if (element instanceof HugeUser &&
-                    ((HugeUser) element).name().equals(USER_ADMIN)) {
+                if (element instanceof HugeUser user &&
+                    user.name().equals(USER_ADMIN)) {
                     // Can't access admin by other users
                     return false;
                 }

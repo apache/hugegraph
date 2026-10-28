@@ -177,9 +177,9 @@ public class HugeTarget extends Entity {
                 this.description = (String) value;
                 break;
             case P.RESS:
-                if (value instanceof String) {
+                if (value instanceof String string) {
                     this.resources = JsonUtil.fromJson(
-                            (String) value,
+                            string,
                             new TypeReference<Map<String,
                                     List<HugeResource>>>() {
                             });

@@ -93,6 +93,19 @@ completion callback once. Algorithm source iterators close even when waiting fai
 an explicit algorithm stop remains normal control flow. The first failure is retained,
 with later worker or iterator-close failures attached as suppressed exceptions.
 Interrupted waits request worker cancellation and preserve the caller's interrupt flag.
+Interrupting a producer blocked on a full queue fails that submission and preserves
+the interrupt flag; input that never entered the queue cannot be reported as accepted.
+
+Ephemeral jobs retain their negative task IDs and existing wraparound rule. Concurrent
+schedulers allocate these IDs atomically, avoiding duplicate IDs caused by lost updates.
+
+Algorithm traversal helpers restore the caller's query capacity and close the traversal
+on success or failure. If calculation and close both fail, the calculation error stays
+primary and the close error is suppressed. String IDs and values in algorithm JSON
+results preserve quotes, backslashes and control characters through JSON encoding;
+numeric result values remain JSON numbers.
+Vertex and edge counting also close their scan iterator when reading or reporting
+progress fails, preserving the calculation error if closing fails as well.
 
 ### Store sort and shuffle iterators
 
@@ -104,6 +117,20 @@ Union and intersection iterators release their shuffle even if closing the sourc
 iterator fails, retaining the source failure and suppressing any later close failure.
 Truncated records and I/O failures fail the query instead of appearing as normal EOF.
 The spill record format is unchanged.
+
+Type-conversion iterators preserve pending records across repeated probes and forward
+closure to their owned source, including through the Java `Iterator` adapter. Closing
+them is terminal and discards pending values and completion markers. The source is
+closed once; a failed close remains visible on later close calls. ORDER BY propagates
+sort failures to the query's existing error and cleanup path with the original cause.
+
+Union and intersection filters preserve a pending record across
+repeated probes, including the extra probe at RPC batch boundaries. Reading with
+`next()` consumes that record exactly once. Union results also support reading without
+a preceding probe. Closing either filter discards pending results and stops further
+probes of its source.
+For a spilled intersection, the requested group size also applies to the final group;
+the default mode continues to select groups containing more than one record.
 
 ### Callback executor configuration
 
@@ -121,6 +148,21 @@ sustained overload can otherwise increase callback backlog and memory use.
 An interrupted wait for PD connection work cancels its submitted task and preserves
 the caller's interrupt flag. The existing failure result and timeout remain unchanged;
 cancellation does not close shared channels.
+
+Blocking PD calls report exhausted transport retries as `PD_UNREACHABLE`, including
+the RPC method and original cause. Existing retry budgets and response-header error
+codes are preserved, so registration and metadata callers receive a PD error rather
+than a missing response.
+
+An interrupted wait for the first lock client's initialization stops before issuing a
+lock RPC, preserves the interrupt flag and leaves the initialization permit with its
+owner. Successful leader discovery binds subsequent PD calls to the discovered leader,
+including when the configured peer used for discovery is a follower.
+
+PD watch notifications isolate runtime failures from individual business listeners.
+The failure is logged and the remaining listeners still receive the event on the same
+callback thread. Cache updates retain their existing order and errors still propagate;
+failed listener work is not retried automatically.
 
 PD snapshot compression finishes the ZIP central directory before flushing and syncing
 the archive. An unreadable source directory fails with an I/O error. Archive entries

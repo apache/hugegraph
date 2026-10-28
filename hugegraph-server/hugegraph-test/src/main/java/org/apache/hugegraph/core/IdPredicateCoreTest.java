@@ -118,8 +118,8 @@ public class IdPredicateCoreTest extends BaseCoreTest {
             HasContainer id = localIdContainer(traversal);
             Assert.assertInstanceOf(NotP.class, id.getPredicate());
             for (Step<?, ?> step : traversal.asAdmin().getSteps()) {
-                if (step instanceof HasStep) {
-                    List<HasContainer> containers = ((HasStep<?>) step).getHasContainers();
+                if (step instanceof HasStep<?> hasStep) {
+                    List<HasContainer> containers = hasStep.getHasContainers();
                     Assert.assertEquals(2, containers.size());
                     Assert.assertEquals(T.id.getAccessor(), containers.get(0).getKey());
                     Assert.assertEquals("name", containers.get(1).getKey());

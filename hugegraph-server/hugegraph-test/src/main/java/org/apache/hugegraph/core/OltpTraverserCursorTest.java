@@ -200,8 +200,8 @@ public class OltpTraverserCursorTest {
                 consumer = traverser.new EdgesConsumer<Edge, Id>(id -> Assert.fail(), OltpTraverser.NO_LIMIT) {
                     @Override
                     protected Iterator<Id> prepare(Iterator<Edge> iterator) {
-                        if (failure instanceof Error) {
-                            throw (Error) failure;
+                        if (failure instanceof Error error) {
+                            throw error;
                         }
                         throw (RuntimeException) failure;
                     }
@@ -209,8 +209,8 @@ public class OltpTraverserCursorTest {
             } else {
                 consumer = traverser.new OneStepEdgeIterConsumer(id -> {
                     if (!outcome.startsWith("async-capacity") && !"lazy-producer".equals(outcome)) {
-                        if (failure instanceof Error) {
-                            throw (Error) failure;
+                        if (failure instanceof Error error) {
+                            throw error;
                         }
                         throw (RuntimeException) failure;
                     }
@@ -434,8 +434,8 @@ public class OltpTraverserCursorTest {
     }
 
     private static RocksIterator nativeCursor(Object value, Set<Object> visited) throws Exception {
-        if (value instanceof RocksIterator) {
-            return (RocksIterator) value;
+        if (value instanceof RocksIterator rocksIterator) {
+            return rocksIterator;
         }
         if (!(value instanceof Iterator || value instanceof QueryResults || value instanceof QueryBatch) ||
             !visited.add(value)) {

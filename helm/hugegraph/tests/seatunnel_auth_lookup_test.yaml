@@ -1,0 +1,112 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: SeaTunnel shorter generated passwords preserve installed credentials
+templates:
+  - seatunnel-auth-secret.yaml
+  - seatunnel.yaml
+set:
+  seatunnel.enabled: true
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+  objects:
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-hugegraph-seatunnel-auth
+        namespace: NAMESPACE
+      data:
+        password: bGVnYWN5LWFkbWluLTAxMjM0NTY3ODlhYmNkZWZnaGk=
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: six-hugegraph-seatunnel-auth
+        namespace: NAMESPACE
+      data:
+        password: QWIxMnhZ
+tests:
+  - it: retains a legacy 32 character password during a no-change upgrade
+    template: seatunnel-auth-secret.yaml
+    asserts:
+      - equal:
+          path: data.password
+          decodeBase64: true
+          value: legacy-admin-0123456789abcdefghi
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+      - matchRegex:
+          path: data["seatunnel.yaml"]
+          decodeBase64: true
+          pattern: 'basic-auth-password: legacy-admin-0123456789abcdefghi'
+
+  - it: honors an explicit password rotation instead of restoring the old value
+    template: seatunnel-auth-secret.yaml
+    set:
+      seatunnel.auth.password: NextAdmin0123456
+    asserts:
+      - equal:
+          path: data.password
+          decodeBase64: true
+          value: NextAdmin0123456
+      - matchRegex:
+          path: data["seatunnel.yaml"]
+          decodeBase64: true
+          pattern: 'basic-auth-password: NextAdmin0123456'
+
+  - it: generates a 6 character alphanumeric password for a new easy release
+    template: seatunnel-auth-secret.yaml
+    release:
+      name: fresh
+    asserts:
+      - matchRegex:
+          path: data.password
+          decodeBase64: true
+          pattern: '^[A-Za-z0-9]{6}$'
+
+  - it: generates a 16 character alphanumeric password for a new strict release
+    template: seatunnel-auth-secret.yaml
+    release:
+      name: fresh
+    set:
+      mode: strict
+    asserts:
+      - matchRegex:
+          path: data.password
+          decodeBase64: true
+          pattern: '^[A-Za-z0-9]{16}$'
+
+  - it: preserves an existing easy password when switching to strict
+    template: seatunnel-auth-secret.yaml
+    release:
+      name: six
+    set:
+      mode: strict
+    asserts:
+      - equal:
+          path: data.password
+          decodeBase64: true
+          value: Ab12xY
+      - matchRegex:
+          path: data["seatunnel.yaml"]
+          decodeBase64: true
+          pattern: 'basic-auth-password: Ab12xY'

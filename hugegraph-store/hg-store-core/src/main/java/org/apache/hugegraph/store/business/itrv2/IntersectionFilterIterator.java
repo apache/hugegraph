@@ -23,6 +23,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
@@ -40,6 +41,7 @@ public class IntersectionFilterIterator implements ScanIterator {
     private final ScanIterator iterator;
     private final IntersectionWrapper wrapper;
     private boolean processed = false;
+    private boolean closed;
     private Iterator innerIterator;
     private SortShuffle<RocksDBSession.BackendColumn> sortShuffle;
 
@@ -69,6 +71,9 @@ public class IntersectionFilterIterator implements ScanIterator {
 
     @Override
     public boolean hasNext() {
+        if (this.closed) {
+            return false;
+        }
         if (!processed) {
             try {
                 dedup();
@@ -137,7 +142,7 @@ public class IntersectionFilterIterator implements ScanIterator {
 
     @Override
     public boolean isValid() {
-        if (this.processed) {
+        if (this.closed || this.processed) {
             return false;
         }
         return iterator.isValid();
@@ -145,15 +150,20 @@ public class IntersectionFilterIterator implements ScanIterator {
 
     @Override
     public <T> T next() {
+        if (this.closed) {
+            throw new NoSuchElementException();
+        }
         return (T) this.innerIterator.next();
     }
 
     @Override
     public void close() {
+        this.closed = true;
         try (SortShuffle<?> shuffle = this.sortShuffle) {
             this.iterator.close();
         } finally {
             this.sortShuffle = null;
+            this.innerIterator = null;
             this.map.clear();
         }
     }
@@ -188,6 +198,10 @@ public class IntersectionFilterIterator implements ScanIterator {
 
         private int count = 0;
 
+        private boolean ready;
+
+        private boolean exhausted;
+
         private final Iterator<E> iterator;
 
         private final Comparator<E> comparator;
@@ -202,37 +216,48 @@ public class IntersectionFilterIterator implements ScanIterator {
         }
 
         /**
-         * Consecutive duplicate elimination. When prev == current, record data. When not equal,
-         * return previous data. Note: Final result may contain duplicates.
+         * Return the last element of each matching group. A group must contain exactly
+         * {@code adjacent} elements, or at least two when {@code adjacent == -1}.
          */
         @Override
         public boolean hasNext() {
+            if (this.ready) {
+                return true;
+            }
+            if (this.exhausted) {
+                return false;
+            }
             while (iterator.hasNext()) {
+                E next = iterator.next();
                 if (prev == null) {
-                    prev = iterator.next();
+                    prev = next;
+                    current = next;
                     continue;
                 }
 
-                current = iterator.next();
-                if (comparator.compare(prev, current) == 0) {
-                    data = current;
+                if (comparator.compare(prev, next) == 0) {
+                    current = next;
                     count += 1;
-                } else {
-                    // count starts from 0, so the size is count + 1
-                    if (count > 0 && this.adjacent == -1 || count + 1 == this.adjacent) {
-                        count = 0;
-                        prev = current;
-                        return true;
-                    } else {
-                        count = 0;
-                        prev = current;
-                    }
+                    continue;
+                }
+
+                boolean matches = matchesGroup();
+                if (matches) {
+                    data = current;
+                }
+                count = 0;
+                prev = next;
+                current = next;
+                if (matches) {
+                    this.ready = true;
+                    return true;
                 }
             }
 
-            // last result
-            if (count > 0) {
-                count = 0;
+            this.exhausted = true;
+            if (prev != null && matchesGroup()) {
+                data = current;
+                this.ready = true;
                 return true;
             }
 
@@ -241,7 +266,18 @@ public class IntersectionFilterIterator implements ScanIterator {
 
         @Override
         public E next() {
-            return data;
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            E result = this.data;
+            this.data = null;
+            this.ready = false;
+            return result;
+        }
+
+        private boolean matchesGroup() {
+            // count excludes the first element of the group.
+            return this.adjacent == -1 ? this.count > 0 : this.count + 1 == this.adjacent;
         }
     }
 

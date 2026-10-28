@@ -96,16 +96,13 @@ public class SDConfigService {
      */
     public List<SDConfig> getTargets(String appName) {
         HgAssert.isArgumentNotNull(appName, "appName");
-        switch (appName) {
-            case "pd":
-                return Collections.singletonList(this.getPdTargets());
-            case "store":
-                return Collections.singletonList(this.getStoreTargets());
-            default:
-                return this.toModels(
-                        this.getRegister()
-                            .getNodes(Query.newBuilder().setAppName(appName).build()));
-        }
+        return switch (appName) {
+            case "pd" -> Collections.singletonList(this.getPdTargets());
+            case "store" -> Collections.singletonList(this.getStoreTargets());
+            default -> this.toModels(
+                    this.getRegister()
+                        .getNodes(Query.newBuilder().setAppName(appName).build()));
+        };
     }
 
     private SDConfig getPdTargets() {

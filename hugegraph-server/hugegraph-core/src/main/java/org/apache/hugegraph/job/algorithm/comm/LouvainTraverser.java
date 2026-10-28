@@ -813,10 +813,9 @@ public class LouvainTraverser extends AlgoTraverser {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Community)) {
+            if (!(object instanceof Community other)) {
                 return false;
             }
-            Community other = (Community) object;
             return Objects.equals(this.cid, other.cid);
         }
 

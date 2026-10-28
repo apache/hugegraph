@@ -44,6 +44,7 @@ import java.util.stream.Collectors;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 import org.apache.commons.configuration2.Configuration;
@@ -1153,6 +1154,25 @@ public final class GraphManager {
                                     this.serviceGraphSpace);
         }
         this.clearGraphSpace(name);
+        MetaDriver metaDriver = this.metaManager.metaDriver();
+        if (metaDriver instanceof PdMetaDriver) {
+            try {
+                ((PdMetaDriver) metaDriver).pdClient().deleteGraphSpace(name);
+            } catch (PDException e) {
+                throw new HugeException("Failed to remove graph space '%s' statistics from PD: %s", e,
+                                        name, StringUtils.abbreviate(e.getMessage(), 2048));
+            } catch (StatusRuntimeException e) {
+                if (e.getStatus().getCode() == Status.Code.UNIMPLEMENTED) {
+                    throw new HugeException("PD does not support graph-space statistics cleanup " +
+                                            "(UNIMPLEMENTED). Upgrade all PD nodes before retrying " +
+                                            "deletion of graph space '%s'. Graphs, graph-space " +
+                                            "authorization, schema templates and services have " +
+                                            "already been cleared; space configuration and its " +
+                                            "list entry are retained.", e, name);
+                }
+                throw new HugeException("Failed to remove graph space '%s' statistics from PD", e, name);
+            }
+        }
         this.metaManager.removeGraphSpaceConfig(name);
         this.metaManager.clearGraphSpaceList(name);
         this.metaManager.notifyGraphSpaceRemove(name);
@@ -1674,8 +1694,8 @@ public final class GraphManager {
         Graph graph = this.graphs.get(spaceGraphName);
         if (graph == null) {
             return null;
-        } else if (graph instanceof HugeGraph) {
-            return (HugeGraph) graph;
+        } else if (graph instanceof HugeGraph matchedHugeGraph) {
+            return matchedHugeGraph;
         }
         throw new NotSupportException("graph instance of %s", graph.getClass());
     }
@@ -2161,6 +2181,8 @@ public final class GraphManager {
     }
 
     private void listenMetaChanges() {
+        this.metaManager.listenGraphSpaceAdd(ConsumerWrapper.wrap(this::graphSpaceRefreshHandler));
+        this.metaManager.listenGraphSpaceUpdate(ConsumerWrapper.wrap(this::graphSpaceRefreshHandler));
         this.metaManager.listenGraphSpaceRemove(ConsumerWrapper.wrap(this::graphSpaceRemoveHandler));
         this.metaManager.listenGraphAdd(ConsumerWrapper.wrap(this::graphAddHandler));
         this.metaManager.listenGraphRemove(ConsumerWrapper.wrap(this::graphRemoveHandler));
@@ -2397,8 +2419,8 @@ public final class GraphManager {
                 return graph1;
             }
             throw new NotFoundException(String.format("Graph '%s' does not exist", name));
-        } else if (graph instanceof HugeGraph) {
-            return (HugeGraph) graph;
+        } else if (graph instanceof HugeGraph matchedHugeGraph) {
+            return matchedHugeGraph;
         }
         throw new NotSupportException("graph instance of %s", graph.getClass());
     }
@@ -2968,6 +2990,13 @@ public final class GraphManager {
         }
     }
 
+    private <T> void graphSpaceRefreshHandler(T response) {
+        for (String name : this.metaManager.extractGraphSpacesFromResponse(response)) {
+            // Notifications carry only names: read current metadata so delayed events cannot restore old quotas.
+            this.readGraphSpace(name, true);
+        }
+    }
+
     private <T> void graphSpaceRemoveHandler(T response) {
         for (String name : this.metaManager.extractGraphSpacesFromResponse(response)) {
             // Refresh recreated spaces, but retry snapshots superseded by a local mutation.
@@ -3013,8 +3042,7 @@ public final class GraphManager {
         for (String graphName : graphNames) {
             if (this.graphs.containsKey(graphName)) {
                 Graph graph = this.graphs.get(graphName);
-                if (graph instanceof HugeGraph) {
-                    HugeGraph hugeGraph = (HugeGraph) graph;
+                if (graph instanceof HugeGraph hugeGraph) {
                     String[] values =
                             graphName.split(MetaManager.META_PATH_JOIN);
                     if (values.length < 2) {
@@ -3045,8 +3073,7 @@ public final class GraphManager {
         for (String graphName : graphNames) {
             if (this.graphs.containsKey(graphName)) {
                 Graph graph = this.graphs.get(graphName);
-                if (graph instanceof HugeGraph) {
-                    HugeGraph hugeGraph = (HugeGraph) graph;
+                if (graph instanceof HugeGraph hugeGraph) {
                     ((AbstractBackendStoreProvider) hugeGraph.storeProvider())
                             .notifyAndWaitEvent(Events.STORE_CLEAR);
                 }

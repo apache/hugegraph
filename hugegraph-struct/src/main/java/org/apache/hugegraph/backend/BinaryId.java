@@ -87,10 +87,10 @@ public class BinaryId implements Id {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof BinaryId)) {
+        if (!(other instanceof BinaryId id)) {
             return false;
         }
-        return Arrays.equals(this.bytes, ((BinaryId) other).bytes);
+        return Arrays.equals(this.bytes, id.bytes);
     }
 
     @Override

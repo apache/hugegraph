@@ -186,8 +186,8 @@ public class HugeAccess extends Relationship {
                 break;
             case P.PERMISSION:
                 //FIXME: Unified
-                if (value instanceof Byte) {
-                    this.permission = HugePermission.fromCode((Byte) value);
+                if (value instanceof Byte byteValue) {
+                    this.permission = HugePermission.fromCode(byteValue);
                 } else {
                     this.permission = HugePermission.valueOf(value.toString());
                 }

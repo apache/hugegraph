@@ -44,8 +44,8 @@ public class QueueStore extends MetadataRocksDBStore {
         } else {
             var store = getStore();
             // todo: delete record via client
-            if (store instanceof RaftKVStore) {
-                ((RaftKVStore) store).doRemove(MetadataKeyHelper.getQueueItemKey(itemId));
+            if (store instanceof RaftKVStore raftStore) {
+                raftStore.doRemove(MetadataKeyHelper.getQueueItemKey(itemId));
             }
         }
     }

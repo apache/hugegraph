@@ -625,8 +625,7 @@ public class IndexLabelBuilder extends AbstractBuilder
     }
 
     private void checkPrimaryKeyIndex(SchemaLabel schemaLabel) {
-        if (schemaLabel instanceof VertexLabel) {
-            VertexLabel vl = (VertexLabel) schemaLabel;
+        if (schemaLabel instanceof VertexLabel vl) {
             if (vl.idStrategy().isPrimaryKey()) {
                 if (this.indexType.isSecondary() ||
                     this.indexType.isUnique() ||
