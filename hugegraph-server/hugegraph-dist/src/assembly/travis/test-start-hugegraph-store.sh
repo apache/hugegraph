@@ -175,6 +175,9 @@ JAVA
                   g1 G1 zgc ZGC direct-default direct-heap-lower direct-heap-raised \
                   direct-heap-tab direct-heap-alias direct-explicit-cap \
                   direct-tool-options-cap direct-jdk-options-cap direct-tool-options-heap \
+                  direct-tool-options-single direct-tool-options-double \
+                  direct-jdk-options-single direct-jdk-options-double \
+                  direct-tool-options-inner direct-tool-options-tab direct-tool-options-other \
                   invalid missing-module-options; do
         capture="$fixture/$option.args"
         local -a args=(-d false)
@@ -194,6 +197,15 @@ JAVA
             # The JVM reads these before the command line, so a launcher cap would override them
             direct-tool-options-cap) jvm_options=""; tool_options="-Dt=1 -XX:MaxDirectMemorySize=512m" ;;
             direct-jdk-options-cap) jvm_options=""; jdk_options="-XX:MaxDirectMemorySize=512m" ;;
+            # The JVM drops quotes anywhere in a token of these variables
+            direct-tool-options-single) jvm_options=""; tool_options="-Dt=1 '-XX:MaxDirectMemorySize=64m'" ;;
+            direct-tool-options-double) jvm_options=""; tool_options='"-XX:MaxDirectMemorySize=64m"' ;;
+            direct-jdk-options-single) jvm_options=""; jdk_options="'-XX:MaxDirectMemorySize=64m'" ;;
+            direct-jdk-options-double) jvm_options=""; jdk_options='-Dt=1 "-XX:MaxDirectMemorySize=64m"' ;;
+            direct-tool-options-inner) jvm_options=""; tool_options='-XX:"MaxDirectMemorySize"=64m' ;;
+            direct-tool-options-tab) jvm_options=""; tool_options=$'-Dt=1\t-XX:MaxDirectMemorySize=64m' ;;
+            # Another option that merely contains the name doesn't count
+            direct-tool-options-other) jvm_options=""; tool_options="-Dt=-XX:MaxDirectMemorySize=64m" ;;
             # The launcher -Xmx overrides an environment heap, so the cap still follows calc_xmx
             direct-tool-options-heap) jvm_options=""; tool_options="-Xmx4g" ;;
             missing-module-options) rm "$fixture/bin/jvm-module.options" ;;
@@ -239,7 +251,8 @@ JAVA
             # The JVM uses the last -XX:MaxDirectMemorySize on the command line
             cap=$(grep -E '^-XX:MaxDirectMemorySize=' "$capture" | tail -1)
             case "$option" in
-                direct-default | direct-tool-options-heap) want='-XX:MaxDirectMemorySize=1024m' ;;
+                direct-default | direct-tool-options-heap | direct-tool-options-other)
+                    want='-XX:MaxDirectMemorySize=1024m' ;;
                 direct-explicit-cap) want='-XX:MaxDirectMemorySize=256m' ;;
                 # A heap-only -j leaves the cap to the JVM, which defaults it to that heap;
                 # a cap in JAVA_TOOL_OPTIONS or JDK_JAVA_OPTIONS is left to apply as given

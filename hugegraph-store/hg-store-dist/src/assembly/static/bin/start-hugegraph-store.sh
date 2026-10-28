@@ -182,12 +182,14 @@ if [ "$JAVA_OPTIONS" = "" ]; then
         esac
     done
     # The JVM reads JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS before the command line, so a cap
-    # there would lose to this one; keep it instead
-    for opt in ${JAVA_TOOL_OPTIONS:-} ${JDK_JAVA_OPTIONS:-}; do
-        case "$opt" in
-            -XX:MaxDirectMemorySize=*) DIRECT_MEMORY_OPTION="" ;;
-        esac
-    done
+    # there would lose to this one; keep it instead. The JVM drops quotes anywhere in a token
+    # there, so drop them too. A false match, such as the text inside a quoted -D value, only
+    # leaves the cap to the JVM, whose default is this same heap.
+    ENV_JVM_OPTIONS=" ${JAVA_TOOL_OPTIONS:-} ${JDK_JAVA_OPTIONS:-} "
+    ENV_JVM_OPTIONS="${ENV_JVM_OPTIONS//[\"\']/}"
+    case "${ENV_JVM_OPTIONS//[$'\t\r\n']/ }" in
+        *" -XX:MaxDirectMemorySize="*) DIRECT_MEMORY_OPTION="" ;;
+    esac
      JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${DIRECT_MEMORY_OPTION} -XX:MetaspaceSize=256M -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION} "
     # JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
 
