@@ -35,9 +35,13 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
+import org.apache.hugegraph.store.business.itrv2.InAccurateIntersectionIterator;
+import org.apache.hugegraph.store.business.itrv2.InAccurateUnionFilterIterator;
 import org.apache.hugegraph.store.business.itrv2.IntersectionFilterIterator;
 import org.apache.hugegraph.store.business.itrv2.IntersectionWrapper;
+import org.apache.hugegraph.store.business.itrv2.MapLimitIterator;
 import org.apache.hugegraph.store.business.itrv2.MapValueFilterIterator;
+import org.apache.hugegraph.store.business.itrv2.MultiListIterator;
 import org.apache.hugegraph.store.business.itrv2.UnionFilterIterator;
 import org.apache.hugegraph.store.business.itrv2.io.SortShuffleSerializer;
 import org.apache.hugegraph.store.grpc.query.QueryRequest;
@@ -106,6 +110,21 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
     }
 
     @Test
+    public void testLimitDedupPreservesPendingResults() {
+        assertFilterContract(FilterKind.LIMIT_DEDUP);
+    }
+
+    @Test
+    public void testInAccurateUnionPreservesPendingResults() {
+        assertFilterContract(FilterKind.INACCURATE_UNION);
+    }
+
+    @Test
+    public void testInAccurateIntersectionPreservesPendingResults() {
+        assertFilterContract(FilterKind.INACCURATE_INTERSECTION);
+    }
+
+    @Test
     public void testEmptyUnionRemainsExhausted() {
         IntersectionWrapper<BackendColumn> wrapper = new IntersectionWrapper<>(
                 new RowIterator(List.of()), column -> column.name[0]);
@@ -158,6 +177,22 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
     @Test(timeout = 5000)
     public void testIntersectionDoesNotLoseRecordsBetweenSingleRecordBatches() throws Exception {
         assertSingleRecordBatches(FilterKind.INTERSECTION);
+    }
+
+    @Test(timeout = 5000)
+    public void testLimitDedupDoesNotLoseRecordsBetweenSingleRecordBatches() throws Exception {
+        assertSingleRecordBatches(FilterKind.LIMIT_DEDUP);
+    }
+
+    @Test(timeout = 5000)
+    public void testInAccurateUnionDoesNotLoseRecordsBetweenSingleRecordBatches() throws Exception {
+        assertSingleRecordBatches(FilterKind.INACCURATE_UNION);
+    }
+
+    @Test(timeout = 5000)
+    public void testInAccurateIntersectionDoesNotLoseRecordsBetweenSingleRecordBatches()
+            throws Exception {
+        assertSingleRecordBatches(FilterKind.INACCURATE_INTERSECTION);
     }
 
     private static void assertFilterContract(FilterKind kind) {
@@ -239,10 +274,22 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         BackendColumn third = BackendColumn.of(new byte[]{3}, new byte[]{13});
         List<BackendColumn> rows = kind == FilterKind.UNION_UNIQUE ? List.of(first, second, third) :
                                    Arrays.asList(first, second, third, first, second, third);
+        RowIterator source = new RowIterator(rows);
+        switch (kind) {
+            case LIMIT_DEDUP:
+                return new FilterFixture(new MapLimitIterator<BackendColumn>(source), source);
+            case INACCURATE_UNION:
+                return new FilterFixture(new InAccurateUnionFilterIterator<BackendColumn>(
+                        source, column -> column.name[0]), source);
+            case INACCURATE_INTERSECTION:
+                return new FilterFixture(new InAccurateIntersectionIterator<BackendColumn>(
+                        new MultiListIterator(List.of(source)), column -> column.name[0]), source);
+            default:
+                break;
+        }
         IntersectionWrapper<BackendColumn> wrapper = new IntersectionWrapper<>(
                 new RowIterator(rows), column -> column.name[0]);
         wrapper.proc();
-        RowIterator source = new RowIterator(rows);
         ScanIterator iterator = kind == FilterKind.INTERSECTION ?
                                 new IntersectionFilterIterator(source, wrapper, 2) :
                                 new UnionFilterIterator<>(source, wrapper, BackendColumn::compareTo,
@@ -251,7 +298,8 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
     }
 
     private enum FilterKind {
-        UNION_UNIQUE, UNION_BUFFERED, INTERSECTION
+        UNION_UNIQUE, UNION_BUFFERED, INTERSECTION, LIMIT_DEDUP, INACCURATE_UNION,
+        INACCURATE_INTERSECTION
     }
 
     private static class FilterFixture {
