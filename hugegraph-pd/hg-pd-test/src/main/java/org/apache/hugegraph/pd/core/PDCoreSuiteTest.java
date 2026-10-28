@@ -33,6 +33,8 @@ import org.apache.hugegraph.pd.raft.RaftEngineRpcTimeoutTest;
 import org.apache.hugegraph.pd.raft.RaftReflectionUtilTest;
 import org.apache.hugegraph.pd.raft.RaftStateMachineSnapshotTest;
 import org.apache.hugegraph.pd.raft.ZipUtilsTest;
+import org.apache.hugegraph.pd.service.StoreShutdownReportTest;
+import org.apache.hugegraph.pd.service.StoreShutdownAuthenticationTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -56,6 +58,9 @@ import lombok.extern.slf4j.Slf4j;
         PartitionServiceTest.class,
         StoreMonitorDataServiceTest.class,
         StoreServiceTest.class,
+        StoreRestoreRegistrationTest.class,
+        StoreShutdownReportTest.class,
+        StoreShutdownAuthenticationTest.class,
         TaskScheduleServiceTest.class,
         IpAuthHandlerTest.class,
         RaftEngineCliProcessorsTest.class,

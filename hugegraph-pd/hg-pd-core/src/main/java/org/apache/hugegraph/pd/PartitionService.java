@@ -658,7 +658,7 @@ public class PartitionService implements RaftStateListener {
         var maxShardsPerStore = pdConfig.getPartition().getMaxShardsPerStore();
         var shardCount = pdConfig.getPartition().getShardCount();
 
-        if (shardCount * toCount > storeService.getActiveStores().size() * maxShardsPerStore) {
+        if (shardCount * toCount > storeService.getPlacementStores().size() * maxShardsPerStore) {
             throw new PDException(Pdpb.ErrorType.Too_Many_Partitions_Per_Store_VALUE,
                                   "can't satisfy target shard group count, reached the upper " +
                                   "limit of the cluster");

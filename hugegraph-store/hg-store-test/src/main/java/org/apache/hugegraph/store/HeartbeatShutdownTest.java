@@ -216,7 +216,7 @@ public class HeartbeatShutdownTest {
         Constructor<HgStoreEngine> constructor = HgStoreEngine.class.getDeclaredConstructor();
         constructor.setAccessible(true);
         HgStoreEngine engine = constructor.newInstance();
-        Fixture service = new Fixture(false);
+        HeartbeatService service = new HeartbeatService(engine);
         RpcServer rpc = Mockito.mock(RpcServer.class);
         HgMetricService metrics = Mockito.mock(HgMetricService.class);
         setField(HgStoreEngine.class, engine, "partitionManager", manager);
@@ -227,7 +227,6 @@ public class HeartbeatShutdownTest {
         Class<?> configClass = Class.forName("org.apache.hugegraph.store.node.AppConfig");
         Object node = nodeClass.getConstructor(configClass).newInstance((Object) null);
         setField(nodeClass, node, "storeEngine", engine);
-        service.addStateListener(engine);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("NODE_DESTROY_ENTERED");
             try {
@@ -240,9 +239,14 @@ public class HeartbeatShutdownTest {
                 throw new AssertionError(e);
             }
         }, "recovery-fixture-shutdown"));
-        service.start();
-        Assert.assertTrue(service.entered.await(5, TimeUnit.SECONDS));
-        service.onStateChanged(Metapb.StoreState.Up);
+        Mockito.when(provider.registerStore(Mockito.any())).thenReturn(1L);
+        Mockito.when(provider.getClusterStats()).thenReturn(Metapb.ClusterStats.newBuilder()
+                .setState(Metapb.ClusterState.Cluster_OK).build());
+        options.setGrpcAddress("127.0.0.1:8500");
+        options.setRaftAddress("127.0.0.1:8510");
+        options.setPdProvider(provider);
+        service.setStoreMetadata(metadata);
+        service.init(options);
     }
 
     private static void runInterruptedEngineShutdown(Path marker) throws Exception {
@@ -374,9 +378,10 @@ public class HeartbeatShutdownTest {
             assertStillClosing(shutdown);
             callbackRelease.countDown();
             shutdown.get(5, TimeUnit.SECONDS);
-            service.onStateChanged(Metapb.StoreState.Offline);
+            Assert.assertEquals(Metapb.StoreState.Offline, service.getStoreInfo().getState());
+            service.onStateChanged(Metapb.StoreState.Up);
             Assert.assertEquals(1, calls.get());
-            Assert.assertEquals(Metapb.StoreState.Up, service.getStoreInfo().getState());
+            Assert.assertEquals(Metapb.StoreState.Offline, service.getStoreInfo().getState());
         } finally {
             callbackRelease.countDown();
             service.shutdown();

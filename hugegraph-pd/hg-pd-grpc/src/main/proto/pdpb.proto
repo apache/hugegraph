@@ -29,6 +29,8 @@ service PD {
   rpc GetStore(GetStoreRequest) returns (GetStoreResponse) {}
   // Modify Store status and other information.
   rpc SetStore(SetStoreRequest) returns (SetStoreResponse) {}
+  // A Store reports temporary shutdown without administrative offlining or lease renewal.
+  rpc ReportStoreShutdown(SetStoreRequest) returns (SetStoreResponse) {}
   // Look up the partition based on the key
   rpc DelStore(DetStoreRequest) returns (DetStoreResponse) {}
   rpc GetAllStores(GetAllStoresRequest) returns (GetAllStoresResponse) {}
@@ -203,6 +205,7 @@ message RegisterStoreResponse {
   ResponseHeader header = 1;
   // Upon initial registration, returns the new store_id
   uint64 store_id = 2;
+  metapb.Store store = 3;
 }
 
 message SetStoreRequest {

@@ -224,6 +224,25 @@ A single Store replacement can still cause request errors or timeouts while Raft
 leadership and client routes converge. Observe application errors as well as
 shard recovery before continuing; do not blindly retry writes.
 
+With PD and Store images containing #3229's registration changes, `Up` follows
+local engine restore and graceful stops report `Offline`. Use PD's
+`heartbeatAgeMillis` to reject stale `Up` records after an abrupt stop.
+Temporary shutdown reports preserve the existing keepalive window without renewing
+it; quick restarts do not trip the initial-store-count gate, while expiry still
+applies if the Store does not return. Stream reconnects do not repeat local restore.
+While recovery runs, Offline registrations renew the returned Store's lease.
+The dedicated shutdown RPC falls back to normal expiry on older PDs without
+using the administrative Offline path, so a PD rollback does not remove that lease.
+These signals do not prove Raft catch-up.
+<!-- TODO: replace the manual barrier only when Store also exposes per-group
+     Raft catch-up readiness; local restore and heartbeat freshness are insufficient. -->
+The shutdown report succeeds only if PD accepts a privileged internal credential:
+set `HG_PD_AUTH_SECRET_KEY` in Store to match PD's `auth.secret-key`. Without it,
+or if the RPC fails, shutdown continues and the existing lease expires normally.
+Restoring Offline Stores retain their liveness lease but cannot receive new
+placements until `Up`; recovery retries back off to the heartbeat interval.
+
+
 ### PD patrol and leader balance
 
 Partition patrol repairs shard membership; it does not balance shard leaders.

@@ -200,6 +200,41 @@ channel.shutdown();
 
 Register a new Store node with PD.
 
+Updated Stores first register `Offline` to obtain their identity, restore local
+partition engines, then register `Up`. Upgrade PD before Store: older PD versions
+ignore this restore gate, and older Stores retain their previous registration
+behavior. Pending Stores still require activation. `Up` does not guarantee Raft
+catch-up; graceful shutdown reports `Offline` without requesting permanent retirement.
+Temporary shutdown reports retain the existing keepalive entry without renewing it;
+expiry still removes a Store that does not return. During recovery, repeated Offline
+registrations renew the returned Store's lease while an owned worker restores engines.
+Once local restore succeeds,
+stream reconnects register `Up` directly without repeating recovery.
+`RegisterStoreResponse.store` supplies the authoritative registration state; older
+responses without this additive field fall back to a fresh Store lookup.
+
+`ReportStoreShutdown(SetStoreRequest)` returns `SetStoreResponse` and records
+temporary Offline by Store ID, preserving PD metadata and the existing lease even
+when the cluster is not ready. Older PDs return `UNIMPLEMENTED`; updated Stores
+fall back to expiry, never to `SetStore`. Administrative `SetStore(Offline)` keeps
+its cluster-readiness guard and removes the active entry as before.
+
+Shutdown reporting requires a privileged internal Basic credential matching PD's
+`auth.secret-key`. Set the same `HG_PD_AUTH_SECRET_KEY` in each Store process;
+this shared credential authorizes internal callers across Store IDs, rather than
+identifying an individual Store. Keep it restricted to trusted internal services.
+Missing, invalid or unconfigured credentials refuse the RPC. Store still shuts
+down and PD retains its previous record until the existing lease expires if the
+report is refused, unreachable, or unsupported by an older PD.
+
+A live restoration lease is not placement readiness: new allocation, replica
+addition, balancing and capacity checks select only Stores whose canonical state
+is `Up`. Existing shard membership and liveness/expiry tracking remain separate.
+Offline renewal occurs at most every five seconds while restoration is polled;
+failed restore attempts back off from one second to the Store heartbeat interval,
+with a full failure trace only on the first or a changed partition failure set.
+
+
 **Request**:
 ```protobuf
 message RegisterStoreRequest {
@@ -922,6 +957,16 @@ curl http://localhost:8620/v1/partitions?graph_name=social_network
 ```
 
 ### Store API
+
+#### Heartbeat freshness
+
+The authenticated `/v1/stores` and `/v1/store/{id}` responses expose
+`heartbeatAgeMillis` alongside the existing `lastHeartBeat`. Age is computed with
+PD's clock, is `-1` if no heartbeat is recorded, and is clamped to zero for future
+timestamps after a clock adjustment. Compare it with the fixed 30-second Store
+heartbeat period (30000 ms) to detect stale `Up` records before keep-alive expiry.
+Read this state from the PD leader and continue to verify shard-group membership
+and leaders during rolling updates; fresh heartbeats do not prove Raft catch-up.
 
 #### List Stores
 

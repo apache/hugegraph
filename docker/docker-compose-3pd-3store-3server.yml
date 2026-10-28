@@ -161,6 +161,7 @@ services:
     container_name: hg-store0
     hostname: store0
     environment:
+      HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store0
       HG_STORE_GRPC_PORT: "8500"
@@ -176,6 +177,7 @@ services:
     container_name: hg-store1
     hostname: store1
     environment:
+      HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store1
       HG_STORE_GRPC_PORT: "8500"
@@ -191,6 +193,7 @@ services:
     container_name: hg-store2
     hostname: store2
     environment:
+      HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store2
       HG_STORE_GRPC_PORT: "8500"

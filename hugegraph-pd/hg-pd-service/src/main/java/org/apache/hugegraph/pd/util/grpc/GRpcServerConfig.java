@@ -18,6 +18,7 @@
 package org.apache.hugegraph.pd.util.grpc;
 
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.service.interceptor.StoreShutdownAuthentication;
 import org.apache.hugegraph.pd.util.HgExecutorUtil;
 import org.lognet.springboot.grpc.GRpcServerBuilderConfigurer;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +34,9 @@ public class GRpcServerConfig extends GRpcServerBuilderConfigurer {
     @Autowired
     private PDConfig pdConfig;
 
+    @Autowired
+    private StoreShutdownAuthentication storeShutdownAuthentication;
+
     @Override
     public void configure(ServerBuilder<?> serverBuilder) {
         PDConfig.ThreadPoolGrpc poolGrpc = pdConfig.getThreadPoolGrpc();
@@ -40,6 +44,7 @@ public class GRpcServerConfig extends GRpcServerBuilderConfigurer {
                 HgExecutorUtil.createExecutor(EXECUTOR_NAME, poolGrpc.getCore(), poolGrpc.getMax(),
                                               poolGrpc.getQueue()));
         serverBuilder.maxInboundMessageSize(MAX_INBOUND_MESSAGE_SIZE);
+        serverBuilder.intercept(storeShutdownAuthentication);
         // TODO: GrpcAuthentication is instantiated as a Spring bean but never registered
         // here - add serverBuilder.intercept(grpcAuthentication) once auth is refactored.
         // It extends Authentication, which now also checks the Basic password against

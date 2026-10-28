@@ -399,6 +399,26 @@ public class PDClient {
      * @return
      */
     public long registerStore(Metapb.Store store) throws PDException {
+        return registerStoreResponse(store).getStoreId();
+    }
+
+    public Metapb.Store registerStoreWithState(Metapb.Store store) throws PDException {
+        Pdpb.RegisterStoreResponse response = registerStoreResponse(store);
+        if (response.hasStore()) {
+            if (config.isEnableCache() && response.getStore().getId() != 0) {
+                cache.addStore(response.getStore().getId(), response.getStore());
+            }
+            return response.getStore();
+        }
+        if (response.getStoreId() == 0) {
+            return store.toBuilder().setId(0).build();
+        }
+        // Older PDs return only the identity. Avoid a stale Offline entry from an earlier handshake.
+        cache.removeStore(response.getStoreId());
+        return getStore(response.getStoreId());
+    }
+
+    private Pdpb.RegisterStoreResponse registerStoreResponse(Metapb.Store store) throws PDException {
         Pdpb.RegisterStoreRequest request = Pdpb.RegisterStoreRequest.newBuilder()
                                                                      .setHeader(header)
                                                                      .setStore(store).build();
@@ -406,7 +426,7 @@ public class PDClient {
         Pdpb.RegisterStoreResponse response =
                 blockingUnaryCall(PDGrpc.getRegisterStoreMethod(), request);
         handleResponseError(response.getHeader());
-        return response.getStoreId();
+        return response;
     }
 
     /**
@@ -450,6 +470,15 @@ public class PDClient {
             cache.addStore(store.getId(), store);
         }
         return store;
+    }
+
+    public Metapb.Store reportStoreShutdown(long storeId) throws PDException {
+        Pdpb.SetStoreRequest request = Pdpb.SetStoreRequest.newBuilder().setHeader(header)
+                .setStore(Metapb.Store.newBuilder().setId(storeId)).build();
+        Pdpb.SetStoreResponse response = getStub().reportStoreShutdown(request);
+        handleResponseError(response.getHeader());
+        cache.removeStore(storeId);
+        return response.getStore();
     }
 
     /**

@@ -67,7 +67,7 @@ public class DefaultPdProvider implements PdProvider {
     private GraphManager graphManager = null;
 
     public static String name = "store";
-    public static String authority = "default";
+    public static String authority = System.getenv().getOrDefault("HG_PD_AUTH_SECRET_KEY", "default");
 
     PDEventListener listener = new PDEventListener() {
         // Listening to pd change information listener
@@ -133,13 +133,17 @@ public class DefaultPdProvider implements PdProvider {
                  store);
 
         long storeId = 0;
-        Metapb.Store protoObj = store.getProtoObj();
+        Metapb.Store protoObj = store.getProtoObj().toBuilder()
+                                     .setState(store.getState() == Metapb.StoreState.Up ?
+                                               Metapb.StoreState.Up : Metapb.StoreState.Offline)
+                                     .build();
         try {
-            storeId = pdClient.registerStore(protoObj);
+            Metapb.Store registered = pdClient.registerStoreWithState(protoObj);
+            storeId = registered.getId();
             store.setId(storeId);
-            if (pdClient.getStore(storeId).getState() != Metapb.StoreState.Up) {
+            if (registered.getState() == Metapb.StoreState.Pending) {
                 LOG.warn("Store {} is not activated, state is {}", storeId,
-                         pdClient.getStore(storeId).getState());
+                         registered.getState());
             }
         } catch (PDException e) {
             LOG.error(

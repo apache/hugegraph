@@ -132,6 +132,7 @@ public class StoreNodeService {
      * @param store
      */
     public Metapb.Store register(Metapb.Store store) throws PDException {
+        boolean restoring = store.getState() == Metapb.StoreState.Offline;
         if (store.getId() == 0) {
             // Initial registration, generate a new ID, and ensure that the ID is not duplicated.
             store = newStoreNode(store);
@@ -157,15 +158,6 @@ public class StoreNodeService {
         }
 
         // offline or up, or in the initial activation list, go live automatically
-        // TODO: do not mark a re-registering Store Up before it has restored its partition engines
-        // (HgStoreEngine.restoreLocalPartitionEngine); report a restoring state, or expose
-        // restore-complete per shard group, so a rolling restart can wait on it. The Helm chart
-        // (helm/hugegraph) production preset (values-cluster.yaml) keeps Store rollouts on
-        // OnDelete with a manual /v1/shardGroups barrier between Pod deletions; the default
-        // values use RollingUpdate. Restore-complete alone does not retire the barrier: a stopped
-        // Store stays Up until its keep-alive entry expires, so keep the rollout checks until PD
-        // also exposes liveness that tells stale membership apart.
-        // https://github.com/apache/hugegraph/issues/3229
         Metapb.StoreState storeState = lastStore.getState();
         if (storeState == Metapb.StoreState.Offline || storeState == Metapb.StoreState.Up
             || inInitialStoreList(store)) {
@@ -205,12 +197,26 @@ public class StoreNodeService {
             }
         }
 
+        // Updated Stores register Offline to obtain their identity before restoring partitions.
+        // Older Stores still request Up, and Pending activation and duplicate checks stay intact.
+        if (restoring && storeState == Metapb.StoreState.Up) {
+            storeState = Metapb.StoreState.Offline;
+            store = store.toBuilder().setState(storeState).build();
+        }
+
         // Store information
         storeInfoMeta.updateStore(store);
         if (storeState == Metapb.StoreState.Up) {
             // Update the store active status
             storeInfoMeta.keepStoreAlive(store);
             onStoreStatusChanged(store, Metapb.StoreState.Offline, Metapb.StoreState.Up);
+            checkStoreStatus();
+        } else if (restoring && storeState == Metapb.StoreState.Offline) {
+            // A returned Store is alive even while its engines recover. Renew on each retry.
+            storeInfoMeta.keepStoreAlive(store);
+            if (lastStore.getState() == Metapb.StoreState.Up) {
+                onStoreStatusChanged(store, Metapb.StoreState.Up, Metapb.StoreState.Offline);
+            }
             checkStoreStatus();
         }
 
@@ -267,6 +273,7 @@ public class StoreNodeService {
      * Update the store information, detect the change of store status, and notify Hugestore
      */
     public synchronized Metapb.Store updateStore(Metapb.Store store) throws PDException {
+        boolean administrativeOffline = store.getState() == Metapb.StoreState.Offline;
         log.info("updateStore storeId: {}, address: {}, state: {}", store.getId(),
                  store.getAddress(), store.getState());
         Metapb.Store lastStore = storeInfoMeta.getStore(store.getId());
@@ -287,6 +294,10 @@ public class StoreNodeService {
         }
 
         storeInfoMeta.updateStore(store);
+        if (administrativeOffline) {
+            // A crashed restoring Store may already be Offline while its lease is still present.
+            storeInfoMeta.removeActiveStore(store);
+        }
         if (store.getState() != Metapb.StoreState.Unknown &&
             store.getState() != lastStore.getState()) {
             // If you want to take the store offline
@@ -309,9 +320,6 @@ public class StoreNodeService {
                     storeInfoMeta.removeActiveStore(store);
                 }
                 storeTurnoff(store);
-            } else if (store.getState() == Metapb.StoreState.Offline) {
-                // Monitor that the store has gone offline and is removed from the active
-                storeInfoMeta.removeActiveStore(store);
             } else if (store.getState() == Metapb.StoreState.Tombstone) {
                 // When the status changes, the store is shut down, the shardGroup is modified,
                 // and the replica is migrated
@@ -326,6 +334,18 @@ public class StoreNodeService {
             onStoreStatusChanged(lastStore, lastStore.getState(), store.getState());
         }
         return store;
+    }
+
+    public synchronized Metapb.Store reportStoreShutdown(long storeId) throws PDException {
+        Metapb.Store current = getStore(storeId);
+        if (current.getState() != Metapb.StoreState.Up) {
+            return current;
+        }
+        Metapb.Store offline = current.toBuilder().setState(Metapb.StoreState.Offline).build();
+        storeInfoMeta.updateStore(offline);
+        // Preserve the existing lease, including its expiry; administrative Offline still removes it.
+        onStoreStatusChanged(offline, Metapb.StoreState.Up, Metapb.StoreState.Offline);
+        return offline;
     }
 
     /**
@@ -409,6 +429,21 @@ public class StoreNodeService {
         return storeInfoMeta.getActiveStores();
     }
 
+    /**
+     * Placement requires both a live lease and the current canonical Up state.
+     * Shutdown reports deliberately retain the old TTL entry until expiry.
+     */
+    public List<Metapb.Store> getPlacementStores() throws PDException {
+        List<Metapb.Store> stores = new ArrayList<>();
+        for (Metapb.Store active : getActiveStores()) {
+            Metapb.Store current = storeInfoMeta.getStore(active.getId());
+            if (current != null && current.getState() == Metapb.StoreState.Up) {
+                stores.add(current);
+            }
+        }
+        return stores;
+    }
+
     public List<Metapb.Store> getTombStores() throws PDException {
         List<Metapb.Store> stores = new ArrayList<>();
         for (Metapb.Store store : this.getStores()) {
@@ -437,7 +472,7 @@ public class StoreNodeService {
         // number cannot exceed the number of raft groups
         if (storeInfoMeta.getShardGroup(partId) == null) {
             // Get active store key
-            List<Metapb.Store> stores = storeInfoMeta.getActiveStores();
+            List<Metapb.Store> stores = getPlacementStores();
 
             if (stores.size() == 0) {
                 throw new PDException(Pdpb.ErrorType.NO_ACTIVE_STORE_VALUE,
@@ -497,7 +532,7 @@ public class StoreNodeService {
      */
     public synchronized List<Metapb.Shard> reallocShards(Metapb.ShardGroup shardGroup) throws
                                                                                        PDException {
-        List<Metapb.Store> stores = storeInfoMeta.getActiveStores();
+        List<Metapb.Store> stores = getPlacementStores();
 
         if (stores.size() == 0) {
             throw new PDException(Pdpb.ErrorType.NO_ACTIVE_STORE_VALUE,
@@ -511,7 +546,8 @@ public class StoreNodeService {
         }
 
         int shardCount = pdConfig.getPartition().getShardCount();
-        shardCount = Math.min(shardCount, stores.size());
+        // A leased but restoring member must not make an existing group shrink.
+        shardCount = Math.min(shardCount, getActiveStores().size());
         if (shardCount == 2 || shardCount < 1) {
             // Two shards could not elect a leader
             // It cannot be 0
@@ -522,6 +558,11 @@ public class StoreNodeService {
         shards.addAll(shardGroup.getShardsList());
 
         if (shardCount > shards.size()) {
+            long candidates = stores.stream().filter(store -> !isStoreInShards(shards, store.getId())).count();
+            if (candidates < shardCount - shards.size()) {
+                throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
+                                      "Not enough restored stores to add replicas");
+            }
             // Need to add shards
             log.info("reallocShards ShardGroup {}, add shards from {} to {}",
                      shardGroup.getId(), shards.size(), shardCount);
@@ -583,7 +624,7 @@ public class StoreNodeService {
                                                                                     PDException {
         int sum = groups.stream().map(pair -> pair.getValue()).reduce(0, Integer::sum);
         // shard group is too big
-        if (sum > getActiveStores().size() * pdConfig.getPartition().getMaxShardsPerStore()) {
+        if (sum > getPlacementStores().size() * pdConfig.getPartition().getMaxShardsPerStore()) {
             throw new PDException(Pdpb.ErrorType.Too_Many_Partitions_Per_Store_VALUE,
                                   "can't satisfy target shard group count");
         }
@@ -921,7 +962,7 @@ public class StoreNodeService {
     public boolean checkStoreCanOffline(Metapb.Store currentStore) {
         try {
             long currentStoreId = currentStore.getId();
-            List<Metapb.Store> activeStores = this.getActiveStores();
+            List<Metapb.Store> activeStores = this.getPlacementStores();
             Map<Long, Metapb.Store> storeMap = new HashMap<>();
             activeStores.forEach(store -> {
                 if (store.getId() != currentStoreId) {

@@ -60,6 +60,7 @@ services:
       pd:
         condition: service_healthy
     environment:
+      HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
       HG_STORE_PD_ADDRESS: pd:8686
       HG_STORE_GRPC_HOST: store
       HG_STORE_GRPC_PORT: "8500"

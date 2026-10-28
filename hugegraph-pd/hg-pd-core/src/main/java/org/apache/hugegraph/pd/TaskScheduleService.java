@@ -298,7 +298,7 @@ public class TaskScheduleService {
             return null;
         }
 
-        int activeStores = storeService.getActiveStores().size();
+        int activeStores = storeService.getPlacementStores().size();
         if (activeStores == 0) {
             log.warn("balancePartitionShard non active stores, skip to balancePartitionShard");
             return null;
@@ -318,7 +318,7 @@ public class TaskScheduleService {
 
         // Count the partitions on each store, StoreId -> PartitionID, ShardRole
         Map<Long, Map<Integer, Metapb.ShardRole>> partitionMap = new HashMap<>();
-        storeService.getActiveStores().forEach(store -> {
+        storeService.getPlacementStores().forEach(store -> {
             partitionMap.put(store.getId(), new HashMap<>());
         });
 
@@ -651,7 +651,7 @@ public class TaskScheduleService {
 
         // The maximum split count that a compute cluster can support
         int splitCount = pdConfig.getPartition().getMaxShardsPerStore() *
-                         storeService.getActiveStores().size() /
+                         storeService.getPlacementStores().size() /
                          (storeService.getShardGroups().size() *
                           pdConfig.getPartition().getShardCount());
 
@@ -750,7 +750,7 @@ public class TaskScheduleService {
         // Record the amount of data in the partition to be migrated
         Map<Integer, Long> partitionDataSize = new HashMap<>();
 
-        storeService.getActiveStores().forEach(store -> {
+        storeService.getPlacementStores().forEach(store -> {
             if (store.getId() != sourceStore.getId()) {
                 otherPartitionMap.put(store.getId(), new HashMap<>());
                 // Records the remaining disk space of other stores, in bytes
