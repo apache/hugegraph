@@ -381,7 +381,8 @@ limits it can't read. A Store with a 4 GiB limit, `-Xmx1g` and `-XX:MaxDirectMem
 gets 512 MiB. Without
 `-XX:MaxDirectMemorySize` the JVM allows as much direct memory as heap, and the budget counts
 it that way. `bin/start-hugegraph-store.sh` sets the flag to the heap it picks; when `-j` sets
-`-Xmx`, `-XX:MaxHeapSize` or `-XX:MaxDirectMemorySize` itself, the launcher leaves the flag out and the JVM's
+`-Xmx`, `-XX:MaxHeapSize` or `-XX:MaxDirectMemorySize` itself, or `JAVA_TOOL_OPTIONS` or
+`JDK_JAVA_OPTIONS` sets `-XX:MaxDirectMemorySize`, the launcher leaves the flag out and the JVM's
 default (that heap) or the given cap applies. Either way the budget counts a limit the JVM
 enforces. In small containers set a
 cap below the heap, or the budget falls to the 256 MiB floor.

@@ -174,9 +174,11 @@ JAVA
     for option in default custom-java-options user-options default-serial default-zgc \
                   g1 G1 zgc ZGC direct-default direct-heap-lower direct-heap-raised \
                   direct-heap-tab direct-heap-alias direct-explicit-cap \
+                  direct-tool-options-cap direct-jdk-options-cap direct-tool-options-heap \
                   invalid missing-module-options; do
         capture="$fixture/$option.args"
         local -a args=(-d false)
+        local tool_options="" jdk_options=""
         jvm_options="-Xms64m -Xmx64m"
         case "$option" in
             default) jvm_options="" ;;
@@ -189,13 +191,19 @@ JAVA
             direct-heap-tab) jvm_options=""; args+=(-j $'-Dlauncher.test=true\t-Xmx4g') ;;
             direct-heap-alias) jvm_options=""; args+=(-j "-XX:MaxHeapSize=4g") ;;
             direct-explicit-cap) jvm_options=""; args+=(-j "-XX:MaxDirectMemorySize=256m") ;;
+            # The JVM reads these before the command line, so a launcher cap would override them
+            direct-tool-options-cap) jvm_options=""; tool_options="-Dt=1 -XX:MaxDirectMemorySize=512m" ;;
+            direct-jdk-options-cap) jvm_options=""; jdk_options="-XX:MaxDirectMemorySize=512m" ;;
+            # The launcher -Xmx overrides an environment heap, so the cap still follows calc_xmx
+            direct-tool-options-heap) jvm_options=""; tool_options="-Xmx4g" ;;
             missing-module-options) rm "$fixture/bin/jvm-module.options" ;;
             default-serial) jvm_options="$jvm_options -XX:+UseSerialGC" ;;
             default-zgc) jvm_options="$jvm_options -XX:+UseZGC" ;;
             *) args+=(-g "$option") ;;
         esac
-        env -u GC_OPTION -u JAVA_TOOL_OPTIONS -u LD_PRELOAD \
+        env -u GC_OPTION -u LD_PRELOAD \
             -u TOPLINGDB_ROCKSDB_PROVIDER -u TOPLING_RUNTIME_CLASSPATH -u TOPLING_ACTIVE_NATIVE \
+            JAVA_TOOL_OPTIONS="$tool_options" JDK_JAVA_OPTIONS="$jdk_options" \
             JAVA_HOME="$fixture/jdk" JAVA_OPTIONS="$jvm_options" \
             OPEN_TELEMETRY=false STDOUT_MODE=true CAPTURE_FILE="$capture" \
             PATH="$fixture/jdk/bin:$PATH" \
@@ -231,13 +239,14 @@ JAVA
             # The JVM uses the last -XX:MaxDirectMemorySize on the command line
             cap=$(grep -E '^-XX:MaxDirectMemorySize=' "$capture" | tail -1)
             case "$option" in
-                direct-default) want='-XX:MaxDirectMemorySize=1024m' ;;
+                direct-default | direct-tool-options-heap) want='-XX:MaxDirectMemorySize=1024m' ;;
                 direct-explicit-cap) want='-XX:MaxDirectMemorySize=256m' ;;
-                # A heap-only -j leaves the cap to the JVM, which defaults it to that heap
+                # A heap-only -j leaves the cap to the JVM, which defaults it to that heap;
+                # a cap in JAVA_TOOL_OPTIONS or JDK_JAVA_OPTIONS is left to apply as given
                 *) want='' ;;
             esac
             if [[ "$cap" == "$want" ]]; then
-                pass "launcher '$option' sets direct memory to '${want:-the JVM default (-j heap)}'"
+                pass "launcher '$option' sets direct memory to '${want:-no launcher cap}'"
             else
                 fail "launcher '$option' set direct memory to '${cap:-none}', expected '${want:-none}'"
             fi
