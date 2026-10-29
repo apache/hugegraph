@@ -123,6 +123,21 @@ unchanged. To run the Store server tests through the package phase:
 mvn clean package -pl hugegraph-store/hg-store-test -am -Pstore-server-test
 ```
 
+#### Enabling S3 on the stock distribution
+
+The S3 cloud storage provider is opt-in and is not bundled by default. To include it, add
+`-Ps3-cloud-storage` to the build; it bundles `hg-store-cloud-s3` and the AWS SDK into the
+`hg-store-node` executable JAR:
+
+```bash
+mvn clean package -pl hugegraph-store/hg-store-dist -am -DskipTests -Ps3-cloud-storage
+```
+
+Then set `cloud.storage.enabled: true` and the `cloud.storage.s3.*` options in `conf/application.yml`.
+The stock distribution does not scan a `plugins/` directory, so a provider jar cannot be dropped in
+at runtime. See [Pluggable Cloud Storage](docs/pluggable-cloud-storage-architecture.md) for the
+options, packaging details and operations guidance.
+
 ### Configuration
 
 Extract the distribution package and edit `conf/application.yml`:
@@ -441,6 +456,7 @@ Comprehensive documentation for HugeGraph Store:
 | [Integration Guide](docs/integration-guide.md) | Integrating Store with HugeGraph Server, client API usage, migrating from other backends |
 | [Query Engine](docs/query-engine.md) | Query pushdown mechanisms, multi-partition queries, gRPC API reference |
 | [Operations Guide](docs/operations-guide.md) | Monitoring and metrics, troubleshooting common issues, backup and recovery, rolling upgrades |
+| [Pluggable Cloud Storage](docs/pluggable-cloud-storage-architecture.md) | Optional S3/object-storage mirroring of SSTs and metadata: configuration, packaging, observability and recovery |
 | [Best Practices](docs/best-practices.md) | Hardware sizing, performance tuning, security configuration, high availability design |
 | [Development Guide](docs/development-guide.md) | Development environment setup, module architecture, testing strategies, contribution workflow |
 

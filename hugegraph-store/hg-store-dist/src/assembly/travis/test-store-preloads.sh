@@ -60,7 +60,8 @@ download_and_verify() {
     touch "$2"
 }
 MOCK
-    touch "$top/lib/hg-store-node-fixture.jar" "$top/topling/rocksdbjni.jar" \
+    touch "$top/lib/hg-store-node-fixture.jar" "$top/lib/rocksdbjni-fixture.jar" \
+          "$top/topling/rocksdbjni.jar" \
           "$top/topling/librocksdbjni-linux64.so"
     (cd "$top/topling" && sha256sum rocksdbjni.jar librocksdbjni-linux64.so > easy-migrate.sha256)
     printf '%s\n' 'http: {auto_start_http: false}' > "$top/conf/toplingdb.yaml"
@@ -90,7 +91,7 @@ for arch in x86_64 aarch64 arm64; do
             }
             test "$(cat "$top/version-preloads")" = "$expected"
             test "$(cat "$top/main-preloads")" = "$expected"
-            grep -qx -- '-jar' "$top/main-preloads.args"
+            grep -qx 'org.springframework.boot.loader.JarLauncher' "$top/main-preloads.args"
 
             default_top="$TEST_ROOT/$name-default"
             default_expected="${expected//$top/$default_top}"

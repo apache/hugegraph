@@ -408,14 +408,30 @@ jobs:
           echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
           echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
-      - name: Run Store ingress and Arthas security tests
+      # -Dtest scopes the run to hg-store-node's own tests (including ArthasSecurityTest); without it
+      # -am would also run the test suites of every upstream module. StoredRowIngressTest is listed
+      # by name because hg-store-core also has tests in org.apache.hugegraph.store.business.
+      - name: Run store-node tests
         run: |
           set -o pipefail
           RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-node -am \
-            -Dtest=StoredRowIngressTest,ArthasSecurityTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtest='org/apache/hugegraph/store/node/**/*Test,StoredRowIngressTest' \
+            -Dsurefire.failIfNoSpecifiedTests=false -DreuseForks=false \
             -Djacoco.sessionId=store-node-test \
             -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec" 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
+
+      # Unit tests for the optional S3 cloud-storage provider plugin. -Dtest scopes the run to this
+      # module's own provider test (-am would otherwise also run every upstream module's tests);
+      # the module's *Benchmark / *E2ETest classes stay excluded by its Surefire config.
+      - name: Run S3 cloud storage provider test
+        run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          mvn test -pl hugegraph-store/hg-store-cloud-s3 -am \
+            -Dtest=S3CloudStorageProviderTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -DreuseForks=false -ntp 2>&1 | tee "$RUNTIME_LOG"
           bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run common test
