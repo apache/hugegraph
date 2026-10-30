@@ -325,6 +325,74 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
         this.assertOlapClear(false, false);
     }
 
+    @Test
+    public void testToplingOlapClearPreservesOtherThreadPendingWrites() throws Exception {
+        Id id = IdGenerator.of(123L);
+        String path = DB_PATH + "/olap-clear-concurrent";
+        String table = "store+ap_123";
+        RocksDBSessions olap = new RocksDBStdSessions(FakeObjects.newConfig(), "db", "olap", path, path);
+        CountDownLatch pending = new CountDownLatch(1);
+        CountDownLatch commit = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread writer = new Thread(() -> {
+            try {
+                RocksDBSessions.Session session = olap.session();
+                session.put(table, getBytes("m"), getBytes("pending replacement"));
+                session.put(table, getBytes("z"), getBytes("pending outside range"));
+                pending.countDown();
+                Assert.assertTrue(commit.await(30, TimeUnit.SECONDS));
+                session.commit();
+            } catch (Throwable e) {
+                failure.set(e);
+            } finally {
+                pending.countDown();
+                try {
+                    olap.close();
+                } catch (Throwable e) {
+                    failure.compareAndSet(null, e);
+                }
+            }
+        }, "olap-pending-writer");
+        try {
+            RocksDBStore.RocksDBGraphStore store = new RocksDBStore.RocksDBGraphStore(
+                    new RocksDBStoreProvider(), "db", "store") {
+                @Override
+                protected RocksDBSessions db(HugeType type) {
+                    return type == HugeType.OLAP ? olap : super.db(type);
+                }
+            };
+            Whitebox.setInternalState(store, "sessions", olap);
+            Whitebox.setInternalState(store, "toplingProvider", true);
+            store.createOlapTable(id);
+            RocksDBSessions.Session session = olap.session();
+            session.put(table, getBytes("m"), getBytes("old"));
+            session.put(table, getBytes("n"), getBytes("old"));
+            session.commit();
+            writer.start();
+            Assert.assertTrue(pending.await(30, TimeUnit.SECONDS));
+            Assert.assertNull(failure.get());
+            Assert.assertArrayEquals(getBytes("old"), session.get(table, getBytes("m")));
+            Assert.assertNull(session.get(table, getBytes("z")));
+
+            store.clearOlapTable(id);
+            // The other worker cannot commit until the clear has returned.
+            Assert.assertNull(session.keyRange(table));
+            commit.countDown();
+            writer.join(TimeUnit.SECONDS.toMillis(30));
+            Assert.assertFalse(writer.isAlive());
+            Assert.assertNull(failure.get());
+            Assert.assertArrayEquals(getBytes("pending replacement"), session.get(table, getBytes("m")));
+            Assert.assertArrayEquals(getBytes("pending outside range"), session.get(table, getBytes("z")));
+            Assert.assertNull(session.get(table, getBytes("n")));
+        } finally {
+            commit.countDown();
+            writer.join(TimeUnit.SECONDS.toMillis(30));
+            Assert.assertFalse("Writer must stop before closing its database", writer.isAlive());
+            olap.close();
+            FileUtils.deleteDirectory(new File(path));
+        }
+    }
+
     private void assertOlapClear(boolean topling, boolean separate) throws Exception {
         Id id = IdGenerator.of(123L);
         String path = DB_PATH + "/olap-clear-" + topling + "-" + separate;
@@ -366,6 +434,7 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
                     Assert.assertSame(handle, handles.get(table));
                 } else {
                     Assert.assertNotSame(handle, handles.get(table));
+                    handle = handles.get(table);
                 }
                 Assert.assertTrue(olap.existsTable(table));
                 Assert.assertNull(session.keyRange(table));
