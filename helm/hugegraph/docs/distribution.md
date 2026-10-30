@@ -145,5 +145,5 @@ enabling either, also transfer its configured `apache/seatunnel` or
 the same Vermeer image, which defaults to `hugegraph/vermeer:latest`. Mirror the
 selected image and required platforms; pin a compatible tag or digest for a
 reproducible deployment. See [image compatibility](vermeer.md#image-compatibility)
-for required capabilities and migration from the former pinned default. Hubble
-needs its native Vermeer adapter when selecting a custom build.
+for required capabilities. Hubble needs its native Vermeer adapter when
+selecting a custom build.

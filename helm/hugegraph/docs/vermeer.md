@@ -131,12 +131,9 @@ token-file properties and sets `operations.vermeer.enabled=false`, including
 when the image contains old defaults.
 
 Cluster health requires a paired Hubble and Vermeer build that supports the
-authenticated `GET /api/v1/admin/cluster` snapshot (`schema_version: 1`). The
-former pinned Vermeer image documented below predates that endpoint. Releases
-that retain it need a compatible Vermeer image and Hubble build selected using
-`vermeer.image` and `hubble.image` (clear or replace the old
-`vermeer.image.digest` when selecting another tag). Do not infer capability from
-a tag alone. An older image that returns 404 is shown as unsupported, not
+authenticated `GET /api/v1/admin/cluster` snapshot (`schema_version: 1`). Select
+compatible builds using `vermeer.image` and `hubble.image`; a tag alone does not
+establish capability. An image that returns 404 is shown as unsupported, not
 healthy. A failed or unauthorized snapshot is reported as unavailable and does
 not turn the main graph cluster into a database outage.
 
@@ -286,11 +283,7 @@ its intended internal API integration.
 ### Image compatibility
 
 The development Chart defaults to `hugegraph/vermeer:latest` and `Always` pull
-policy. Pin a compatible tag or digest for reproducible deployments. The former
-default `hugegraph/vermeer:helm-30b67d93e7d0` was published at OCI index digest
-`sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e`
-for Linux `amd64` and `arm64` from
-[source commit 30b67d93e7d0](https://github.com/apache/hugegraph-computer/commit/30b67d93e7d097374341cf46ee6a0703421512b1).
+policy. Pin a compatible tag or digest for reproducible deployments.
 
 Custom builds must include `/go/bin/vermeer-token`, versioned HMAC-SHA256 file
 credentials, native administrator password login and space-aware Worker
@@ -298,9 +291,8 @@ availability. Hubble needs its native Vermeer adapter and nine algorithm forms.
 A different tag alone does not establish these capabilities.
 
 `vermeer.image.digest` takes priority over the tag. A Helm upgrade using
-`--reuse-values` can retain the former tag, digest and pull policy. To switch an
-existing release to the development default, include its other required values
-and explicitly reset all three:
+`--reuse-values` retains the release's image settings. To use the development
+default, include the other required values and explicitly set all three:
 
 ```bash
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph -f my-values.yaml \
@@ -311,8 +303,8 @@ helm upgrade hugegraph ./helm/hugegraph -n hugegraph -f my-values.yaml \
 
 Retain the release's reviewed credentials, storage and metadata namespace in
 `my-values.yaml`. An explicit digest from reused or supplied values must also be
-cleared when selecting another tag. A custom immutable build can instead set its own verified
-`vermeer.image.digest`. Images inherit `global.imageRegistry` and
+cleared when selecting another tag. A custom immutable build can instead set its
+own verified `vermeer.image.digest`. Images inherit `global.imageRegistry` and
 `imagePullSecrets`; registry mirrors must preserve the selected index and
 required architectures. Master, Worker and token initialization reuse the
 Vermeer image, with no runtime package downloads.

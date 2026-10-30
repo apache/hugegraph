@@ -93,7 +93,7 @@ When Vermeer is enabled, mirror its additional image
 `hugegraph/vermeer:latest` or the compatible tag or digest you selected. It is
 not part of the four-image default installation above. See
 [image compatibility](../docs/vermeer.md#image-compatibility) for the required
-capabilities and migration from the former pinned default.
+capabilities and image settings.
 
 The PD wait init container reuses the Store image and Helm test reuses the
 Server image. Both already include `curl`; the chart selects a shell command

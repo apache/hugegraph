@@ -156,7 +156,7 @@ When enabled, also mirror `apache/seatunnel` and/or `hugegraph/vermeer` at the
 configured versions. Vermeer token initialization reuses its own image.
 The optional Vermeer image defaults to `latest` with `Always` pull policy, like
 the other HugeGraph components. See [image compatibility and upgrades](docs/vermeer.md#image-compatibility)
-for production pinning and migration from an older Chart.
+for image settings and production pinning.
 
 ### Storage
 
