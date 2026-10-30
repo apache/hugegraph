@@ -164,6 +164,56 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         }
     }
 
+    @Test
+    public void testMultiListCloseBeforeIterationClosesAllSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second));
+
+        iterator.close();
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertFalse(iterator.hasNext());
+
+        iterator.close();
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+    }
+
+    @Test
+    public void testLimitDedupCloseBeforeIterationClosesMultiListSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        ScanIterator iterator = new MapLimitIterator<BackendColumn>(
+                new MultiListIterator(List.of(first, second)));
+
+        iterator.close();
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+    }
+
+    @Test
+    public void testMultiListClosesEachSourceOnceAfterPartialIteration() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        RowIterator third = singleRow(3);
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second, third));
+
+        assertTrue(iterator.hasNext());
+        assertEquals(1, (int) iterator.<BackendColumn>next().name[0]);
+        assertTrue(iterator.hasNext());
+        assertEquals(1, first.closes);
+
+        iterator.close();
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertEquals(1, third.closes);
+    }
+
     @Test(timeout = 5000)
     public void testUnionUniqueStreamDoesNotLoseRecordsBetweenSingleRecordBatches() throws Exception {
         assertSingleRecordBatches(FilterKind.UNION_UNIQUE);
@@ -268,6 +318,11 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         }
     }
 
+    private static RowIterator singleRow(int key) {
+        return new RowIterator(List.of(BackendColumn.of(new byte[]{(byte) key},
+                                                        new byte[]{(byte) (key + 10)})));
+    }
+
     private static FilterFixture filter(FilterKind kind) {
         BackendColumn first = BackendColumn.of(new byte[]{1}, new byte[]{11});
         BackendColumn second = BackendColumn.of(new byte[]{2}, new byte[]{12});
@@ -317,6 +372,7 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
 
         private final Iterator<BackendColumn> rows;
         private boolean closed;
+        private int closes;
         private int probes;
         private RuntimeException closeFailure;
 
@@ -347,6 +403,7 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         @Override
         public void close() {
             this.closed = true;
+            this.closes++;
             if (this.closeFailure != null) {
                 throw this.closeFailure;
             }
