@@ -18,6 +18,7 @@
 package org.apache.hugegraph.pd.client;
 
 import java.io.Closeable;
+import java.net.ConnectException;
 import java.util.LinkedList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -42,6 +43,7 @@ import io.grpc.ClientCall;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.AbstractBlockingStub;
 import io.grpc.stub.AbstractStub;
@@ -278,6 +280,88 @@ public abstract class AbstractClient implements Closeable {
             throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
                                   "RPC blocking call failed: " + method.getFullMethodName(), e);
         }
+    }
+
+    /**
+     * Sends the request once, for a call that is not idempotent: it can't be sent again when
+     * its response is lost. An UNAVAILABLE status drops the stub if it still holds the channel
+     * of the call, so the next call connects again; other failures keep it, since calls of
+     * other threads may be running on the channel and a reconnect would cut them off. A call
+     * whose connection was refused never left this client, so it is sent once more on a new
+     * stub, as a PD that stopped a moment ago leaves it.
+     *
+     * @return null when the call failed
+     */
+    protected <ReqT, RespT> RespT blockingUnaryCallOnce(
+            MethodDescriptor<ReqT, RespT> method, ReqT req) throws PDException {
+        return blockingUnaryCallOnce(method, req, false);
+    }
+
+    private <ReqT, RespT> RespT blockingUnaryCallOnce(
+            MethodDescriptor<ReqT, RespT> method, ReqT req, boolean resent) throws PDException {
+        AbstractBlockingStub stub;
+        Channel attemptChannel;
+        synchronized (this) {
+            stub = getBlockingStub();
+            // The stub of the call wraps the channel with its interceptors: compare the stored one
+            attemptChannel = proxy.getBlockingStub().getChannel();
+        }
+        try {
+            return ClientCalls.blockingUnaryCall(stub.getChannel(), method,
+                                                 stub.getCallOptions(), req);
+        } catch (StatusRuntimeException e) {
+            boolean unsent = !resent && refused(e);
+            log.warn("{} failed, {}: {}", method.getFullMethodName(),
+                     unsent ? "never sent, sending it once more" : "not sent again",
+                     e.getStatus());
+            if (e.getStatus().getCode() == Status.Code.UNAVAILABLE) {
+                synchronized (this) {
+                    AbstractBlockingStub current = proxy.getBlockingStub();
+                    if (current != null && current.getChannel() == attemptChannel) {
+                        proxy.setBlockingStub(null);
+                    }
+                }
+            }
+            if (unsent) {
+                return blockingUnaryCallOnce(method, req, true);
+            }
+            throw failed(method, e);
+        } catch (RuntimeException e) {
+            log.error(method.getFullMethodName() + " exception, not sent again", e);
+            return null;
+        }
+    }
+
+    /**
+     * The failure of a call made once, with the gRPC status, so the caller can tell a call PD
+     * rejected (UNIMPLEMENTED from an older PD, PERMISSION_DENIED) from one that was lost
+     * (UNAVAILABLE, DEADLINE_EXCEEDED) and has an unknown outcome
+     */
+    private PDException failed(MethodDescriptor<?, ?> method, StatusRuntimeException e) {
+        Status status = e.getStatus();
+        boolean lost = status.getCode() == Status.Code.UNAVAILABLE ||
+                       status.getCode() == Status.Code.DEADLINE_EXCEEDED;
+        String message = method.getFullMethodName() + " failed with " + status.getCode() +
+                         (status.getDescription() == null ? "" :
+                          ": " + status.getDescription()) +
+                         (lost ? ", pd.peers=" + config.getServerHost() : "");
+        return new PDException(lost ? Pdpb.ErrorType.PD_UNREACHABLE_VALUE :
+                               Pdpb.ErrorType.UNKNOWN_VALUE, message, e);
+    }
+
+    /**
+     * Whether the call failed to connect, so its request was never written
+     */
+    private static boolean refused(StatusRuntimeException e) {
+        if (e.getStatus().getCode() != Status.Code.UNAVAILABLE) {
+            return false;
+        }
+        for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConnectException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // this.stubs = new ConcurrentHashMap<String,AbstractBlockingStub>(hosts.length);

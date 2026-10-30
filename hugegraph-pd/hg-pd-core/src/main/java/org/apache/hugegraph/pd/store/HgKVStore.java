@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.grpc.kv.TxnRequest;
+import org.apache.hugegraph.pd.grpc.kv.TxnResponse;
 
 public interface HgKVStore {
 
@@ -54,6 +56,16 @@ public interface HgKVStore {
     void loadSnapshot(String snapshotPath) throws PDException;
 
     List<KV> scanRange(byte[] start, byte[] end);
+
+    /**
+     * Writes all entries in one atomic batch, in list order; a null value deletes the key
+     */
+    void writeBatch(List<KV> kvs) throws PDException;
+
+    /**
+     * Applies a KV TXN atomically, see {@link KvTxnApplier}
+     */
+    TxnResponse txn(TxnRequest request) throws PDException;
 
     void close();
 

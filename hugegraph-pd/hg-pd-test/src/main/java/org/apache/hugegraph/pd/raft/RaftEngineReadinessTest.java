@@ -22,6 +22,8 @@ import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.hugegraph.pd.common.PDException;
+import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.Assert;
 import org.junit.Before;
@@ -29,6 +31,7 @@ import org.junit.Test;
 
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.Status;
+import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.entity.LeaderChangeContext;
 import com.alipay.sofa.jraft.entity.PeerId;
@@ -192,6 +195,46 @@ public class RaftEngineReadinessTest {
         this.engine.refreshAlivePeerCount();
 
         Assert.assertEquals(-1, this.engine.getAlivePeerCount());
+    }
+
+    /**
+     * shutDown() drops the TXN peer gate and the log index of the node it stops, so a txn that
+     * arrives after it fails like any proposal without a node, not with a NullPointerException
+     * from a gate that lists the peers of a dropped node
+     */
+    @Test
+    public void testShutdownDropsTheTxnPeerGate() throws Exception {
+        Whitebox.setInternalState(this.engine, "lastLogIndexAtStart", 7L);
+        Whitebox.setInternalState(this.engine, "txnPeerGate", new TxnPeerGate(
+                () -> { throw new NullPointerException("raftNode"); },
+                endpoint -> null, 3000L, 100L, System::currentTimeMillis));
+        this.engine.shutDown();
+        Assert.assertEquals(Long.MAX_VALUE, this.engine.getLastLogIndexAtStart());
+        Assert.assertNull(Whitebox.getInternalState(this.engine, "txnPeerGate"));
+        this.engine.checkTxnPeers();
+        this.engine.checkTxnPeers(new Configuration());
+    }
+
+    /**
+     * jraft lists the configuration only on the leader and throws IllegalStateException
+     * elsewhere. A node that lost the leadership after the leader check of a call answers a
+     * txn with TXN_NOT_PROPOSED and a membership change with NOT_LEADER, not with the raw
+     * exception
+     */
+    @Test
+    public void testPeerChecksOffTheLeaderAnswerWithAPdException() throws Exception {
+        Whitebox.setInternalState(this.engine, "txnPeerGate", new TxnPeerGate(
+                () -> { throw new IllegalStateException("Not leader"); },
+                endpoint -> null, 3000L, 100L, System::currentTimeMillis));
+        PDException txn = Assert.assertThrows(PDException.class, this.engine::checkTxnPeers);
+        Assert.assertEquals(Pdpb.ErrorType.TXN_NOT_PROPOSED_VALUE, txn.getErrorCode());
+
+        when(mockNode.listPeers()).thenThrow(new IllegalStateException("Not leader"));
+        Configuration next = new Configuration();
+        next.parse("127.0.0.2:8610");
+        PDException change = Assert.assertThrows(PDException.class,
+                                                 () -> this.engine.checkTxnPeers(next));
+        Assert.assertEquals(Pdpb.ErrorType.NOT_LEADER_VALUE, change.getErrorCode());
     }
 
     @Test

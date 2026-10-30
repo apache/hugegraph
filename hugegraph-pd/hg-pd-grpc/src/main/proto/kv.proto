@@ -39,6 +39,7 @@ service KvService {
   rpc isLocked(LockRequest) returns (LockResponse);
   rpc putTTL(TTLRequest) returns (TTLResponse);
   rpc keepTTLAlive(TTLRequest) returns (TTLResponse);
+  rpc txn(TxnRequest) returns (TxnResponse);
 }
 
 /* requests */
@@ -140,4 +141,108 @@ message TTLRequest{
 message TTLResponse{
   pdpb.ResponseHeader header = 1;
   bool succeed = 2;
+}
+
+/*
+ * Atomic multi-key write, applied as one raft entry and one RocksDB write batch. Keys and
+ * values share the namespace of put/get/scanPrefix. The compares run first, in order; when
+ * one fails, or the graph record rejects the TXN, none of its ops is written. TXN writes fire
+ * no plain watch events. A TXN sent again is applied again, which is not always harmless (a
+ * guarded CREATE fails its compare the second time), so a client sends a TXN once and reads
+ * the state when it gets no response.
+ */
+message TxnRequest {
+  pdpb.RequestHeader header = 1;
+  repeated TxnCompare compares = 2;
+  repeated TxnOp ops = 3;
+  // The per-graph schema sync record to change, if any
+  TxnRecord record = 4;
+}
+
+message TxnCompare {
+  enum Kind {
+    // The zero value: a compare without a kind is rejected before the TXN is proposed
+    UNSPECIFIED = 0;
+    ABSENT = 1;
+    EQUALS = 2;
+  }
+  string key = 1;
+  Kind kind = 2;
+  string value = 3;
+}
+
+message TxnOp {
+  enum Type {
+    // The zero value: an op without a type is rejected before the TXN is proposed
+    UNSPECIFIED = 0;
+    PUT = 1;
+    DELETE = 2;
+    DELETE_PREFIX = 3;
+  }
+  Type type = 1;
+  string key = 2;
+  string value = 3;
+}
+
+/*
+ * The record value is {"rev":<n>,"inc":<n>,"state":"LIVE"|"DROPPED"}; rev is the raft index of
+ * the last TXN that wrote it, or the previous rev plus one when that is higher (a store that
+ * changed raft.enable has a lower index afterwards), so it only rises; inc is the incarnation
+ * of the graph, which a create after a drop advances.
+ */
+message TxnRecord {
+  enum Op {
+    // The zero value: a record without an op is rejected before the TXN is proposed
+    UNSPECIFIED = 0;
+    // Advance rev, keeping inc and state; creates the record (LIVE, inc 1) if it is absent and
+    // expected_incarnation is 0. Rejected for a DROPPED graph or another incarnation.
+    BUMP = 1;
+    // Start a new incarnation, LIVE: inc 1 for an absent record, else the stored inc plus one
+    CREATE = 2;
+    // Mark the expected incarnation DROPPED
+    DROP = 3;
+  }
+  string key = 1;
+  Op op = 2;
+  // 0 does not check the incarnation (BUMP and CREATE); DROP needs one
+  int64 expected_incarnation = 3;
+}
+
+message TxnResponse {
+  enum Failure {
+    NONE = 0;
+    COMPARE_FAILED = 1;
+    GRAPH_DROPPED = 2;
+    INCARNATION_MISMATCH = 3;
+    // The stored record can't be read; nothing is written and the record is left as it is
+    INVALID_RECORD = 4;
+  }
+  pdpb.ResponseHeader header = 1;
+  bool succeeded = 2;
+  // Set when the TXN succeeded: the record's rev after it (the raft index of the TXN, or one
+  // above the previous rev when that is higher), or the raft index for a TXN without a record
+  int64 revision = 3;
+  // The record's incarnation after the TXN, or the stored one when the record rejected it
+  // (0 for an absent or unreadable record)
+  int64 incarnation = 4;
+  Failure failure = 5;
+  // Position of the failed compare, with COMPARE_FAILED
+  int32 failed_compare = 6;
+  // The record's state after the TXN, or the stored one when the record rejected it ("" for an
+  // absent or unreadable record)
+  string state = 7;
+}
+
+/*
+ * The raft entry of a TXN, built by the PD node that proposes it: the request, with every key
+ * encoded as that node encodes the keys of put/get/scanPrefix, so every node writes the same
+ * bytes whatever its own default charset. Internal to PD; no client sends it.
+ */
+message TxnEntry {
+  TxnRequest request = 1;
+  // The store keys of the compares, then the ops, then the record, in request order
+  repeated bytes keys = 2;
+  // The default charset of the proposer, which encoded the keys; every node builds the TTL
+  // marker names of those keys in it, so they match what the proposer's KvService writes
+  string charset = 3;
 }
