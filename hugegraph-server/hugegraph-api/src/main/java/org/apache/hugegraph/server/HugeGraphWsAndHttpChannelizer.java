@@ -20,6 +20,8 @@ package org.apache.hugegraph.server;
 import org.apache.tinkerpop.gremlin.server.AbstractChannelizer;
 import org.apache.tinkerpop.gremlin.server.handler.WsAndHttpChannelizerHandler;
 import org.apache.tinkerpop.gremlin.server.util.ServerGremlinExecutor;
+import org.apache.tinkerpop.gremlin.util.MessageSerializer;
+import org.apache.tinkerpop.gremlin.util.ser.MessageTextSerializer;
 
 import io.netty.channel.ChannelPipeline;
 
@@ -34,6 +36,13 @@ public class HugeGraphWsAndHttpChannelizer extends AbstractChannelizer {
         this.handler.init(executor, new HttpGremlinRequestHandler(
                 this.serializers, this.gremlinExecutor,
                 this.graphManager, this.settings));
+    }
+
+    /** Returns the initialized JSON text serializer, or null when it is unavailable. */
+    public MessageTextSerializer<?> jsonSerializer() {
+        MessageSerializer<?> serializer =
+                this.serializers.get("application/json");
+        return serializer instanceof MessageTextSerializer ? (MessageTextSerializer<?>) serializer : null;
     }
 
     @Override
