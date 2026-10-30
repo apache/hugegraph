@@ -100,7 +100,7 @@
         <commons.lang3.version>3.18.0</commons.lang3.version>
         <commons.io.version>2.7</commons.io.version>
         <commons.codec.version>1.13</commons.codec.version>
-        <guava.version>30.0-jre</guava.version>
+        <guava.version>33.7.1-jre</guava.version>
         <javax.json.version>1.0</javax.json.version>
         <jsr305.version>3.0.1</jsr305.version>
         <javassist.version>3.28.0-GA</javassist.version>
