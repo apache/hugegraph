@@ -12,13 +12,13 @@ new version for upgrades. See [version selection](distribution.md#choose-a-versi
 
 ## Credentials
 
-Normal Helm installations generate/reuse three kept Secrets:
+The base installation generates/reuses three kept Secrets:
 
 | Default Secret | Data key | Readers |
 |---|---|---|
-| `<release>-admin` | `password` | Server, Helm test |
+| `<release>-admin` | `password` | Server, Helm test; enabled engines' deployment access |
 | `<release>-auth-token` | `token_secret` | All Server replicas |
-| `<release>-pd-auth` | `secret-key` | PD, Server storage wait, Hubble |
+| `<release>-pd-auth` | `secret-key` | PD, Server storage wait, Hubble; enabled Vermeer |
 
 `existingSecret` takes priority over an inline value, which takes priority over
 auto-generation. Existing Secrets are not managed by the chart. Override their
@@ -28,6 +28,16 @@ The admin password must be printable ASCII without spaces, colons or
 backslashes. The PD REST secret must be printable ASCII without surrounding
 whitespace or backslashes. JWT signing keys must be at least 32 bytes.
 These constraints match the current image's authentication/property encoding.
+
+Optional SeaTunnel and Vermeer are disabled in every HugeGraph preset. When
+enabled, they add independent entry credentials: SeaTunnel's native HTTP Basic
+account and Vermeer's separate native administrator password. New human
+passwords are 6 random alphanumeric characters in `easy`, 16 in `strict`; upgrades and mode changes retain existing Secrets. Internal Vermeer
+service authentication is automatic and separate from these passwords. These
+credentials do not replace Server or PD credentials. Their Secret reuse, external-source and rotation procedures are in
+the [SeaTunnel guide](seatunnel.md#seatunnel-entry-authentication) and
+[Vermeer guide](vermeer.md#deployment-credentials-and-gitops). Account password
+changes must also refresh dependent engines' deployment credentials.
 
 The admin Secret supplies the **initial** password when the account is created.
 To rotate an existing account, first call the Server API with the old credential:
@@ -140,6 +150,11 @@ Export and explicitly pin the existing storage flags before a GitOps sync; a
 successful offline render does not establish a safe migration.
 
 Local PVs bind to nodes and cannot move their files automatically on node loss.
+The seven-volume base example does not allocate optional Vermeer data volumes.
+Vermeer uses separate Master/Worker claims even when both containers share one
+standalone Pod; see [storage and recovery](vermeer.md#storage-and-recovery).
+Its persisted metadata does not provide transparent task or in-memory result
+recovery. SeaTunnel's checkpoint directory is temporary and adds no PVCs.
 See [all seven local PVs](../examples/README.md#storage) for directory, capacity,
 claim binding and scheduling requirements. `Retain` preserves files on claim
 deletion; reclamation/recovery needs explicit inspection.
@@ -274,20 +289,63 @@ RocksDB lock file or assigning an empty volume does not recover shard data.
 The chart does not provide backup or automatic disk-loss recovery; keep backups
 outside the data PVs and validate recovery separately.
 
+## PD metadata namespace
+
+`metadataCluster` is the shared PD metadata prefix for Server and Store. It
+defaults to `hg-test`, matching the existing Server default. The chart sets
+`HG_SERVER_CLUSTER` and `PD_CLUSTER` together; use this shared field rather than
+overriding either environment variable or adding `-Dpd.cluster` to Store options.
+It is independent of graph spaces, partition identifiers and Raft membership.
+
+Keep the initialized value when upgrading. A different prefix does not migrate
+Schema or graph metadata, and the chart rejects a change from the namespace
+recorded on the existing Server Deployment. Standard older installations using
+`hg-test` need no adoption step.
+
+For an older custom image or a cluster value supplied through `valueFrom`, first
+inspect the running Server configuration and startup log (`Meta cluster bound
+to ...`) to establish its actual existing prefix. Only after verifying that
+value, record it on the Server Deployment and retain it in the Helm values:
+
+```bash
+# Replace current-prefix only with the verified existing Server metadata prefix.
+kubectl -n hugegraph annotate deployment hugegraph-server \
+  hugegraph.apache.org/metadata-cluster=current-prefix --overwrite
+# Set metadataCluster: current-prefix in the reviewed values used for upgrade.
+```
+
+This records an existing namespace; it is not a migration command. A conflicting
+literal `HG_SERVER_CLUSTER` is still rejected. With Store `updateStrategy=OnDelete`,
+apply the existing one-at-a-time Store update procedure before expecting a new
+`PD_CLUSTER` environment value to take effect. Retain data volumes throughout
+that procedure; restarting a temporary Store is not a data-preserving upgrade.
+
+If Vermeer loading reports a missing vertex/edge label from Store, compare this
+prefix on Server and Store before changing Schema or retrying data imports.
+
 ## Networking and Hubble
 
-Easy mode leaves NetworkPolicy off; strict enables it. Explicit values win.
-Policies require a network plugin that enforces them. Generated rules allow
-component communication and DNS; admit external clients/controllers with native
-`extraIngress`, and external addresses with appropriate `extraEgress`.
-Selecting strict mode and then overriding a Service to NodePort/LoadBalancer,
-setting `externalIPs`, or enabling Ingress does not automatically admit outside traffic. NOTES names
-exposed components with no external ingress rule and points to the matching
-`networkPolicy.<component>.extraIngress` setting; template rendering remains valid.
-For Hubble PD discovery via an external `server.advertiseUrl`, also configure
-Hubble's `extraEgress` for that destination.
-Empty external rule lists are valid and can block clients; `{}` is a valid
-allow-all rule. Consider NodePort source NAT when choosing source ranges.
+Easy mode leaves full base-service NetworkPolicy isolation off; strict enables
+it. Explicit base-service settings win. SeaTunnel/Vermeer HTTP inherits NodePort
+in easy mode and ClusterIP in strict mode; explicit types are preserved and
+authentication stays enabled. Only NodePort HTTP admits outside callers; native
+RPC/Worker HTTP and member/CLI port 5801 remain internal, including with
+`networkPolicy.enabled=false`. Their extra ingress rules require
+explicit internal Pod/namespace selectors; IP blocks and allow-all forms are
+rejected. Strict additionally restricts engine egress. Actual isolation needs
+a NetworkPolicy-capable CNI.
+
+For base PD/Server/Hubble services, generated full-isolation rules allow component
+traffic and DNS. Admit actual outside clients/controllers with their
+`extraIngress`, and external destinations with `extraEgress`. Selecting strict
+mode and overriding a base Service to NodePort/LoadBalancer, setting `externalIPs`
+or enabling Ingress does not admit callers automatically. NOTES identifies
+exposed base components with no outside ingress rule. Empty outside rule lists
+can block clients; `{}` is an allow-all form for base-service rules only.
+Consider NodePort source NAT when selecting source ranges. For Hubble discovery
+via an external `server.advertiseUrl`, also configure Hubble's `extraEgress`.
+Native entry and login steps are in the [SeaTunnel](seatunnel.md) and
+[Vermeer](vermeer.md#optional-native-administration) guides; Hubble service tokens stay automatic.
 
 Client Services accept native Kubernetes traffic and load-balancer fields under
 `pd.service`, `server.service` and `hubble.service`. LoadBalancer-specific fields

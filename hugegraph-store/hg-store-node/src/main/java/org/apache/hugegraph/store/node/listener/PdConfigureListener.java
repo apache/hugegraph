@@ -39,6 +39,7 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
+import org.springframework.core.env.PropertySource;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
@@ -55,6 +56,12 @@ public class PdConfigureListener implements
     private static final String CONFIG_FIX_PREFIX = "S:FS";
     private static final String TIMESTAMP_KEY = "S:Timestamp";
     private static final String PD_CONFIG_FILE_NAME = "application-pd.yml";
+    static final String MEMORY_KEY = "rocksdb.total_memory_size";
+    // Where an operator sets one Store's RocksDB budget: the Docker entrypoint's
+    // SPRING_APPLICATION_JSON (HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE) or
+    // -Drocksdb.total_memory_size
+    private static final String[] MEMORY_OVERRIDE_SOURCES = {"spring.application.json",
+                                                             "systemProperties"};
     private final String workDir = System.getProperty("user.dir");
     private final String fileSeparator = System.getProperty("file.separator");
     private final String configFilePath =
@@ -121,8 +128,26 @@ public class PdConfigureListener implements
         if (!pdConfFile.exists() || pdConfFile.lastModified() <= pdLastModified) {
             log.info("update local application-pd.yml from pd....{}", pdConfig);
             writeYml(pdConfig);
+            dropOverriddenMemory(configs, sources);
             PropertiesPropertySource source = new PropertiesPropertySource("pd-config", configs);
             sources.addFirst(source);
+        }
+    }
+
+    /**
+     * The PD-managed configuration is shared by every Store and goes in front of all
+     * other property sources, so a rocksdb.total_memory_size in it would shadow the
+     * budget an operator set for this Store. When one is set, leave that key out of the
+     * PD source and let Spring's own precedence pick it; nothing is written back to PD.
+     */
+    static void dropOverriddenMemory(Properties pdConfigs, MutablePropertySources sources) {
+        for (String name : MEMORY_OVERRIDE_SOURCES) {
+            PropertySource<?> source = sources.get(name);
+            Object value = source == null ? null : source.getProperty(MEMORY_KEY);
+            if (value != null && !value.toString().trim().isEmpty()) {
+                pdConfigs.remove(MEMORY_KEY);
+                return;
+            }
         }
     }
 

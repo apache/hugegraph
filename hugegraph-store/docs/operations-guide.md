@@ -654,6 +654,38 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 
 5. **Verify**: Wait for even distribution (may take hours)
 
+Replica migration can leave learners in a Raft group while they receive a snapshot or catch up.
+If the same membership change is retried after a catch-up timeout, Store resumes those learners
+and promotes them to voting members after catch-up; it does not need to create them again.
+Each catch-up check waits up to 600 seconds before returning `TASK_CONTINUE`. This is a
+per-attempt wait, not an overall migration deadline; a peer that cannot catch up can keep
+the operation pending across retries. Inspect its replication progress and errors before
+continuing a node operation. This retry correction does not add durable task admission
+or recovery of a migration task across a Leader change.
+Verify the actual voter and learner lists before treating migration as complete: a target count
+that includes learners is not proof of voting membership.
+
+### Restoring Store Membership after a Restart
+
+For a persisted partition, startup verifies the shard group directly with PD and refreshes
+the derived local `SHARDGROUP` once per group when this Store is still a member and no
+engine is running for the group. This lets JRaft restore its durable configuration even
+when the business database contains older membership metadata. Running engines and
+durable Raft configuration are not replaced by the PD bootstrap metadata.
+
+Only PD's explicit `NOT_FOUND` response for a persisted graph partition skips that graph's
+recovery, for example when it was dropped while the Store was offline. Other graphs can
+still recover. The skipped graph's local data, partition-store location and Raft files
+remain intact; a group with no remaining graph partitions does not start an engine.
+A null/ambiguous result, invalid metadata or a failed PD lookup blocks recovery of the
+whole Store process while retaining local data. This includes members with an unspecified
+`None` role until PD reports usable member roles. Restore PD access or correct the reported
+metadata before retrying startup; do not delete data or reset Raft peers to bypass a failure.
+PD exclusion is not proof that a Store has been safely retired. Check every assigned
+group after a restart before continuing a rolling operation. This recovery correction
+does not establish why older derived metadata was persisted, or provide a complete
+desired/observed membership protocol or protection against partial PD partition queries.
+
 ### Removing Store Nodes
 
 **When to Remove**:

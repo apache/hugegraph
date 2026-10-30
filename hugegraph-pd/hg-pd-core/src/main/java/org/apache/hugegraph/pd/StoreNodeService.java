@@ -20,11 +20,13 @@ package org.apache.hugegraph.pd;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.lang3.StringUtils;
@@ -131,7 +133,7 @@ public class StoreNodeService {
      *
      * @param store
      */
-    public Metapb.Store register(Metapb.Store store) throws PDException {
+    public synchronized Metapb.Store register(Metapb.Store store) throws PDException {
         if (store.getId() == 0) {
             // Initial registration, generate a new ID, and ensure that the ID is not duplicated.
             store = newStoreNode(store);
@@ -167,11 +169,15 @@ public class StoreNodeService {
         // also exposes liveness that tells stale membership apart.
         // https://github.com/apache/hugegraph/issues/3229
         Metapb.StoreState storeState = lastStore.getState();
-        if (storeState == Metapb.StoreState.Offline || storeState == Metapb.StoreState.Up
-            || inInitialStoreList(store)) {
-            storeState = Metapb.StoreState.Up;
-        } else {
-            storeState = Metapb.StoreState.Pending;
+        // Restarting an exiting Store must not cancel its persisted drain intent, including
+        // when its address is still present in the bootstrap allowlist.
+        if (storeState != Metapb.StoreState.Exiting) {
+            if (storeState == Metapb.StoreState.Offline || storeState == Metapb.StoreState.Up
+                || inInitialStoreList(store)) {
+                storeState = Metapb.StoreState.Up;
+            } else {
+                storeState = Metapb.StoreState.Pending;
+            }
         }
 
         store = Metapb.Store.newBuilder(lastStore)
@@ -212,6 +218,8 @@ public class StoreNodeService {
             storeInfoMeta.keepStoreAlive(store);
             onStoreStatusChanged(store, Metapb.StoreState.Offline, Metapb.StoreState.Up);
             checkStoreStatus();
+        } else if (storeState == Metapb.StoreState.Exiting) {
+            storeInfoMeta.keepStoreAlive(store);
         }
 
         // Wait for the store information to be saved before sending the changes
@@ -266,36 +274,54 @@ public class StoreNodeService {
     /**
      * Update the store information, detect the change of store status, and notify Hugestore
      */
-    public synchronized Metapb.Store updateStore(Metapb.Store store) throws PDException {
-        log.info("updateStore storeId: {}, address: {}, state: {}", store.getId(),
-                 store.getAddress(), store.getState());
-        Metapb.Store lastStore = storeInfoMeta.getStore(store.getId());
-        if (lastStore == null) {
-            return null;
-        }
-        Metapb.Store.Builder builder =
-                Metapb.Store.newBuilder(lastStore).clearLabels().clearStats();
-        store = builder.mergeFrom(store).build();
-        if (store.getState() == Metapb.StoreState.Tombstone) {
-            List<Metapb.Store> activeStores = getStores();
-            if (lastStore.getState() == Metapb.StoreState.Up
-                && activeStores.size() - 1 < pdConfig.getMinStoreCount()) {
-                throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
-                                      "The number of active stores is less then " +
-                                      pdConfig.getMinStoreCount());
+    public Metapb.Store updateStore(Metapb.Store store) throws PDException {
+        return updateStore(store, Collections.emptySet());
+    }
+
+    public Metapb.Store updateStore(Metapb.Store store,
+                                    Set<Integer> submittedGroups) throws PDException {
+        Metapb.Store lastStore;
+        boolean stateChanged;
+        synchronized (this) {
+            log.info("updateStore storeId: {}, address: {}, state: {}", store.getId(),
+                     store.getAddress(), store.getState());
+            lastStore = storeInfoMeta.getStore(store.getId());
+            if (lastStore == null) {
+                return null;
             }
-        }
+            boolean requestedDrain = store.getState() == Metapb.StoreState.Exiting;
+            Metapb.Store.Builder builder =
+                    Metapb.Store.newBuilder(lastStore).clearLabels().clearStats();
+            store = builder.mergeFrom(store).build();
+            // Tombstone is terminal for this Store identity, as in registration and
+            // heartbeat handling. A deferred retirement notification must not race a
+            // management request that revives the same identity.
+            if (lastStore.getState() == Metapb.StoreState.Tombstone &&
+                store.getState() != Metapb.StoreState.Tombstone) {
+                throw new PDException(Pdpb.ErrorType.STORE_HAS_BEEN_REMOVED_VALUE,
+                                      String.format("Store id %d has been removed.", store.getId()));
+            }
+            if (store.getState() == Metapb.StoreState.Exiting &&
+                lastStore.getState() != Metapb.StoreState.Exiting && !checkStoreCanOffline(store)) {
+                throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
+                                      "Cannot begin drain without current voting quorum and enough " +
+                                      "eligible destination Stores for the configured replicas");
+            }
+            if (store.getState() == Metapb.StoreState.Tombstone &&
+                lastStore.getState() != Metapb.StoreState.Tombstone &&
+                !getShardGroupsByStore(store.getId()).isEmpty()) {
+                long sourceId = store.getId();
+                long destinations = getPlacementStores().stream()
+                                                        .filter(s -> s.getId() != sourceId).count();
+                requirePlacementCapacity(Math.toIntExact(destinations), false);
+            }
 
-        storeInfoMeta.updateStore(store);
-        if (store.getState() != Metapb.StoreState.Unknown &&
-            store.getState() != lastStore.getState()) {
-            // If you want to take the store offline
-            if (store.getState() == Metapb.StoreState.Exiting) {
-                if (lastStore.getState() == Metapb.StoreState.Exiting) {
-                    // If it is already in the offline state, no further processing will be made
-                    return lastStore;
-                }
-
+            storeInfoMeta.updateStore(store);
+            stateChanged = store.getState() != Metapb.StoreState.Unknown &&
+                           store.getState() != lastStore.getState();
+            // A previous attempt can persist Exiting before capacity checks fail. Repeating
+            // the same intent must resume the remaining groups after capacity is restored.
+            if (requestedDrain) {
                 List<Metapb.Store> activeStores = this.getActiveStores();
                 Map<Long, Metapb.Store> storeMap = new HashMap<>();
                 activeStores.forEach(s -> {
@@ -308,21 +334,27 @@ public class StoreNodeService {
                     log.info("updateStore removeActiveStores store {}", store.getId());
                     storeInfoMeta.removeActiveStore(store);
                 }
-                storeTurnoff(store);
-            } else if (store.getState() == Metapb.StoreState.Offline) {
-                // Monitor that the store has gone offline and is removed from the active
-                storeInfoMeta.removeActiveStore(store);
-            } else if (store.getState() == Metapb.StoreState.Tombstone) {
-                // When the status changes, the store is shut down, the shardGroup is modified,
-                // and the replica is migrated
-                log.info("updateStore removeActiveStores store {}", store.getId());
-                storeInfoMeta.removeActiveStore(store);
-                // Storage goes offline
-                storeTurnoff(store);
-            } else if (store.getState() == Metapb.StoreState.Up) {
-                storeInfoMeta.keepStoreAlive(store);
-                checkStoreStatus();
+                storeTurnoff(store, submittedGroups);
+            } else if (stateChanged) {
+                if (store.getState() == Metapb.StoreState.Offline) {
+                    // Monitor that the store has gone offline and is removed from the active
+                    storeInfoMeta.removeActiveStore(store);
+                } else if (store.getState() == Metapb.StoreState.Tombstone) {
+                    // When the status changes, the store is shut down, the shardGroup is modified,
+                    // and the replica is migrated
+                    log.info("updateStore removeActiveStores store {}", store.getId());
+                    storeInfoMeta.removeActiveStore(store);
+                    // Storage goes offline
+                    storeTurnoff(store);
+                } else if (store.getState() == Metapb.StoreState.Up) {
+                    storeInfoMeta.keepStoreAlive(store);
+                    checkStoreStatus();
+                }
             }
+        }
+        // Tombstone listeners enter synchronized PartitionService methods. Never call
+        // them with this monitor held: placement takes PartitionService before this.
+        if (stateChanged) {
             onStoreStatusChanged(lastStore, lastStore.getState(), store.getState());
         }
         return store;
@@ -335,8 +367,22 @@ public class StoreNodeService {
      * @throws PDException
      */
     public synchronized void storeTurnoff(Metapb.Store store) throws PDException {
+        storeTurnoff(store, Collections.emptySet());
+    }
+
+    public synchronized void storeTurnoff(Metapb.Store store,
+                                          Set<Integer> submittedGroups)
+            throws PDException {
         // Traverse ShardGroup,redistribution
         for (Metapb.ShardGroup group : getShardGroupsByStore(store.getId())) {
+            // PDService can submit a capacity-aware migration before persisting
+            // Exiting. Keep that accepted destination authoritative instead of
+            // immediately issuing a second, independently planned change.
+            if (submittedGroups.contains(group.getId())) {
+                log.info("Skip duplicate drain submission for shard group {}",
+                         group.getId());
+                continue;
+            }
             Metapb.ShardGroup.Builder builder = Metapb.ShardGroup.newBuilder(group);
             builder.clearShards();
             group.getShardsList().forEach(shard -> {
@@ -409,6 +455,21 @@ public class StoreNodeService {
         return storeInfoMeta.getActiveStores();
     }
 
+    /**
+     * Return live Stores that may receive new replicas. The TTL entry records liveness and can
+     * still contain an older Up state after a Store starts exiting, so consult Store metadata.
+     */
+    public List<Metapb.Store> getPlacementStores() throws PDException {
+        List<Metapb.Store> stores = new ArrayList<>();
+        for (Metapb.Store activeStore : storeInfoMeta.getActiveStores()) {
+            Metapb.Store store = storeInfoMeta.getStore(activeStore.getId());
+            if (store != null && store.getState() == Metapb.StoreState.Up) {
+                stores.add(store);
+            }
+        }
+        return stores;
+    }
+
     public List<Metapb.Store> getTombStores() throws PDException {
         List<Metapb.Store> stores = new ArrayList<>();
         for (Metapb.Store store : this.getStores()) {
@@ -437,32 +498,22 @@ public class StoreNodeService {
         // number cannot exceed the number of raft groups
         if (storeInfoMeta.getShardGroup(partId) == null) {
             // Get active store key
-            List<Metapb.Store> stores = storeInfoMeta.getActiveStores();
+            List<Metapb.Store> stores = getPlacementStores();
 
             if (stores.size() == 0) {
                 throw new PDException(Pdpb.ErrorType.NO_ACTIVE_STORE_VALUE,
                                       "There is no any online store");
             }
 
-            if (stores.size() < pdConfig.getMinStoreCount()) {
-                throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
-                                      "The number of active stores is less then " +
-                                      pdConfig.getMinStoreCount());
-            }
-
-            int shardCount = pdConfig.getPartition().getShardCount();
-            shardCount = Math.min(shardCount, stores.size());
-            // Two shards could not elect a leader
-            // It cannot be 0
-
-            if (shardCount == 2 || shardCount < 1) {
-                shardCount = 1;
-            }
+            int shardCount = requirePlacementCapacity(stores.size(), getShardGroups().isEmpty());
 
             // All ShardGroups are created at one time to ensure that the initial groupIDs are
             // orderly and easy for humans to read
             for (int groupId = 0; groupId < pdConfig.getConfigService().getPartitionCount();
                  groupId++) {
+                if (storeInfoMeta.getShardGroup(groupId) != null) {
+                    continue;
+                }
                 int storeIdx = groupId % stores.size();  // Assignment rules, simplified to modulo
                 List<Metapb.Shard> shards = new ArrayList<>();
                 for (int i = 0; i < shardCount; i++) {
@@ -497,26 +548,14 @@ public class StoreNodeService {
      */
     public synchronized List<Metapb.Shard> reallocShards(Metapb.ShardGroup shardGroup) throws
                                                                                        PDException {
-        List<Metapb.Store> stores = storeInfoMeta.getActiveStores();
+        List<Metapb.Store> stores = getPlacementStores();
 
         if (stores.size() == 0) {
             throw new PDException(Pdpb.ErrorType.NO_ACTIVE_STORE_VALUE,
                                   "There is no any online store");
         }
 
-        if (stores.size() < pdConfig.getMinStoreCount()) {
-            throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
-                                  "The number of active stores is less then " +
-                                  pdConfig.getMinStoreCount());
-        }
-
-        int shardCount = pdConfig.getPartition().getShardCount();
-        shardCount = Math.min(shardCount, stores.size());
-        if (shardCount == 2 || shardCount < 1) {
-            // Two shards could not elect a leader
-            // It cannot be 0
-            shardCount = 1;
-        }
+        int shardCount = requirePlacementCapacity(stores.size(), false);
 
         List<Metapb.Shard> shards = new ArrayList<>();
         shards.addAll(shardGroup.getShardsList());
@@ -571,6 +610,26 @@ public class StoreNodeService {
 
         log.info("reallocShards ShardGroup {}, shards: {}", group.getId(), group.getShardsList());
         return shards;
+    }
+
+    private int requirePlacementCapacity(int eligibleCount, boolean bootstrap) throws PDException {
+        int shardCount = pdConfig.getPartition().getShardCount();
+        if (shardCount < 1 || shardCount % 2 == 0) {
+            throw new PDException(Pdpb.ErrorType.SET_CONFIG_SHARD_COUNT_ERROR_VALUE,
+                                  "Configured shard count must be a positive odd number");
+        }
+        int minimum = Math.max(shardCount, pdConfig.getMinStoreCount());
+        if (bootstrap) {
+            minimum = Math.max(minimum, pdConfig.getInitialStoreCount());
+        }
+        if (eligibleCount < minimum) {
+            throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
+                                  String.format("Cannot place %s voting replicas on %s eligible " +
+                                                "Stores; required count is %s%s", shardCount,
+                                                eligibleCount, minimum,
+                                                bootstrap ? " during bootstrap" : ""));
+        }
+        return shardCount;
     }
 
     /**
@@ -727,7 +786,7 @@ public class StoreNodeService {
      * @param storeStats
      * @throws PDException
      */
-    public Metapb.ClusterStats heartBeat(Metapb.StoreStats storeStats) throws PDException {
+    public synchronized Metapb.ClusterStats heartBeat(Metapb.StoreStats storeStats) throws PDException {
         this.storeInfoMeta.updateStoreStats(storeStats);
         Metapb.Store lastStore = this.getStore(storeStats.getStoreId());
         if (lastStore == null) {
@@ -745,22 +804,17 @@ public class StoreNodeService {
         Metapb.Store nowStore;
         // If you are going to take the store offline
         if (lastStore.getState() == Metapb.StoreState.Exiting) {
-            List<Metapb.Store> activeStores = this.getActiveStores();
-            Map<Long, Metapb.Store> storeMap = new HashMap<>();
-            activeStores.forEach(store -> {
-                storeMap.put(store.getId(), store);
-            });
-            // If the partition of the offline store is 0, it means that the migration has been
-            // completed and can be taken offline, if it is not 0, the migration is still in
-            // progress and you need to wait
-            if (storeStats.getPartitionCount() > 0 &&
-                storeMap.containsKey(storeStats.getStoreId())) {
+            // TTL expiry only means the last heartbeat is stale, not that migration finished.
+            // Require both the source and PD's group view to be empty before retiring it.
+            if (storeStats.getPartitionCount() > 0 ||
+                !getShardGroupsByStore(storeStats.getStoreId()).isEmpty()) {
                 nowStore = Metapb.Store.newBuilder(lastStore)
                                        .setStats(storeStats)
                                        .setLastHeartbeat(System.currentTimeMillis())
                                        .setState(Metapb.StoreState.Exiting).build();
                 this.storeInfoMeta.updateStore(nowStore);
-                return this.clusterStats;
+                this.storeInfoMeta.keepStoreAlive(nowStore);
+                return exitingHeartbeatStats();
             } else {
                 nowStore = Metapb.Store.newBuilder(lastStore)
                                        .setStats(storeStats)
@@ -768,7 +822,7 @@ public class StoreNodeService {
                                        .setState(Metapb.StoreState.Tombstone).build();
                 this.storeInfoMeta.updateStore(nowStore);
                 storeInfoMeta.removeActiveStore(nowStore);
-                return this.clusterStats;
+                return exitingHeartbeatStats();
             }
         }
 
@@ -793,6 +847,15 @@ public class StoreNodeService {
             this.checkStoreStatus();
             return this.clusterStats;
         }
+    }
+
+    private Metapb.ClusterStats exitingHeartbeatStats() {
+        // A live source can still serve during drain. A prior minority/learner warning is
+        // not itself a voting-quorum decision. Preserve explicit Fault/Offline policies.
+        if (this.clusterStats.getState() == Metapb.ClusterState.Cluster_Warn) {
+            checkStoreStatus();
+        }
+        return this.clusterStats;
     }
 
     public synchronized Metapb.ClusterStats updateClusterStatus(Metapb.ClusterState state) {
@@ -828,8 +891,8 @@ public class StoreNodeService {
 
     /**
      * Check the cluster health status
-     * Whether the number of active machines is greater than the minimum threshold
-     * The number of partition shards online has exceeded half
+     * Empty clusters wait for bootstrap Stores. Existing groups require a strict majority of
+     * known voters to be live; this hint is not a proof of the committed Raft configuration.
      */
     public synchronized void checkStoreStatus() {
         Metapb.ClusterStats.Builder builder = Metapb.ClusterStats.newBuilder()
@@ -837,28 +900,19 @@ public class StoreNodeService {
                                                                          Metapb.ClusterState.Cluster_OK);
         try {
             List<Metapb.Store> activeStores = this.getActiveStores();
-            if (activeStores.size() < pdConfig.getMinStoreCount()) {
-                builder.setState(Metapb.ClusterState.Cluster_Not_Ready);
-                builder.setMessage("The number of active stores is " + activeStores.size()
-                                   + ", less than pd.initial-store-count:" +
-                                   pdConfig.getMinStoreCount());
+            List<Metapb.ShardGroup> groups = this.getShardGroups();
+            if (groups.isEmpty()) {
+                requirePlacementCapacity(getPlacementStores().size(), true);
             }
-            Map<Long, Metapb.Store> storeMap = new HashMap<>();
-            activeStores.forEach(store -> {
-                storeMap.put(store.getId(), store);
-            });
+            Set<Long> activeIds = new HashSet<>();
+            activeStores.forEach(store -> activeIds.add(store.getId()));
 
             if (builder.getState() == Metapb.ClusterState.Cluster_OK) {
-                // Check whether the number of online shards for each partition is greater than half
-                for (Metapb.ShardGroup group : this.getShardGroups()) {
-                    int count = 0;
-                    for (Metapb.Shard shard : group.getShardsList()) {
-                        count += storeMap.containsKey(shard.getStoreId()) ? 1 : 0;
-                    }
-                    if (count * 2 < group.getShardsList().size()) {
+                for (Metapb.ShardGroup group : groups) {
+                    if (!hasVotingQuorum(group, activeIds)) {
                         builder.setState(Metapb.ClusterState.Cluster_Not_Ready);
                         builder.setMessage(
-                                "Less than half of active shard, partitionId is " + group.getId());
+                                "Cannot confirm a live voting majority, partitionId is " + group.getId());
                         break;
                     }
                 }
@@ -866,11 +920,32 @@ public class StoreNodeService {
 
         } catch (PDException e) {
             log.error("StoreNodeService updateClusterStatus exception {}", e);
+            builder.setState(Metapb.ClusterState.Cluster_Not_Ready)
+                   .setMessage(e.getMessage());
         }
         this.clusterStats = builder.setTimestamp(System.currentTimeMillis()).build();
         if (this.clusterStats.getState() != Metapb.ClusterState.Cluster_OK) {
             log.error("The cluster is not ready, {}", this.clusterStats);
         }
+    }
+
+    private static boolean hasVotingQuorum(Metapb.ShardGroup group, Set<Long> activeIds) {
+        Set<Long> seen = new HashSet<>();
+        Set<Long> voters = new HashSet<>();
+        for (Metapb.Shard shard : group.getShardsList()) {
+            if (!seen.add(shard.getStoreId())) {
+                return false;
+            }
+            if (shard.getRole() == Metapb.ShardRole.Leader ||
+                shard.getRole() == Metapb.ShardRole.Follower) {
+                voters.add(shard.getStoreId());
+            } else if (shard.getRole() != Metapb.ShardRole.Learner &&
+                       shard.getRole() != Metapb.ShardRole.None) {
+                return false;
+            }
+        }
+        long liveVoters = voters.stream().filter(activeIds::contains).count();
+        return !voters.isEmpty() && liveVoters > voters.size() / 2;
     }
 
     public void addStatusListener(StoreStatusListener listener) {
@@ -892,7 +967,13 @@ public class StoreNodeService {
     protected void onStoreStatusChanged(Metapb.Store store, Metapb.StoreState old,
                                         Metapb.StoreState stats) {
         log.info("onStoreStatusChanged storeId = {} from {} to {}", store.getId(), old, stats);
-        statusListeners.forEach(e -> {
+        List<StoreStatusListener> listeners;
+        synchronized (statusListeners) {
+            listeners = new ArrayList<>(statusListeners);
+        }
+        // Do not hold the listener-list monitor across callbacks either: register()
+        // dispatches Up while holding this Store service's monitor.
+        listeners.forEach(e -> {
             e.onStoreStatusChanged(store, old, stats);
         });
     }
@@ -913,34 +994,21 @@ public class StoreNodeService {
     }
 
     /**
-     * Check whether the current store can be discontinued
-     * If the number of active machines is less than or equal to the minimum threshold, they
-     * cannot be taken offline
-     * If the number of shards in the partition is not more than half, it cannot be offline
+     * Check whether draining can begin while the source still serves its current replicas.
+     * Final retirement needs the separate empty-engine/member checks in heartBeat.
      */
     public boolean checkStoreCanOffline(Metapb.Store currentStore) {
         try {
             long currentStoreId = currentStore.getId();
             List<Metapb.Store> activeStores = this.getActiveStores();
-            Map<Long, Metapb.Store> storeMap = new HashMap<>();
-            activeStores.forEach(store -> {
-                if (store.getId() != currentStoreId) {
-                    storeMap.put(store.getId(), store);
-                }
-            });
+            Set<Long> activeIds = new HashSet<>();
+            activeStores.forEach(store -> activeIds.add(store.getId()));
+            long destinations = getPlacementStores().stream()
+                                                    .filter(store -> store.getId() != currentStoreId).count();
+            requirePlacementCapacity(Math.toIntExact(destinations), false);
 
-            if (storeMap.size() < pdConfig.getMinStoreCount()) {
-                return false;
-            }
-
-            // Check whether the number of online shards for each partition is greater than half
             for (Metapb.ShardGroup group : this.getShardGroups()) {
-                int count = 0;
-                for (Metapb.Shard shard : group.getShardsList()) {
-                    long storeId = shard.getStoreId();
-                    count += storeMap.containsKey(storeId) ? 1 : 0;
-                }
-                if (count * 2 < group.getShardsList().size()) {
+                if (!hasVotingQuorum(group, activeIds)) {
                     return false;
                 }
             }

@@ -21,6 +21,9 @@
 # easy: browser/API NodePorts; strict: internal Services and NetworkPolicy.
 # Explicit component parameters always override these mode defaults.
 mode: easy
+# Shared PD metadata namespace used by Server and Store Schema reads.
+# Preserve the existing Server value on upgrades; this is not a migration switch.
+metadataCluster: hg-test
 global:
   imageRegistry: ""
 persistence:
@@ -59,9 +62,8 @@ pd:
     # Shard replicas per partition, seeding PD at first bootstrap only.
     # Empty derives 3 when store.replicas is at least 3, else 1, so a fresh
     # multi-store install gets store-level HA instead of the image default
-    # of 1. The derivation skips 2 because PD clamps a shard count of 2 to
-    # 1 (two shards cannot elect a leader). An explicit value must be odd
-    # and must not exceed store.replicas.
+    # of 1. The derivation skips 2 because PD rejects even shard counts.
+    # An explicit value must be odd and must not exceed store.replicas.
     defaultShardCount: ""
     # Maximum shards per store, seeding PD at first bootstrap only. Also
     # fixes the initial partition count: store.replicas x this value /
@@ -542,14 +544,155 @@ hubble:
       failureThreshold: 3
       timeoutSeconds: 5
 
+# Optional engine using Apache SeaTunnel's native hybrid Kubernetes deployment.
+# One hybrid StatefulSet serves both modes; HTTP includes the built-in Web UI.
+seatunnel:
+  enabled: false
+  mode: standalone
+  # Used in cluster mode; standalone always starts one hybrid node.
+  replicas: 2
+  image:
+    repository: apache/seatunnel
+    tag: "3.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    # Unset inherits easy: NodePort / strict: ClusterIP; explicit ClusterIP stays private.
+    type:
+    # Unset or 0 allocates a port; nonzero requires type NodePort.
+    nodePort:
+    annotations: {}
+  auth:
+    # Native HTTP Basic authentication for the Web UI and all REST endpoints.
+    # Independent of the HugeGraph credential used by source/sink connectors.
+    username: admin
+    # Empty generates 6 characters in easy / 16 in strict; upgrades reuse the kept Secret.
+    password: ""
+  # Replaces the image's jvm_options; reserve memory outside the heap under 2Gi.
+  javaOpts: >-
+    -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxMetaspaceSize=256m
+    -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/seatunnel.hprof
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1536Mi
+    limits:
+      memory: 2Gi
+  # Match the other workloads. The upstream image runs as root; configure a
+  # compatible UID and writable paths before enabling runAsNonRoot.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  # Native Kubernetes env entries; matching names override automatic HG_* values.
+  # HG_HOST/PORT/PROTOCOL, HG_USERNAME/PASSWORD and HG_GRAPH_SPACE/NAME default to
+  # this release's Server, existing admin Secret, graph space and graph_a.
+  env: []
+  # Full native configuration files, keyed by filename (e.g. seatunnel.yaml).
+  # Keep member port 5801 and HTTP 8080 when overriding discovery/engine files.
+  config: {}
+
+# Optional native graph-computing engine. Both modes remain disabled until opted in.
+# standalone runs Master + Worker containers together; cluster uses separate Pods.
+vermeer:
+  enabled: false
+  mode: standalone
+  image:
+    repository: hugegraph/vermeer
+    # Official matching build with file credentials, native admin login and token helper.
+    # Pin the multi-platform manifest; clear digest when selecting a different tag.
+    tag: helm-30b67d93e7d0
+    digest: sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e
+    pullPolicy: IfNotPresent
+  auth:
+    # Token signing factor. existingSecret > value > a stable generated Secret.
+    # File-backed signing keys require at least 16 characters; prefer 32 random characters.
+    value: ""
+    existingSecret: ""
+    key: token-factor
+    autoGenerate: true
+    # Separate native UI login: 6 characters in easy / 16 in strict for new passwords.
+    # Hubble continues to use the internal service token; upgrades reuse the kept Secret.
+    admin:
+      password: ""
+      existingSecret: ""
+      key: password
+      autoGenerate: true
+  # Optional JSON {"username":"...","password":"..."} for Schema reads.
+  # Empty reuses the deployment's Server administrator Secret as a password file.
+  hugegraphCredentials:
+    existingSecret: ""
+    key: credentials.json
+  service:
+    # Unset inherits easy: NodePort / strict: ClusterIP; explicit ClusterIP stays private.
+    type:
+    # Unset or 0 allocates a port; nonzero requires type NodePort.
+    nodePort:
+    annotations: {}
+  master:
+    httpPort: 6688
+    grpcPort: 6689
+    resources: {}
+    storage:
+      enabled:
+      size: 10Gi
+      storageClassName: ""
+    extraEnv: []
+  worker:
+    # Ignored in standalone mode, which always has one colocated Worker.
+    replicas: 3
+    httpPort: 6788
+    grpcPort: 6789
+    resources: {}
+    storage:
+      enabled:
+      size: 20Gi
+      storageClassName: ""
+    extraEnv: []
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  terminationGracePeriodSeconds: 60
+  probes:
+    startup:
+      failureThreshold: 60
+      periodSeconds: 5
+      timeoutSeconds: 3
+    readiness:
+      failureThreshold: 3
+      periodSeconds: 10
+      timeoutSeconds: 3
+    liveness:
+      failureThreshold: 3
+      periodSeconds: 20
+      timeoutSeconds: 3
+
 # Kubernetes NetworkPolicy: mode default plus explicit per-component rules.
-# easy does not isolate clients; strict isolates release traffic and DNS. Only
-# enforced when the network plugin implements NetworkPolicy (kind v0.25+,
+# easy exposes enabled browser/API entries; strict additionally isolates release egress.
+# Native HTTP follows Service exposure; RPC/member ports remain private.
+# Enforced only when the network plugin implements NetworkPolicy (kind v0.25+,
 # k3s, Calico, Cilium); elsewhere the objects are accepted and do nothing.
-# Nothing outside the release is admitted unless it is listed in
+# For core components, nothing outside the release is admitted unless listed in
 # <component>.extraIngress as standard NetworkPolicy ingress rules: apps in
 # other namespaces, Prometheus, Vermeer, and the Ingress controller. Exposing
-# a component does not automatically add callers: configure extraIngress
+# a core component does not automatically add callers: configure extraIngress
 # and extraEgress using native Kubernetes NetworkPolicy rules.
 networkPolicy:
   # Unset inherits mode (easy: false, strict: true).
@@ -564,6 +707,18 @@ networkPolicy:
     extraIngress: []
     # For Hubble's optional outside endpoints (es.urls, prometheus.url set
     # through extraEnv). PD, Store and Server reach only the release and DNS.
+    extraEgress: []
+  vermeer:
+    # Extra callers must use Pod/namespace selectors; no ipBlock or open rules.
+    extraIngress: []
+    extraEgress: []
+  seatunnel:
+    # Extra callers must use Pod/namespace selectors; no ipBlock or open rules.
+    # Member port 5801 is restricted even when networkPolicy.enabled is false.
+    # With full isolation, peers, DNS and the Server API are allowed by default.
+    # Add trusted submitters/monitoring using native NetworkPolicy rules.
+    extraIngress: []
+    # External source/sink systems and shared checkpoint storage need egress.
     extraEgress: []
 
 # No init Job; see README.md for the HStore initialization contract.

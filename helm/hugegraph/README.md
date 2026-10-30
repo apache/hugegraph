@@ -9,6 +9,8 @@ are not supported.
 Provide a default StorageClass or prepare matching PVs. The default installation
 needs **7 volumes**: 3 × 10 GiB for PD, 3 × 50 GiB for Store, and 1 × 1 GiB
 for Hubble. The chart creates PVCs; it does not create a storage provisioner.
+SeaTunnel and Vermeer are **disabled by default**, including in the single-node
+and cluster presets. Optional components add resources only when enabled.
 
 ## Install a published Chart
 
@@ -81,6 +83,60 @@ helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
 
 Inactive credential values may remain in the values file when auth is disabled.
 
+### Optional components
+
+| Component | Default | Enable when needed |
+|---|---|---|
+| Hubble | Enabled | `hubble.enabled=false` selects API-only deployment |
+| SeaTunnel | Disabled | `seatunnel.enabled=true` adds data import/export and its native UI |
+| Vermeer | Disabled | `vermeer.enabled=true` adds graph computation, Hubble integration and its native UI |
+
+<details>
+<summary>SeaTunnel: optional import, export and migration</summary>
+
+Set `seatunnel.enabled=true` to start one long-running hybrid member alongside HugeGraph;
+set `seatunnel.mode=cluster` to use multiple members of the same native StatefulSet
+(two by default). SeaTunnel is disabled by default and its topology is independent
+of the HugeGraph single-/multi-node presets. Both modes include the engine's task UI.
+Native HTTP defaults to NodePort in easy mode and ClusterIP in strict mode.
+
+Only authenticated HTTP is exposed through NodePort; member/CLI port 5801 stays
+restricted to same-release callers in both modes. Strict additionally limits
+egress. Actual isolation needs a supporting CNI and trusted namespace RBAC.
+
+The chart injects the same-release Server address, GraphSpace and administrator
+Secret references into the mounted Source/Sink examples. Create the target graph
+before submitting them manually; Helm does not create graphs or import data.
+UI and REST submission use a separate native HTTP Basic administrator account
+with a newly generated 6-character password in `easy` or 16 characters in `strict`; online upgrades reuse the
+existing Secret, including credentials created by older releases. Container
+security and scheduling options follow the other components; see the
+[SeaTunnel deployment guide](docs/seatunnel.md) for configuration and limits.
+
+</details>
+
+<details>
+<summary>Vermeer: optional graph computation with Hubble</summary>
+
+Enable Vermeer with `--set vermeer.enabled=true`. The default
+`vermeer.mode=standalone` runs one Master and one Worker as two containers in
+one Pod. Set `vermeer.mode=cluster` for one Master Pod and multiple Worker Pods
+(`vermeer.worker.replicas=3` by default). Both HugeGraph presets leave Vermeer
+disabled; choose the compute topology explicitly when enabling it.
+
+With Hubble enabled in its default PD mode, the chart configures the internal
+Master URL and service token automatically. Sign in to Hubble as the HugeGraph
+administrator, select an HStore graph, then load it and run an algorithm. The
+existing flow includes reload, task status/cancellation, paginated results and
+unload; it does not write results back into HugeGraph properties.
+
+Native Vermeer UI/API uses NodePort in easy mode and ClusterIP in strict mode,
+with a separate generated password: 6 characters in `easy`, 16 in `strict`.
+Hubble needs no manual token configuration. Internal RPC stays private.
+See the [Vermeer deployment guide](docs/vermeer.md) for administration and recovery.
+
+</details>
+
 ### Internal image registry
 
 Mirror the four component images (`hugegraph/pd`, `hugegraph/store`,
@@ -96,6 +152,11 @@ prefix. Set `imagePullSecrets` if the registry needs credentials.
 Store's wait init container and Helm test reuse the Store and Server images,
 which already contain `curl`; no separate curl image is needed by default.
 See the [complete registry example](examples/values-internal-registry.yaml).
+When enabled, also mirror `apache/seatunnel` and/or `hugegraph/vermeer` at the
+configured versions. Vermeer token initialization reuses its own image.
+The optional Vermeer image is pinned to the officially published Linux
+amd64/arm64 index. See [verified image and custom overrides](docs/vermeer.md#image-compatibility)
+for its tag, digest, source and publishing run. Normal enablement needs no image override.
 
 ### Storage
 
@@ -117,6 +178,18 @@ For a **new temporary installation**, add `--set persistence.enabled=false`
 to use `emptyDir`. Component storage flags override that global setting.
 PVC failures never cause an automatic fallback. Do not switch initialized
 PD/Store data between persistent and temporary storage.
+Vermeer adds separate Master and Worker data claims: two in standalone mode,
+or one Master claim plus one per Worker in cluster mode. Its storage flags
+inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and-recovery).
+
+### PD metadata namespace
+
+`metadataCluster` defaults to `hg-test`, preserving the namespace used by existing
+Server images. The chart gives Server and Store the same value so Store scans
+can find the Server's Schema. This is separate from a graph space or Raft group.
+Changing it does not migrate metadata; upgrades reject changes to a recorded
+namespace. See [metadata namespace adoption](docs/operations.md#pd-metadata-namespace)
+before upgrading a deployment that used custom metadata settings.
 
 ### Server service identity
 
@@ -160,13 +233,20 @@ still need verification with a running Linux cluster. See the
 
 ## Modes and entry points
 
-`mode: easy` is the default. `mode: strict` changes Server/Hubble to ClusterIP
-and enables NetworkPolicy; authentication, Hubble and persistence stay enabled.
+`values-single.yaml` and `values-cluster.yaml` select the HugeGraph topology.
+The independent `vermeer.mode` and `seatunnel.mode` select optional engine
+topologies; none of these presets enables an optional engine automatically.
+
+`mode: easy` defaults HTTP entries to NodePort. `mode: strict` defaults them to ClusterIP
+and enables full NetworkPolicy isolation; authentication, Hubble and persistence stay enabled.
 Use `--set mode=strict` or `-f helm/hugegraph/values-strict.yaml`.
 
 **Explicit component value > global value > mode default.** An explicit `false`
 is preserved; null component values inherit. The global settings are
-`persistence.enabled` and `global.imageRegistry`. No mode requires HTTPS.
+`persistence.enabled` and `global.imageRegistry`. SeaTunnel/Vermeer HTTP stays
+authenticated and peer channels remain internal. No mode requires HTTPS.
+
+Server/Hubble entry choices:
 
 | Entry | Access | When to use it |
 |---|---|---|
@@ -179,12 +259,21 @@ ClusterIP is an internal virtual service address, not a node IP. An ordinary
 laptop usually cannot reach it directly. With default `externalTrafficPolicy:
 Cluster`, NodePort can forward through a node that does not host the target Pod.
 
-To fix a NodePort, set `server.service.nodePort` or `hubble.service.nodePort`.
+Native HTTP supports only ClusterIP/NodePort. A null `service.type` inherits the
+mode; existing explicit ClusterIP values stay private. The ClusterIP fallback
+applies only when the effective merged values lack `mode`. An upgrade using new
+chart defaults can instead inherit `mode: easy` and NodePort. To keep native HTTP
+private during upgrades, explicitly set `seatunnel.service.type` and
+`vermeer.service.type` to `ClusterIP`. Entry commands are in the
+[SeaTunnel](docs/seatunnel.md) and
+[Vermeer](docs/vermeer.md#optional-native-administration) guides.
+
+To fix a NodePort, set the component's `service.nodePort`.
 Omission or `0` allocates automatically. Kubernetes validates the actual cluster
 range; the chart does not force `30000–32767`.
 
 A [hostless HTTP Ingress example](examples/values-http-ingress.yaml) is available.
-With NetworkPolicy enabled, add native rules for actual clients and controllers;
+With base-service NetworkPolicy enabled, add rules for actual clients and controllers;
 empty external rule lists are valid but can block access. Explicit Service and
 policy values override either mode. Legacy exposure acknowledgement fields are
 accepted for compatibility and no longer gate rendering.
@@ -199,10 +288,14 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 | `mode` | Entry and policy defaults | `easy` |
 | `pd.replicas` / `store.replicas` / `server.replicas` | Component replicas | `3` / `3` / `3` |
 | `hubble.enabled` | Install the UI | `true` |
+| `seatunnel.enabled` / `vermeer.enabled` | Install optional data/computation engines | `false` / `false` |
+| `vermeer.mode` | One Pod with two containers, or separate Master/Worker Pods | `standalone` |
+| `vermeer.worker.replicas` | Worker Pods in Vermeer cluster mode | `3` |
 | `server.auth.enabled` | Server authentication | `true` |
 | `server.service.type` / `hubble.service.type` | Explicit entry type; null inherits mode | resolved `NodePort` |
+| `seatunnel.service.type` / `vermeer.service.type` | Optional native HTTP entry; null inherits mode | resolved `NodePort` when enabled |
 | `pd.service.type` | PD client entry type | `ClusterIP` |
-| `*.service.nodePort` | Fixed Server/Hubble port; omitted/0 allocates automatically | unset |
+| `*.service.nodePort` | Fixed component HTTP NodePort; omitted/0 allocates automatically | unset |
 | `global.imageRegistry` | Prefix image repositories without an explicit registry | `""` |
 | `*.image.repository` / `tag` / `digest` | Component image; digest takes priority | see values |
 | `persistence.enabled` | Global persistent storage | `true` |
@@ -224,7 +317,7 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 - `values-single.yaml`: 1 PD + 1 Store + 1 Server, with Hubble and authentication.
 - `values-cluster.yaml`: required PD/Store anti-affinity, resources and controlled
   Store updates. NetworkPolicy inherits mode; the preset is a capacity starting point.
-- All client Services support native `externalTrafficPolicy`, `loadBalancerClass`,
+- Base PD/Server/Hubble client Services support native `externalTrafficPolicy`, `loadBalancerClass`,
   `loadBalancerIP`, `loadBalancerSourceRanges`, `externalIPs` and
   `allocateLoadBalancerNodePorts`, subject to cluster/controller support.
 - Resources, JVM options, scheduling, probes, HPA/PDB, metadata and external

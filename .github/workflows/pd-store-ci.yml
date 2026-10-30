@@ -364,6 +364,10 @@ jobs:
         run: |
           mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp
 
+      - name: Run Store docker entrypoint rocksdb memory tests
+        run: |
+          $TRAVIS_DIR/test-store-docker-entrypoint.sh
+
       - name: Check startup test prerequisites (Store)
         id: store-preflight
         run: |
@@ -404,12 +408,13 @@ jobs:
           echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
           echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
-      - name: Run Store ingress and Arthas security tests
+      - name: Run Store ingress, Arthas security and metrics tests
         run: |
           set -o pipefail
           RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-node -am \
-            -Dtest=StoredRowIngressTest,ArthasSecurityTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtest=StoredRowIngressTest,ArthasSecurityTest,HgStoreMetricsControllerTest \
+            -Dsurefire.failIfNoSpecifiedTests=false \
             -Djacoco.sessionId=store-node-test \
             -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec" 2>&1 | tee "$RUNTIME_LOG"
           bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"

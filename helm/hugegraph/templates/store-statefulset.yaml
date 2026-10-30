@@ -23,6 +23,8 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: store
+  annotations:
+    hugegraph.apache.org/metadata-cluster: {{ .Values.metadataCluster | quote }}
 spec:
   serviceName: {{ include "hugegraph.store.name" . }}
   replicas: {{ .Values.store.replicas }}
@@ -143,6 +145,8 @@ spec:
             - name: rest
               containerPort: {{ .Values.store.ports.rest }}
           env:
+            - name: PD_CLUSTER
+              value: {{ .Values.metadataCluster | quote }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:

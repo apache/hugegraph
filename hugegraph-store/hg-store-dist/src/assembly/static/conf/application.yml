@@ -39,6 +39,9 @@ raft:
   # raft cache queue size
   disruptorBufferSize: 1024
   address: 127.0.0.1:8510
+  # Maximum bytes per newly allocated segment log file (1 GiB).
+  # Keep this above the largest encoded Raft entry, including replica catch-up.
+  maxSegmentFileSize: ${jraft.log_storage.segment.max.size.bytes:1073741824}
   max-log-file-size: 600000000000
   # Snapshot generation interval, in seconds
   snapshotInterval: 1800

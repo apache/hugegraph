@@ -48,11 +48,11 @@ helm install hugegraph ./hugegraph-helm -n hugegraph \
 ```
 
 Development packages append a workflow run number to the source chart version,
-for example `0.2.0-dev.123`. They may use `latest` service images. Helm OCI tags
+for example `0.4.0-dev.123`. They may use `latest` service images. Helm OCI tags
 come from the chart's SemVer version; `helm-dev` and `latest` are not Chart versions.
 
 Formal packages use the exact `Chart.version` maintained in source, for example
-`0.2.0`. They are published only after the corresponding HugeGraph service release
+`0.4.0`. They are published only after the corresponding HugeGraph service release
 exists and the chart selects published fixed component images. A source tag
 such as `helm-1.8.0` therefore denotes an already released service, not an
 advance preview. Chart fixes may be released independently from a reviewed master
@@ -138,3 +138,15 @@ default Store wait container and Helm test hook reuse component images. Explicit
 shown in the [private registry example](../examples/values-internal-registry.yaml).
 The mirror must preserve the selected image references and support the cluster's
 CPU architecture.
+
+SeaTunnel and Vermeer are disabled by default in every HugeGraph preset. When
+enabling either, also transfer its configured `apache/seatunnel` or
+`hugegraph/vermeer` image. Vermeer Master, Worker and token initialization use
+the same Vermeer image. Its default is the officially published
+`hugegraph/vermeer:helm-30b67d93e7d0`, pinned by a Linux amd64/arm64 OCI index
+digest. Preserve that index and the required platforms when mirroring it.
+The [Vermeer image reference](vermeer.md#image-compatibility) records the full
+digest, source commit, successful official publishing run and custom-tag override
+command. A tag override must also clear `vermeer.image.digest`, or set a different
+verified digest; the default digest otherwise continues to win. Hubble needs its
+native Vermeer adapter when selecting a custom build.

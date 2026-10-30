@@ -88,7 +88,7 @@ store:
   max-down-time: 86400
 partition:
   # Default number of replicas per partition
-  default-shard-count: 3
+  default-shard-count: 1
   # The default maximum number of replicas per machine, the initial number of partitions= store-max-shard-count * store-number / default-shard-count
   store-max-shard-count: 12
 

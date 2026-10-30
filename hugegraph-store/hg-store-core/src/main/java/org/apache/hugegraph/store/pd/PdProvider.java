@@ -43,6 +43,14 @@ public interface PdProvider {
 
     Partition getPartitionByID(String graph, int partId);
 
+    /**
+     * Preserve PD lookup failures for recovery. Only an explicit NOT_FOUND error proves absence;
+     * the legacy lookup's null result remains ambiguous and must not authorize cleanup.
+     */
+    default Partition getPartitionByIDForRecovery(String graph, int partId) throws PDException {
+        return getPartitionByID(graph, partId);
+    }
+
     Metapb.Shard getPartitionLeader(String graph, int partId);
 
     Metapb.Partition getPartitionByCode(String graph, int code);

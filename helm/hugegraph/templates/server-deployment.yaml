@@ -31,6 +31,8 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
+  annotations:
+    hugegraph.apache.org/metadata-cluster: {{ .Values.metadataCluster | quote }}
 spec:
   {{- if not .Values.server.hpa.enabled }}
   replicas: {{ .Values.server.replicas }}
@@ -253,6 +255,8 @@ spec:
             - name: http
               containerPort: {{ .Values.server.port }}
           env:
+            - name: HG_SERVER_CLUSTER
+              value: {{ .Values.metadataCluster | quote }}
             - name: POD_IP
               valueFrom:
                 fieldRef:

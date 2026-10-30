@@ -87,7 +87,7 @@ public class RaftRpcClient {
             this.rpcClient.invokeAsync(endpoint, request, invokeCtx, invokeCallback,
                                        this.rpcOptions.getRpcDefaultTimeout());
         } catch (final Throwable t) {
-            log.error("failed to call rpc to {}. {}", endpoint, t.getMessage());
+            log.error("failed to call rpc to {}.", endpoint, t);
             closure.failure(t);
             closure.run(new Status(-1, t.getMessage()));
         }

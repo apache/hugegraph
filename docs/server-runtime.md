@@ -30,6 +30,32 @@ component files. CI checks positive-test and startup logs for Java module-access
 errors and unsupported JVM options, including errors printed without failing the
 operation.
 
+### Gremlin and HStore transport reconnection
+
+The Gremlin security manager permits reads of the gRPC shaded Netty boolean property
+`io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator` and the DNS cache setting
+`networkaddress.cache.ttl`. gRPC reads these settings when it builds a DNS resolver or
+rebuilds a transport, including after a PD or Store restart during a Gremlin request.
+Gremlin cannot set or clear these system properties. It also cannot change the separate
+JDK security property `networkaddress.cache.ttl` through `java.security.Security.setProperty`.
+Trusted code outside Gremlin can still configure these settings. Sensitive system
+properties such as `user.home` remain unreadable from Gremlin. The allocator flag is read
+on every allocator invocation. Its whitelist entry permits direct script reads of this
+exact property, but does not permit other gRPC properties or bulk property enumeration.
+
+HStore constructs each target's lazy channel and stub pools on the calling thread so
+initialization retains the caller's Gremlin security context. The client publishes
+the pool after all channels are constructed. If construction throws a runtime exception
+or an error, it closes the partial pool and reports the failure; a subsequent request can retry.
+Cleanup failures are retained as suppressed exceptions, and an original error is rethrown
+unchanged. RPC transport work remains asynchronous. This change does not grant Gremlin permission to create
+threads or thread groups.
+
+The shared gRPC framework and provider discovery initialize during normal PD/framework
+bootstrap before Server accepts Gremlin requests. This does not initialize the pools
+for every future Store target. Unit checks that obtain a stub verify lazy pool
+construction; a successful RPC and its readback are separate runtime checks.
+
 ### Launcher GC options
 
 Use `bin/start-hugegraph.sh -g g1` (or `-g G1`) to select G1 explicitly.
@@ -377,15 +403,6 @@ REST and Gremlin accept requests. A first label-filtered Gremlin query must succ
 without a preceding REST graph query, and subsequent REST queries must remain usable.
 Gremlin scripts still cannot read restricted system properties such as `java.version`
 or disable the security manager.
-
-### HStore transport configuration
-
-HStore's gRPC transport reads the boolean configuration property
-`io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator` on every allocator invocation.
-The server's existing property-read whitelist allows this exact, non-sensitive flag,
-including direct reads from Gremlin scripts. Other restricted property reads and bulk
-system-property enumeration remain denied; this entry grants no wildcard access to
-the gRPC property namespace.
 
 ### Property-query index coverage
 
@@ -961,7 +978,7 @@ that field. Responses retain the raw zero marker so editing clients can preserve
 The bootstrapped `DEFAULT` space keeps explicit compute limits of 128 cores / 128 GB;
 existing positive compute limits are not converted to inheritance.
 Upgrade the Java client together with the Server before sending partial space
-updates (paired [Toolchain change](https://github.com/apache/hugegraph-toolchain/pull/834)).
+updates. The client must preserve the distinction between omitted fields and explicit zeros.
 Older clients send zero for omitted compute fields; the new Server interprets an
 explicit zero as restoring inheritance and cannot distinguish that from an omitted
 SDK property. Until clients are upgraded, use read-modify-write and explicitly send
@@ -1031,3 +1048,18 @@ An administrator can raise limits with `PUT /graphspaces/DEFAULT`, for example:
 Read the current space first and preserve the fields that are not being changed. The
 example raises graph count to 200 and storage to 20480 GB. This changes configuration;
 it does not remove existing graphs or migrate other spaces.
+
+For resource paths, graph aliases and asynchronous Gremlin examples, see
+[REST API usage](rest-api-usage.md).
+
+## Rebuild jobs for schema labels
+
+Rebuild existing labels with `PUT /graphspaces/{space}/graphs/{graph}/jobs/rebuild/`
+followed by `vertexlabels/{name}`, `edgelabels/{name}` or `indexlabels/{name}`.
+Successful submissions return HTTP 202 with a non-null `task_id`; poll the
+corresponding graph's `/tasks/{task_id}` endpoint until completion.
+
+A missing label returns HTTP 404 and identifies the missing schema name.
+No rebuild task is submitted for a missing label. Recreate the intended schema
+or correct the label name before retrying. This also handles a label removed
+before its builder can schedule the rebuild.

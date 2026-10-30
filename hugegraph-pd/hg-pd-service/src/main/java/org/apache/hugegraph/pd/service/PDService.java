@@ -511,10 +511,11 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
                 }
             }
             Metapb.Store store = request.getStore();
+            Set<Integer> submittedGroups = new HashSet<>();
             // Before going offline, check whether the number of active machines is greater than
             // the minimum threshold
             if (state.equals(Metapb.StoreState.Tombstone)) {
-                List<Metapb.Store> activeStores = storeNodeService.getActiveStores();
+                List<Metapb.Store> activeStores = storeNodeService.getPlacementStores();
                 if (lastStore.getState() == Metapb.StoreState.Up
                     && activeStores.size() - 1 < pdConfig.getMinStoreCount()) {
                     throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
@@ -539,9 +540,16 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
                         // to be migrated
                         store = Metapb.Store.newBuilder(lastStore)
                                             .setState(Metapb.StoreState.Exiting).build();
-                        // Perform partition migration operations
-                        taskService.movePartitions((Map<Integer, KVPair<Long, Long>>) resultMap.get(
-                                "movedPartitions"));
+                        // Perform partition migration operations. Preserve the groups whose
+                        // final placement was accepted so updateStore does not immediately
+                        // submit a second independently planned membership change.
+                        Map<Integer, KVPair<Long, Long>> submitted =
+                                taskService.movePartitions(
+                                        (Map<Integer, KVPair<Long, Long>>) resultMap.get(
+                                                "movedPartitions"));
+                        if (submitted != null) {
+                            submittedGroups.addAll(submitted.keySet());
+                        }
                     } else {
                         // If the store is offline, the replica is not migrated
                         // Change the status to Tombstone
@@ -554,7 +562,7 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
                 }
             }
             // Replace license using grpc
-            store = storeNodeService.updateStore(store);
+            store = storeNodeService.updateStore(store, submittedGroups);
             response =
                     Pdpb.SetStoreResponse.newBuilder().setHeader(okHeader).setStore(store).build();
         } catch (PDException e) {

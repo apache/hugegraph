@@ -6,15 +6,12 @@ selects affected tests, reads the project Java version, checks CI policy and ver
 license headers and RAT. Selected Helm checks run as steps in preflight; other selected suites
 run through reusable workflows in the same run.
 
-CI results become advisory after [`.asf.yaml`](../.asf.yaml) is applied. It requests no required CI contexts
-and retains one approving review. This protection change takes effect after the configuration
-is merged and synchronized by Gitbox; verify live protection then. Failed tests keep their
-real failed results. Valid selection and Java outputs allow selected tests to run even when
+The protection policy in [`.asf.yaml`](../.asf.yaml) requests no required CI contexts
+and retains one approving review. Failed jobs retain their failing check results.
+Valid selection and Java outputs allow selected tests to run even when
 the preflight license checks fail.
 
-Preflight keeps its real `check-license` name. The temporary `Server memory tests`
-protection bridge has been removed after confirming both ASF and org master required
-contexts are empty. Actual backend jobs are named `Server memory tests (Java ...)`
+Preflight uses the `check-license` name. Backend jobs are named `Server memory tests (Java ...)`
 and `Server rocksdb tests (Java ...)`; their native checks report real execution.
 
 ## Coverage with selective tests

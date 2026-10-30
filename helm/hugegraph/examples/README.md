@@ -17,6 +17,12 @@ helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
   --set hubble.persistence.storageClassName=my-csi
 ```
 
+SeaTunnel and Vermeer are disabled in both HugeGraph presets. Enabled Vermeer
+adds two volumes in standalone mode, or one Master volume plus one per Worker
+in cluster mode. The default three-Worker cluster therefore adds four volumes.
+Prepare these separately when using the seven-volume local example below.
+See the [Vermeer storage guide](../docs/vermeer.md#storage-and-recovery).
+
 An empty chart `storageClassName` inherits the cluster default; `"-"` renders
 an explicit empty Kubernetes StorageClass and disables default-class assignment.
 Neither creates a provisioner. PVCs remain Pending without matching PVs.
@@ -64,6 +70,8 @@ For a fresh temporary installation, `--set persistence.enabled=false` uses
 `hubble.persistence.enabled` override the global choice. A failed PVC never
 falls back to temporary storage. Changing an initialized cluster's storage mode
 requires a separate data migration/recovery procedure.
+Vermeer Master/Worker storage flags also inherit that global choice; SeaTunnel
+checkpoints remain temporary local files rather than PVC-backed recovery storage.
 
 ## Internal images
 
@@ -71,10 +79,23 @@ requires a separate data migration/recovery procedure.
 four images: `hugegraph/pd:latest`, `hugegraph/store:latest`,
 `hugegraph/server:latest`, and `hugegraph/hubble:latest`. Tags follow the chart's
 current version policy; pin your own published tags/digests.
+Enabled SeaTunnel additionally needs its configured `apache/seatunnel` image;
+enabled Vermeer needs a compatible `hugegraph/vermeer` build, reused for both
+process roles and token initialization. Mirror every enabled image and explicit
+helper override at the verified reference. See [image compatibility](../docs/vermeer.md#image-compatibility)
+before selecting Hubble/Vermeer builds.
 
 `global.imageRegistry` prefixes repositories without an explicit registry.
 A repository such as `other-registry.example.com/team/pd` overrides that prefix.
 Registry credentials remain `imagePullSecrets`.
+
+When Vermeer is enabled, mirror its additional published image
+`hugegraph/vermeer:helm-30b67d93e7d0` at the Chart's pinned Linux amd64/arm64
+index digest. It is not part of the four-image default installation above.
+See the [verified image reference](../docs/vermeer.md#image-compatibility) for
+its source and publishing run. Changing only `vermeer.image.tag` leaves the
+pinned digest in effect; clear `vermeer.image.digest` explicitly for a custom
+tag, or provide that build's verified digest.
 
 The PD wait init container reuses the Store image and Helm test reuses the
 Server image. Both already include `curl`; the chart selects a shell command
@@ -112,6 +133,16 @@ offline renders cannot look up live generated Secrets and otherwise generate new
 random values. Changing the admin Secret alone does not change an already-created
 account; follow the [account password and Secret synchronization steps](../docs/operations.md#credentials).
 
+For native administrator credentials, enabled Vermeer accepts
+`vermeer.auth.admin.password` or `vermeer.auth.admin.existingSecret/key`;
+new installations otherwise generate a kept random alphanumeric password: 6 characters in `easy`, 16 in `strict`. Advanced
+GitOps setups also preserve the automatically managed internal service identity
+through `vermeer.auth.value` or `vermeer.auth.existingSecret/key`. Optional external
+Schema credentials use `vermeer.hugegraphCredentials.existingSecret/key`; the
+referenced key contains a username/password JSON object. See
+[Vermeer deployment credentials](../docs/vermeer.md#deployment-credentials-and-gitops)
+for permissions, generated service tokens and rotation.
+
 Before moving an existing release to a declarative GitOps renderer, export and
 pin its effective values; offline rendering cannot apply Helm's `--reuse-values`.
 Keep the existing `server.service.type`, `hubble.service.type`, `hubble.enabled`
@@ -138,5 +169,8 @@ access. LoadBalancer needs your infrastructure's controller.
 authenticated API; disable `server.auth.enabled` as well for an unauthenticated
 API. Current Hubble login still needs Server auth. Strict mode defaults to internal
 Services and NetworkPolicy, but explicit parameters override defaults. With
-NetworkPolicy enabled, add native `extraIngress` rules for actual clients; `{}`
-is a valid allow-all rule.
+NetworkPolicy enabled, add ingress rules for actual base-service clients.
+SeaTunnel/Vermeer HTTP defaults to NodePort in easy mode and ClusterIP in strict
+mode; login stays required and peer channels stay internal. Entry commands and
+overrides are in the [SeaTunnel](../docs/seatunnel.md) and
+[Vermeer](../docs/vermeer.md#optional-native-administration) guides.

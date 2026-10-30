@@ -21,6 +21,11 @@ import org.apache.hugegraph.store.HeartbeatShutdownTest;
 import org.apache.hugegraph.store.StoreIdChangeTest;
 import org.apache.hugegraph.store.core.snapshot.HgSnapshotHandlerTest;
 import org.apache.hugegraph.store.core.store.meta.PartitionMetaCodecTest;
+import org.apache.hugegraph.store.node.AppConfigTuningTest;
+import org.apache.hugegraph.store.node.listener.PdConfigureListenerMemoryOverrideTest;
+import org.apache.hugegraph.store.options.CgroupMemoryLimitTest;
+import org.apache.hugegraph.store.options.RaftRocksdbOptionsTest;
+import org.apache.hugegraph.store.options.RocksdbMemoryBudgetTest;
 import org.apache.hugegraph.store.util.FileObjectIteratorTest;
 import org.apache.hugegraph.store.util.FilterIteratorCleanupTest;
 import org.apache.hugegraph.store.util.FilterIteratorColumnEqualityTest;
@@ -65,7 +70,12 @@ import lombok.extern.slf4j.Slf4j;
         MetricSessionTest.class,
         HgSnapshotHandlerTest.class,
         StoreIdChangeTest.class,
-        PartitionMetaCodecTest.class
+        PartitionMetaCodecTest.class,
+        RocksdbMemoryBudgetTest.class,
+        CgroupMemoryLimitTest.class,
+        AppConfigTuningTest.class,
+        RaftRocksdbOptionsTest.class,
+        PdConfigureListenerMemoryOverrideTest.class
 })
 @Slf4j
 public class CoreSuiteTest {

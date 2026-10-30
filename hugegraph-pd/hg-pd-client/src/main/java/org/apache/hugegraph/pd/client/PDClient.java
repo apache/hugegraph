@@ -621,17 +621,7 @@ public class PDClient {
         KVPair<Metapb.Partition, Metapb.Shard> partShard =
                 cache.getPartitionById(graphName, partId);
         if (partShard == null) {
-            Pdpb.GetPartitionByIDRequest request = Pdpb.GetPartitionByIDRequest.newBuilder()
-                                                                               .setHeader(header)
-                                                                               .setGraphName(
-                                                                                       graphName)
-                                                                               .setPartitionId(
-                                                                                       partId)
-                                                                               .build();
-            GetPartitionResponse response =
-                    blockingUnaryCall(PDGrpc.getGetPartitionByIDMethod(), request);
-            handleResponseError(response.getHeader());
-            partShard = new KVPair<>(response.getPartition(), response.getLeader());
+            partShard = getPartitionByIdDirect(graphName, partId);
             if (config.isEnableCache()) {
                 cache.update(graphName, partShard.getKey().getId(), partShard.getKey());
                 cache.updateShardGroup(getShardGroup(partShard.getKey().getId()));
@@ -651,6 +641,19 @@ public class PDClient {
             }
         }
         return partShard;
+    }
+
+    /**
+     * Query this graph partition without the cache or any additional shard-group lookup.
+     * In particular, a NOT_FOUND error belongs to this partition RPC rather than cache filling.
+     */
+    public KVPair<Metapb.Partition, Metapb.Shard> getPartitionByIdDirect(String graphName,
+                                                                      int partId) throws PDException {
+        Pdpb.GetPartitionByIDRequest request = Pdpb.GetPartitionByIDRequest.newBuilder()
+                .setHeader(header).setGraphName(graphName).setPartitionId(partId).build();
+        GetPartitionResponse response = blockingUnaryCall(PDGrpc.getGetPartitionByIDMethod(), request);
+        handleResponseError(response.getHeader());
+        return new KVPair<>(response.getPartition(), response.getLeader());
     }
 
     public ShardGroup getShardGroup(int partId) throws PDException {

@@ -17,9 +17,9 @@
 
 apiVersion: v2
 name: hugegraph-helm
-description: Helm chart for Apache HugeGraph HStore cluster (PD + Store + Server)
+description: Helm chart for Apache HugeGraph HStore cluster with optional SeaTunnel and Vermeer
 type: application
-version: 0.2.0
+version: 0.4.0
 # TODO: set appVersion to "1.8.0" when the release images are published.
 appVersion: "latest"
 kubeVersion: ">=1.23.0-0"
@@ -32,6 +32,8 @@ home: https://hugegraph.apache.org/
 icon: https://hugegraph.apache.org/img/logo.svg
 sources:
   - https://github.com/apache/hugegraph
+  - https://github.com/apache/seatunnel
+  - https://github.com/apache/hugegraph-computer/tree/master/vermeer
 maintainers:
   - name: HugeGraph Community
     url: https://hugegraph.apache.org/

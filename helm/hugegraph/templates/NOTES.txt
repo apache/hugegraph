@@ -16,6 +16,7 @@ limitations under the License.
 */}}
 {{ include "hugegraph.resolveValues" . }}
 {{- $hubbleEnabled := .Values.hubble.enabled }}
+{{- $vermeerEnabled := (.Values.vermeer | default dict).enabled | default false }}
 {{ .Release.Name }} installed in namespace {{ .Release.Namespace }} ({{ .Values.mode | default "legacy" }} mode).
 
   PD      {{ .Values.pd.replicas }} replica(s)
@@ -23,6 +24,16 @@ limitations under the License.
   Server  {{ if .Values.server.hpa.enabled }}HPA {{ .Values.server.hpa.minReplicas }}-{{ .Values.server.hpa.maxReplicas }}{{ else }}{{ .Values.server.replicas }} replica(s){{ end }}
 {{- if $hubbleEnabled }}
   Hubble  1 replica (UI)
+{{- end }}
+{{- if (.Values.seatunnel | default dict).enabled }}
+  SeaTunnel  {{ .Values.seatunnel.mode }} mode
+{{- end }}
+{{- if $vermeerEnabled }}
+  Vermeer  {{ .Values.vermeer.mode }} mode (1 Master, {{ if eq .Values.vermeer.mode "standalone" }}1{{ else }}{{ .Values.vermeer.worker.replicas }}{{ end }} Worker{{ if eq .Values.vermeer.mode "cluster" }}(s){{ end }})
+{{- end }}
+{{- if or $vermeerEnabled (.Values.seatunnel | default dict).enabled }}
+Service type controls access; standalone/cluster controls engine topology.
+Node addresses: kubectl get nodes -o wide
 {{- end }}
 {{- $inheritedEntries := list }}
 {{- range $component := list "server" "hubble" }}
@@ -46,6 +57,10 @@ Watch startup (run each command in a separate terminal):
 {{- if .Values.pd.storage.enabled }}{{ $claims = add $claims (int .Values.pd.replicas) }}{{ end }}
 {{- if .Values.store.storage.enabled }}{{ $claims = add $claims (int .Values.store.replicas) }}{{ end }}
 {{- if and $hubbleEnabled .Values.hubble.persistence.enabled }}{{ $claims = add $claims 1 }}{{ end }}
+{{- if $vermeerEnabled }}
+{{- if .Values.vermeer.master.storage.enabled }}{{ $claims = add $claims 1 }}{{ end }}
+{{- if .Values.vermeer.worker.storage.enabled }}{{ $claims = add $claims (ternary 1 (int .Values.vermeer.worker.replicas) (eq .Values.vermeer.mode "standalone")) }}{{ end }}
+{{- end }}
 {{- if gt (int $claims) 0 }}
 
 This configuration needs {{ $claims }} persistent volume claim(s). A dynamic
@@ -56,6 +71,85 @@ Store waits for a PD quorum before startup. If a Pod remains in Init, inspect
 its init-container logs and PD readiness; see helm/hugegraph/docs/operations.md#troubleshooting.
 
 Access:
+{{- if $vermeerEnabled }}
+{{- $vName := include "hugegraph.vermeer.masterName" . }}
+
+  Vermeer:
+    In-cluster Master HTTP: http://{{ $vName }}.{{ .Release.Namespace }}.svc:{{ .Values.vermeer.master.httpPort }}
+{{- if eq .Values.vermeer.service.type "NodePort" }}
+    NodePort: kubectl get svc -n {{ .Release.Namespace }} {{ $vName }} -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}{"\n"}'
+    Native UI/API: http://<reachable-node-ip>:<nodePort>/
+{{- end }}
+    Port-forward: kubectl port-forward -n {{ .Release.Namespace }} svc/{{ $vName }} {{ .Values.vermeer.master.httpPort }}:{{ .Values.vermeer.master.httpPort }}
+    Local native UI/API: http://127.0.0.1:{{ .Values.vermeer.master.httpPort }}/
+    Read the native management password into a local variable:
+      VERMEER_ADMIN_PASSWORD="$(kubectl get secret -n {{ .Release.Namespace }} {{ include "hugegraph.vermeer.adminSecretName" . }} -o jsonpath='{.data.{{ include "hugegraph.vermeer.adminSecretKey" . | replace "." "\\." }}}' | base64 --decode)"
+    Use this password in the native UI's Admin credential field. Login creates a 24-hour session.
+    New chart-generated management passwords have {{ ternary 16 6 (eq .Values.mode "strict") }} characters; upgrades keep existing credentials.
+    This management password is separate from the HugeGraph administrator password and Hubble's service token.
+{{- if $hubbleEnabled }}
+    Hubble is connected automatically. Sign in as a HugeGraph super administrator, select a graph,
+    then open batch analysis, load it into Vermeer and run an algorithm. View results in async tasks.
+    Hubble keeps its service token in a private temporary volume; its running container never mounts the signing factor.
+{{- else }}
+    Hubble is disabled. Enable hubble.enabled=true with hubble.mode=pd for the integrated workflow.
+{{- end }}
+    Compute results are queried from Vermeer and are not written back to HugeGraph.
+    Master/Worker restarts can discard in-memory graph copies and result caches; reload and recompute when needed.
+    Internal gRPC ports admit only same-release Vermeer peers when the CNI enforces NetworkPolicy.
+    Deployment and credentials: helm/hugegraph/docs/vermeer.md
+{{- if .Values.vermeer.auth.existingSecret }}
+
+    After changing the existing signing-factor Secret, restart all consumers so tokens and verification agree:
+      kubectl rollout restart -n {{ .Release.Namespace }} statefulset/{{ $vName }}
+      kubectl rollout status -n {{ .Release.Namespace }} statefulset/{{ $vName }} --timeout=5m
+{{- if $hubbleEnabled }}
+      kubectl rollout restart -n {{ .Release.Namespace }} deployment/{{ include "hugegraph.hubble.name" . }}
+      kubectl rollout status -n {{ .Release.Namespace }} deployment/{{ include "hugegraph.hubble.name" . }} --timeout=5m
+{{- end }}
+    Sign in again with the management password after rotation; existing browser sessions no longer work.
+{{- end }}
+{{- if (.Values.vermeer.auth.admin | default dict).existingSecret }}
+
+    After changing the existing management-password Secret, restart the Master:
+      kubectl rollout restart -n {{ .Release.Namespace }} statefulset/{{ $vName }}
+      kubectl rollout status -n {{ .Release.Namespace }} statefulset/{{ $vName }} --timeout=5m
+{{- end }}
+{{- end }}
+{{- if (.Values.seatunnel | default dict).enabled }}
+
+  SeaTunnel:
+{{- $stName := include "hugegraph.seatunnel.name" . }}
+    In-cluster API: http://{{ $stName }}.{{ .Release.Namespace }}.svc:8080
+{{- if eq .Values.seatunnel.service.type "NodePort" }}
+    NodePort: kubectl get svc -n {{ .Release.Namespace }} {{ $stName }} -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}{"\n"}'
+    Native UI: http://<reachable-node-ip>:<nodePort>/#/overview
+{{- end }}
+      kubectl port-forward -n {{ .Release.Namespace }} svc/{{ $stName }} 8081:8080
+    Local UI: http://127.0.0.1:8081/#/overview
+    Local API: http://127.0.0.1:8081
+    The SeaTunnel NetworkPolicy restricts member/CLI port 5801 to same-release peers in every mode.
+    Enforcement requires a NetworkPolicy-capable CNI; keep namespace labels, pod creation and exec under trusted RBAC.
+    The UI, static resources and REST submission API use a separate SeaTunnel HTTP Basic account.
+    Read credentials into local variables without printing the password in installation output:
+      ST_USERNAME="$(kubectl get secret -n {{ .Release.Namespace }} {{ $stName }}-auth -o jsonpath='{.data.username}' | base64 --decode)"
+      ST_PASSWORD="$(kubectl get secret -n {{ .Release.Namespace }} {{ $stName }}-auth -o jsonpath='{.data.password}' | base64 --decode)"
+    Use this account for the browser Basic login; with port forwarding active, check REST with:
+      curl --user "${ST_USERNAME}:${ST_PASSWORD}" http://127.0.0.1:8081/overview
+    These entry credentials are separate from HugeGraph connector credentials, even when HugeGraph auth is disabled.
+    New chart-generated entry passwords have {{ ternary 16 6 (eq .Values.mode "strict") }} characters; upgrades keep existing credentials.
+    Internal CLI/5801 has no HTTP Basic authentication. External submissions must use the protected REST API.
+    Online Helm upgrades retain the default credentials; rotate using seatunnel.auth.password in controlled values.
+    Pin a password for GitOps/template-only rendering. The auth Secret is retained after disabling or uninstalling.
+    Authentication, rotation and jobs: helm/hugegraph/docs/seatunnel.md
+
+    Same-release example jobs:
+      Server address, port, GraphSpace and credential references are injected; the job files are already mounted.
+      First create the target graph (default {{ .Values.server.graphSpace }}/graph_a; explicit HG_* values override it), then submit:
+      kubectl exec -n {{ .Release.Namespace }} sts/{{ $stName }} -- /opt/seatunnel/bin/seatunnel.sh --master cluster --config /opt/seatunnel/config/hugegraph-sink.conf
+      kubectl exec -n {{ .Release.Namespace }} sts/{{ $stName }} -- /opt/seatunnel/bin/seatunnel.sh --master cluster --config /opt/seatunnel/config/hugegraph-source.conf
+      Helm does not create graphs or run jobs. Cross-environment copies still require HG_SOURCE_* / HG_TARGET_* values.
+{{- end }}
 {{- range $component := list "server" "hubble" "pd" }}
 {{- if or (ne $component "hubble") $hubbleEnabled }}
 {{- $cfg := get $.Values $component }}
@@ -123,6 +217,11 @@ existing account; see helm/hugegraph/docs/operations.md#credentials for account 
 {{- if and (not $pdAuth.existingSecret) (not $pdAuth.value) }}{{ $generated = append $generated "pd.auth" }}{{ end }}
 {{- if and $srvAuth.enabled (not $srvAuth.admin.existingSecret) (not $srvAuth.admin.password) }}{{ $generated = append $generated "server.auth.admin" }}{{ end }}
 {{- if and $srvAuth.enabled (not $srvAuth.token.existingSecret) (not $srvAuth.token.value) }}{{ $generated = append $generated "server.auth.token" }}{{ end }}
+{{- if $vermeerEnabled }}
+{{- if and (not .Values.vermeer.auth.existingSecret) (not .Values.vermeer.auth.value) }}{{ $generated = append $generated "vermeer.auth" }}{{ end }}
+{{- $admin := .Values.vermeer.auth.admin | default dict }}
+{{- if and (not $admin.existingSecret) (not $admin.password) }}{{ $generated = append $generated "vermeer.auth.admin" }}{{ end }}
+{{- end }}
 {{- if $generated }}
 
 Chart-generated credentials are in use: {{ join ", " $generated }}.
@@ -157,7 +256,7 @@ Server registers {{ .Values.server.advertiseUrl }} with PD for external discover
 A standalone Hubble also needs a reachable PD endpoint; see helm/hugegraph/docs/operations.md#networking-and-hubble.
 {{- end }}
 
-Verify all Server Gremlin endpoints:
+Verify all Server Gremlin endpoints{{ if $vermeerEnabled }} and Vermeer service-space Worker availability{{ end }}:
 
   helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }} --logs --timeout 5m
 
