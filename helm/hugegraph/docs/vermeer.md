@@ -321,10 +321,20 @@ requirements.
 ## Storage and recovery
 
 Master and Worker use separate writable data directories, including when they
-share one Pod. Each role mounts its own `/go/bin/vermeer_data` directory;
-logs use `/go/bin/vermeer_data/vermeer.log`. Never share a Pebble directory
-between process roles. Each process also works from that directory, so relative
-local output files under `./data/hubble` use its corresponding data volume.
+share one Pod. Each role mounts its own `/go/bin/vermeer_data` directory. Never
+share a Pebble directory between process roles. Vermeer writes its application
+logs to container stdout. Replace `MASTER_POD` and `WORKER_POD` below with the
+corresponding Pod names to inspect each container:
+
+```bash
+kubectl -n hugegraph logs MASTER_POD -c master
+kubectl -n hugegraph logs WORKER_POD -c worker
+```
+
+In standalone mode, use the same Pod name for both commands. Application logs
+are not stored in the data volume by default. Each process works from its data
+directory, so relative local output files under `./data/hubble` use its
+corresponding data volume.
 Keeping those files does not recreate the in-memory result-query cache.
 
 | Setting | Default |
