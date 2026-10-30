@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+# http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: GraphID official source fixture
+on:
+  pull_request:
+    paths:
+      - 'hugegraph-store/hg-store-test/src/test/graphid-rekey/official-17-source.py'
+      - '.github/workflows/graphid-official-source.yml'
+permissions:
+  contents: read
+jobs:
+  official-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '11'
+      - name: Generate stopped official 1.7 source in isolated directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -u hugegraph-store/hg-store-test/src/test/graphid-rekey/official-17-source.py \
+            "$RUNNER_TEMP/official-17-source"
+      - name: Preserve fixture state and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: graphid-official-source-${{ github.event.pull_request.head.sha }}
+          retention-days: 7
+          path: ${{ runner.temp }}/official-17-source/evidence/
