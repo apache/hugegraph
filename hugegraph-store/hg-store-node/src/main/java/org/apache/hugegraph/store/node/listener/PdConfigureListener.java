@@ -57,10 +57,12 @@ public class PdConfigureListener implements
     private static final String TIMESTAMP_KEY = "S:Timestamp";
     private static final String PD_CONFIG_FILE_NAME = "application-pd.yml";
     static final String MEMORY_KEY = "rocksdb.total_memory_size";
-    // Where an operator sets one Store's RocksDB budget: the Docker entrypoint's
-    // SPRING_APPLICATION_JSON (HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE) or
-    // -Drocksdb.total_memory_size
-    private static final String[] MEMORY_OVERRIDE_SOURCES = {"spring.application.json",
+    // Where an operator sets one Store's RocksDB budget: --rocksdb.total_memory_size, the
+    // Docker entrypoint's SPRING_APPLICATION_JSON (HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE) or
+    // -Drocksdb.total_memory_size. Not systemEnvironment: ROCKSDB_TOTAL_MEMORY_SIZE binds to
+    // rocksdb's total.memory.size key, so it never sets the budget and must not drop PD's
+    private static final String[] MEMORY_OVERRIDE_SOURCES = {"commandLineArgs",
+                                                             "spring.application.json",
                                                              "systemProperties"};
     private final String workDir = System.getProperty("user.dir");
     private final String fileSeparator = System.getProperty("file.separator");
