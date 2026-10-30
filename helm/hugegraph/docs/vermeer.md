@@ -285,12 +285,12 @@ its intended internal API integration.
 
 ### Image compatibility
 
-The Chart pins the officially published `hugegraph/vermeer:helm-30b67d93e7d0`
-image to OCI index digest
-`sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e`.
-The index provides Linux `amd64` and `arm64` images built from
+The development Chart defaults to `hugegraph/vermeer:latest` and `Always` pull
+policy. Pin a compatible tag or digest for reproducible deployments. The former
+default `hugegraph/vermeer:helm-30b67d93e7d0` was published at OCI index digest
+`sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e`
+for Linux `amd64` and `arm64` from
 [source commit 30b67d93e7d0](https://github.com/hugegraph/hugegraph-computer/commit/30b67d93e7d097374341cf46ee6a0703421512b1).
-No manual image override is needed for ordinary enablement.
 
 Publishing uses the
 [publish latest Vermeer workflow](https://github.com/hugegraph/actions/blob/master/.github/workflows/publish_latest_vermeer_image.yml).
@@ -299,21 +299,32 @@ credentials, native administrator password login and space-aware Worker
 availability. Hubble needs its native Vermeer adapter and nine algorithm forms.
 A different tag alone does not establish these capabilities.
 
-`vermeer.image.digest` takes priority over the tag; a repository override also
-retains that digest. To select another reviewed tag, clear it explicitly:
+`vermeer.image.digest` takes priority over the tag. A Helm upgrade using
+`--reuse-values` can retain the former tag, digest and pull policy. To switch an
+existing release to the development default, include its other required values
+and explicitly reset all three:
 
 ```bash
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph -f my-values.yaml \
-  --set-string vermeer.image.tag='<reviewed-tag>' \
-  --set-string vermeer.image.digest= --wait --timeout 20m
+  --set-string vermeer.image.tag=latest \
+  --set-string vermeer.image.digest= \
+  --set vermeer.image.pullPolicy=Always --wait --timeout 20m
 ```
 
 Retain the release's reviewed credentials, storage and metadata namespace in
-`my-values.yaml`. A custom immutable build can instead set its own verified
+`my-values.yaml`. An explicit digest from reused or supplied values must also be
+cleared when selecting another tag. A custom immutable build can instead set its own verified
 `vermeer.image.digest`. Images inherit `global.imageRegistry` and
 `imagePullSecrets`; registry mirrors must preserve the selected index and
 required architectures. Master, Worker and token initialization reuse the
 Vermeer image, with no runtime package downloads.
+
+An updated `latest` image does not change a Pod template by itself: `Always`
+pulls the current image when a container starts, but does not restart running
+Pods. To pick up a newer image, restart the Vermeer StatefulSet(s) and the Hubble
+Deployment (whose init container also uses the Vermeer image), or roll out an
+explicit new tag or digest. Plan the restart for the deployment's availability
+requirements.
 
 </details>
 

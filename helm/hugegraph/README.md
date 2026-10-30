@@ -154,9 +154,9 @@ which already contain `curl`; no separate curl image is needed by default.
 See the [complete registry example](examples/values-internal-registry.yaml).
 When enabled, also mirror `apache/seatunnel` and/or `hugegraph/vermeer` at the
 configured versions. Vermeer token initialization reuses its own image.
-The optional Vermeer image is pinned to the officially published Linux
-amd64/arm64 index. See [verified image and custom overrides](docs/vermeer.md#image-compatibility)
-for its tag, digest, source and publishing run. Normal enablement needs no image override.
+The optional Vermeer image defaults to `latest` with `Always` pull policy, like
+the other HugeGraph components. See [image compatibility and upgrades](docs/vermeer.md#image-compatibility)
+for production pinning and migration from an older Chart.
 
 ### Storage
 

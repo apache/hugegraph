@@ -605,11 +605,11 @@ vermeer:
   mode: standalone
   image:
     repository: hugegraph/vermeer
-    # Official matching build with file credentials, native admin login and token helper.
-    # Pin the multi-platform manifest; clear digest when selecting a different tag.
-    tag: helm-30b67d93e7d0
-    digest: sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e
-    pullPolicy: IfNotPresent
+    # Tracks development builds. Pin a compatible tag or digest for production.
+    tag: latest
+    # Optional immutable digest; when set it takes priority over tag.
+    digest: ""
+    pullPolicy: Always
   auth:
     # Token signing factor. existingSecret > value > a stable generated Secret.
     # File-backed signing keys require at least 16 characters; prefer 32 random characters.

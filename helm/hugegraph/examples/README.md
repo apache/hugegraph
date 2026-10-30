@@ -89,13 +89,11 @@ before selecting Hubble/Vermeer builds.
 A repository such as `other-registry.example.com/team/pd` overrides that prefix.
 Registry credentials remain `imagePullSecrets`.
 
-When Vermeer is enabled, mirror its additional published image
-`hugegraph/vermeer:helm-30b67d93e7d0` at the Chart's pinned Linux amd64/arm64
-index digest. It is not part of the four-image default installation above.
-See the [verified image reference](../docs/vermeer.md#image-compatibility) for
-its source and publishing run. Changing only `vermeer.image.tag` leaves the
-pinned digest in effect; clear `vermeer.image.digest` explicitly for a custom
-tag, or provide that build's verified digest.
+When Vermeer is enabled, mirror its additional image
+`hugegraph/vermeer:latest` or the compatible tag or digest you selected. It is
+not part of the four-image default installation above. See
+[image compatibility](../docs/vermeer.md#image-compatibility) for the required
+capabilities and migration from the former pinned default.
 
 The PD wait init container reuses the Store image and Helm test reuses the
 Server image. Both already include `curl`; the chart selects a shell command

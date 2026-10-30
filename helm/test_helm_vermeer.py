@@ -514,6 +514,22 @@ class VermeerChartTest(unittest.TestCase):
         claim, = vermeer_resources(documents, "PersistentVolumeClaim")
         self.assertEqual("7Gi", claim["spec"]["resources"]["requests"]["storage"])
 
+    def test_default_and_custom_tag_cover_both_processes_and_token_helper(self):
+        for mode in ("standalone", "cluster"):
+            for image, expected in (({}, "hugegraph/vermeer:latest"),
+                                    ({"tag": "dev-build"}, "hugegraph/vermeer:dev-build")):
+                with self.subTest(mode=mode, image=image):
+                    documents = self.documents({"mode": mode, "image": image})
+                    containers = [container for workload in self.workloads(documents)
+                                  for container in pod(workload)["spec"]["containers"]]
+                    hubble, = resources(documents, "Deployment", "hubble")
+                    containers += [container for container in pod(hubble)["spec"]["initContainers"]
+                                   if container["name"] == "vermeer-token"]
+                    self.assertEqual(3, len(containers))
+                    for container in containers:
+                        self.assertEqual(expected, container["image"])
+                        self.assertEqual("Always", container["imagePullPolicy"])
+
     def test_registry_digest_and_pull_secrets_cover_both_processes_and_token_helper(self):
         digest = "sha256:" + "a" * 64
         documents = self.documents({"image": {"repository": "team/vermeer", "tag": "ignored", "digest": digest,
