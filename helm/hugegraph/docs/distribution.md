@@ -58,9 +58,9 @@ such as `helm-1.8.0` therefore denotes an already released service, not an
 advance preview. Chart fixes may be released independently from a reviewed master
 commit after the service release; chart and service version numbers need not match.
 
-The manual workflow in [hugegraph/actions](https://github.com/hugegraph/actions)
-resolves its selected source ref to a fixed commit, validates and packages the
-chart, and installs that exact `.tgz` for its Kubernetes checks before publishing.
+The chart publishing workflow resolves its selected source ref to a fixed commit,
+validates and packages the chart, and installs that exact `.tgz` for its
+Kubernetes checks before publishing.
 Turning off `publish` runs validation without uploading to a registry.
 
 ## Install and mirror a chart offline

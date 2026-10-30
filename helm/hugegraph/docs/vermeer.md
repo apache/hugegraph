@@ -132,11 +132,11 @@ when the image contains old defaults.
 
 Cluster health requires a paired Hubble and Vermeer build that supports the
 authenticated `GET /api/v1/admin/cluster` snapshot (`schema_version: 1`). The
-published Vermeer pin documented below predates that endpoint; retain its
-immutable digest until a reviewed replacement has been published, then select
-the paired images using `hubble.image` and `vermeer.image` (clear or replace the
-old `vermeer.image.digest` when selecting another tag). Do not infer capability
-from a tag alone. An older image that returns 404 is shown as unsupported, not
+former pinned Vermeer image documented below predates that endpoint. Releases
+that retain it need a compatible Vermeer image and Hubble build selected using
+`vermeer.image` and `hubble.image` (clear or replace the old
+`vermeer.image.digest` when selecting another tag). Do not infer capability from
+a tag alone. An older image that returns 404 is shown as unsupported, not
 healthy. A failed or unauthorized snapshot is reported as unavailable and does
 not turn the main graph cluster into a database outage.
 
@@ -290,10 +290,8 @@ policy. Pin a compatible tag or digest for reproducible deployments. The former
 default `hugegraph/vermeer:helm-30b67d93e7d0` was published at OCI index digest
 `sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e`
 for Linux `amd64` and `arm64` from
-[source commit 30b67d93e7d0](https://github.com/hugegraph/hugegraph-computer/commit/30b67d93e7d097374341cf46ee6a0703421512b1).
+[source commit 30b67d93e7d0](https://github.com/apache/hugegraph-computer/commit/30b67d93e7d097374341cf46ee6a0703421512b1).
 
-Publishing uses the
-[publish latest Vermeer workflow](https://github.com/hugegraph/actions/blob/master/.github/workflows/publish_latest_vermeer_image.yml).
 Custom builds must include `/go/bin/vermeer-token`, versioned HMAC-SHA256 file
 credentials, native administrator password login and space-aware Worker
 availability. Hubble needs its native Vermeer adapter and nine algorithm forms.
