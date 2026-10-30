@@ -23,7 +23,6 @@ edge.cache_type=l2
 # if you want to use cassandra, mysql, postgresql, cockroachdb or palo as backend, please find a
 # version before 1.7.0 of apache hugegraph for your application.
 backend=hstore
-serializer=binary
 # The process-wide max capacity of one serialization buffer in bytes
 #serializer.buffer_max_capacity=134217728
 

@@ -744,10 +744,37 @@ public class StandardHugeGraph implements HugeGraph {
         return BackendProviderFactory.open(this.params);
     }
 
+    /**
+     * The backend's serializer unless the config names one explicitly; a
+     * binary-only backend (hstore, rocksdb) refuses any other name, since
+     * its tables parse stored keys as binary and rows written through
+     * another serializer are stored but never read back (#3225).
+     */
     private AbstractSerializer serializer() {
-        String name = this.configuration.get(CoreOptions.SERIALIZER);
+        String name = serializerName(this.configuration, this.storeProvider, this.spaceGraphName());
         LOG.debug("Loading serializer '{}' for graph '{}'", name, this.spaceGraphName());
         return SerializerFactory.serializer(this.configuration, name);
+    }
+
+    public static String serializerName(HugeConfig config, BackendStoreProvider provider,
+                                        String graph) {
+        String backendDefault = provider.serializerName();
+        String configured = config.get(CoreOptions.SERIALIZER);
+        if (configured == null || configured.isEmpty()) {
+            return backendDefault;
+        }
+        configured = configured.toLowerCase();
+        if (!configured.equals(backendDefault) && !provider.acceptsOtherSerializer()) {
+            throw new HugeException("The %s backend requires serializer=%s, but got '%s' " +
+                                    "(graph '%s'); remove the serializer line from the " +
+                                    "graph config", provider.type(), backendDefault, configured, graph);
+        }
+        if (!configured.equals(backendDefault)) {
+            LOG.warn("Graph '{}' overrides the {} backend's serializer '{}' with '{}'; the " +
+                     "serializer option is legacy and will be removed", graph,
+                     provider.type(), backendDefault, configured);
+        }
+        return configured;
     }
 
     private Analyzer analyzer() {

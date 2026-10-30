@@ -476,7 +476,6 @@ File: `hugegraph-server/conf/graphs/hugegraph.properties`
 ```properties
 # Backend Type
 backend=hstore
-serializer=binary
 
 # Store Connection
 store.provider=org.apache.hugegraph.backend.store.hstore.HstoreProvider
@@ -754,7 +753,6 @@ vi conf/graphs/hugegraph.properties
 **Configuration**:
 ```properties
 backend=hstore
-serializer=binary
 
 store.provider=org.apache.hugegraph.backend.store.hstore.HstoreProvider
 store.pd_peers=192.168.1.10:8686,192.168.1.11:8686,192.168.1.12:8686

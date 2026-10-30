@@ -37,7 +37,6 @@ File: `hugegraph-server/conf/graphs/<graph-name>.properties`
 ```properties
 # Backend type
 backend=hstore
-serializer=binary
 
 # Store provider class
 store.provider=org.apache.hugegraph.backend.store.hstore.HstoreProvider
