@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api.gremlin;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 
@@ -24,6 +25,7 @@ import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.exception.HugeGremlinException;
+import org.apache.hugegraph.util.JsonUtil;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -81,13 +83,21 @@ public class GremlinQueryAPI extends API {
         }
 
         if (mediaType == null || !JSON.equals(mediaType.getSubtype())) {
-            String message = response.readEntity(String.class);
+            String message = response.getEntity() == null ? "" :
+                             response.getEntity() instanceof byte[] ?
+                             new String((byte[]) response.getEntity(),
+                                        StandardCharsets.UTF_8) :
+                             response.readEntity(String.class);
             throw new HugeGremlinException(status.getStatusCode(),
                                            ImmutableMap.of("message", message));
         }
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> map = response.readEntity(Map.class);
+        Map<String, Object> map = response.getEntity() instanceof byte[] ?
+                                  JsonUtil.fromJson(
+                                          new String((byte[]) response.getEntity(),
+                                                     StandardCharsets.UTF_8),
+                                          Map.class) : response.readEntity(Map.class);
         String exClassName = (String) map.get("Exception-Class");
         if (FORBIDDEN_REQUEST_EXCEPTIONS.contains(exClassName)) {
             status = Response.Status.FORBIDDEN;

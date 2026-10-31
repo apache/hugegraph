@@ -28,6 +28,7 @@ import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.api.cypher.CypherClientTest;
 import org.apache.hugegraph.auth.ContextGremlinServerHttpTest;
 import org.apache.hugegraph.auth.HttpGremlinRequestHandlerTest;
+import org.apache.hugegraph.auth.EmbeddedGremlinRestExecutorTest;
 import org.apache.hugegraph.auth.ContextTaskTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
@@ -182,6 +183,7 @@ import org.junit.runners.Suite;
         CypherOpProcessorTest.class,
         WsAndHttpBasicAuthHandlerTest.class,
         HttpGremlinRequestHandlerTest.class,
+        EmbeddedGremlinRestExecutorTest.class,
         ContextGremlinServerHttpTest.class,
         GraphSpaceGroupAPITest.class,
         GraphSpaceAuthPayloadTest.class,

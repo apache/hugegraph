@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutor;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.HugeConfig;
@@ -63,6 +64,7 @@ import org.apache.hugegraph.util.Consumers;
 import org.apache.hugegraph.util.Events;
 import org.junit.Test;
 import org.mockito.AdditionalAnswers;
+import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.apache.tinkerpop.gremlin.server.GremlinServer;
 
@@ -489,12 +491,18 @@ public class HugeFactoryTest {
                 }).when(provider).close();
                 Whitebox.setInternalState(graph, "storeProvider", provider);
                 HugeGraphServer server = Mockito.mock(HugeGraphServer.class, Mockito.CALLS_REAL_METHODS);
+                GremlinRestExecutor restExecutor = Mockito.mock(GremlinRestExecutor.class);
+                Whitebox.setInternalState(server, "gremlinRestExecutor", restExecutor);
                 Whitebox.setInternalState(server, "gremlinServer", gremlin);
                 Whitebox.setInternalState(server, "restServer", rest);
                 Whitebox.setInternalState(server, "memoryMonitor", Mockito.mock(MemoryMonitor.class));
 
                 server.stop();
 
+                InOrder shutdown = Mockito.inOrder(restExecutor, gremlin, rest);
+                shutdown.verify(restExecutor).beginShutdown();
+                shutdown.verify(gremlin).stop();
+                shutdown.verify(rest).shutdown();
                 Assert.assertEquals(2, earlyCloses.get());
                 Assert.assertEquals(TaskStatus.SUCCESS, task.status());
                 Assert.assertTrue("Pending task must persist completion before owner close", completionPersisted.get());

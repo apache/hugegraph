@@ -18,6 +18,8 @@
 package org.apache.hugegraph.server;
 
 import org.apache.hugegraph.HugeFactory;
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutor;
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutorFactory;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.WorkLoad;
@@ -74,6 +76,30 @@ public class ApplicationConfig extends ResourceConfig {
     private ServletConfig servletConfig;
 
     public ApplicationConfig(HugeConfig conf, EventHub hub) {
+        this(conf, hub, GremlinRestExecutorFactory.standalone(conf));
+    }
+
+    public ApplicationConfig(HugeConfig conf, EventHub hub,
+                             GremlinRestExecutor executor) {
+        register(new AbstractBinder() {
+            @Override
+            protected void configure() {
+                bind(executor).to(GremlinRestExecutor.class);
+            }
+        });
+        register(new ApplicationEventListener() {
+            @Override
+            public void onEvent(ApplicationEvent event) {
+                if (event.getType() == ApplicationEvent.Type.DESTROY_FINISHED) {
+                    executor.close();
+                }
+            }
+
+            @Override
+            public RequestEventListener onRequest(RequestEvent event) {
+                return null;
+            }
+        });
         packages("org.apache.hugegraph.api");
 
         // Register Jackson to support json
