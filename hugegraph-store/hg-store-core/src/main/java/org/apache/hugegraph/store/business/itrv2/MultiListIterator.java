@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.business.itrv2;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
@@ -43,6 +44,11 @@ public class MultiListIterator implements ScanIterator {
      * current element
      */
     private ScanIterator innerIterator;
+
+    /**
+     * set once close() runs; hasNext()/isValid() stop probing the sources after that
+     */
+    private boolean closed;
 
     public MultiListIterator() {
         this.iterators = new CopyOnWriteArrayList<>();
@@ -69,6 +75,9 @@ public class MultiListIterator implements ScanIterator {
      * Get inner iterator
      */
     private void getInnerIterator() {
+        if (this.closed) {
+            return;
+        }
         if (this.innerIterator != null && this.innerIterator.hasNext()) {
             return;
         }
@@ -103,6 +112,9 @@ public class MultiListIterator implements ScanIterator {
 
     @Override
     public boolean isValid() {
+        if (this.closed) {
+            return false;
+        }
         getInnerIterator();
         if (this.innerIterator != null) {
             return this.innerIterator.isValid();
@@ -115,21 +127,53 @@ public class MultiListIterator implements ScanIterator {
      */
     @Override
     public void close() {
-        if (this.innerIterator != null) {
-            this.innerIterator.close();
+        if (this.closed) {
+            return;
         }
+        this.closed = true;
+        ScanIterator current = this.innerIterator;
+        this.innerIterator = null;
         if (this.innerListIterator == null) {
             // never iterated, so every sub-iterator is still open
             this.innerListIterator = this.iterators.iterator();
         }
+
+        // keep closing the rest if one fails, then rethrow the first failure
+        Throwable failure = null;
+        if (current != null) {
+            failure = closeSource(current, failure);
+        }
         while (this.innerListIterator.hasNext()) {
-            this.innerListIterator.next().close();
+            failure = closeSource(this.innerListIterator.next(), failure);
         }
         this.iterators.clear();
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure != null) {
+            throw (Error) failure;
+        }
+    }
+
+    private static Throwable closeSource(ScanIterator iterator, Throwable failure) {
+        try {
+            iterator.close();
+        } catch (RuntimeException | Error e) {
+            if (failure == null) {
+                return e;
+            }
+            if (failure != e) {
+                failure.addSuppressed(e);
+            }
+        }
+        return failure;
     }
 
     @Override
     public <T> T next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException();
+        }
         return this.innerIterator.next();
     }
 
