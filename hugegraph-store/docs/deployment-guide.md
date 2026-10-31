@@ -697,6 +697,18 @@ tail -f logs/hugegraph-store.log
 curl http://localhost:8520/v1/health
 ```
 
+On Store versions that provide it, `GET /-/lifecycle` reports the process
+startup lifecycle as `{"status":0,"text":"STARTING"}`, `STARTED`,
+`STOPPING`, or `UNAVAILABLE`. `STARTED` means the application reached Spring
+Ready and the gRPC listener started and has not shut down. It does **not**
+establish PD registration, partition recovery, Raft catch-up, or graph read/write
+readiness. `STOPPING` takes precedence once context shutdown begins;
+`UNAVAILABLE` means the gRPC server has shut down before that point. An older
+Store may return 404, which means this signal is unavailable, not that the Store
+is down. The existing `/-/state` operator-controlled flag is unchanged and must
+not be inferred from this lifecycle value. Continue to assess data readiness
+separately; do not use this endpoint as a rolling-update safety gate.
+
 **Verify Store registration with PD**:
 
 ```bash

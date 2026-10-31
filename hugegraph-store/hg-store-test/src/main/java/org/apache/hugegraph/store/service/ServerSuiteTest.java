@@ -38,6 +38,7 @@ import lombok.extern.slf4j.Slf4j;
         OrderedMultiPartitionIteratorTest.class,
         ScanContextCleanupTest.class,
         ContextClosedListenerTest.class,
+        StoreProcessLifecycleTest.class,
         TTLCleanerCleanupTest.class,
         GrpcShutdownBarrierTest.class,
         PartitionEngineShutdownTest.class,
