@@ -294,6 +294,14 @@ curl  http://localhost:8620/v1/partitionsAndStats
      patrol-interval: 600  # Rebalance every 10 minutes (instead of 30)
    ```
 
+   To move leaders back on a timer as well, enable periodic leader balancing:
+   ```yaml
+   pd:
+     balance-leader-enable: true
+     balance-leader-interval: 300   # seconds between checks
+     balance-leader-max-skew: 2     # tolerated leader count spread across stores
+   ```
+
 3. **Check PD Logs**:
    ```bash
    tail -f logs/hugegraph-pd.log | grep "balance"
