@@ -70,11 +70,14 @@ public class PdConfigureListener implements
                                             + "restart-hugegraph-store.sh";
     private ConfigurableApplicationContext context;
     private File pdConfFile;
+    private String selectedProvider;
     // private String restartPath = workDir + fileSeparator + "lib" + fileSeparator;
 
     @Override
     public void onApplicationEvent(ApplicationEnvironmentPreparedEvent event) {
         MutablePropertySources sources = event.getEnvironment().getPropertySources();
+        this.selectedProvider = event.getEnvironment().getProperty("TOPLINGDB_ROCKSDB_PROVIDER");
+        this.prioritizeSelectedProvider(sources);
         String pdAddress = event.getEnvironment().getProperty("pdserver.address");
         pdConfFile = new File(configFilePath);
 
@@ -131,7 +134,21 @@ public class PdConfigureListener implements
             dropOverriddenMemory(configs, sources);
             PropertiesPropertySource source = new PropertiesPropertySource("pd-config", configs);
             sources.addFirst(source);
+            this.prioritizeSelectedProvider(sources);
         }
+    }
+
+    private void prioritizeSelectedProvider(MutablePropertySources sources) {
+        if (StringUtils.isEmpty(this.selectedProvider)) {
+            return;
+        }
+        if (!"rocksdb".equals(this.selectedProvider) && !"topling".equals(this.selectedProvider)) {
+            throw new IllegalArgumentException("Invalid TOPLINGDB_ROCKSDB_PROVIDER: " +
+                                               this.selectedProvider);
+        }
+        Properties override = new Properties();
+        override.setProperty("rocksdb.provider", this.selectedProvider);
+        sources.addFirst(new PropertiesPropertySource("rocksdb-runtime-provider", override));
     }
 
     /**

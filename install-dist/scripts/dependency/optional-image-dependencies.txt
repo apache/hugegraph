@@ -1,0 +1,19 @@
+# Optional image-only dependency; excluded from the standard Maven/lib inventory.
+# The API version does not identify immutable native contents: use the URL and
+# SHA-256 pin in docker/topling-runtime.env and the embedded source provenance.
+
+runtime=topling-community
+version=8.10.2
+source_repository=https://github.com/hugegraph/toplingdb
+artifact_filename=rocksdbjni-8.10.2-linux64.jar
+artifact_pin=docker/topling-runtime.env:TOPLING_JNI_URL,TOPLING_JNI_SHA256
+installed_server=/hugegraph-server/topling/rocksdbjni.jar
+installed_pd=/hugegraph-pd/topling/rocksdbjni.jar
+installed_store=/hugegraph-store/topling/rocksdbjni.jar
+provenance=META-INF/topling-build-info.txt
+embedded_licenses=META-INF/licenses/
+embedded_license_checksums=META-INF/licenses/manifest.sha256
+installed_license_directory=topling/licenses/
+installed_license_summary=topling/LICENSE
+installed_notice=topling/NOTICE
+build_flags=WITH_TOPLING_ROCKS=0 WITH_CSPP_MEMTABLE=0 WITH_TOPLING_DCOMPACT=0

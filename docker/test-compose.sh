@@ -40,10 +40,13 @@ RENDER_DIR=""
 # baseline render shows the Compose default whatever the developer exported;
 # render_with_timeout swaps in a value. Kept as one array rather than a second
 # copy of the environment below, so a variable added there reaches both renders.
-STARTUP_TIMEOUT_ENV=(-u HG_SERVER_STARTUP_TIMEOUT_S)
+STARTUP_TIMEOUT_ENV=()
+BUILD_RUNTIME_ENV=()
 
 compose_auth() {
-    env "${STARTUP_TIMEOUT_ENV[@]}" \
+    env -u HG_SERVER_STARTUP_TIMEOUT_S -u RUNTIME_VARIANT \
+        -u TOPLING_JNI_URL -u TOPLING_JNI_SHA256 \
+        "${STARTUP_TIMEOUT_ENV[@]}" "${BUILD_RUNTIME_ENV[@]}" \
         HUGEGRAPH_VERSION="${VERSION}" \
         HUBBLE_IMAGE="${RENDER_HUBBLE_IMAGE}" \
         HUGEGRAPH_ADMIN_PASSWORD="${PASSWORD}" \
@@ -385,6 +388,45 @@ hubble_password_helper_check() {
     "${DOCKER_DIR}/set-hubble-pd-password.sh" hstore "${PD_SECRET}" >/dev/null
 }
 
+# A published runtime is selected with the existing version parameter. Every
+# other setting, including volumes and HStore topology, must render identically.
+assert_topling_variants() {
+    local topology file
+    for topology in standalone hstore ha; do
+        case "${topology}" in
+            standalone) file=docker-compose.yml ;;
+            hstore) file=docker-compose-hstore.yml ;;
+            ha) file=docker-compose-3pd-3store-3server.yml ;;
+        esac
+        (
+            VERSION=ci-version-topling
+            render "${RENDER_DIR}/${topology}-topling.json" -f "${DOCKER_DIR}/${file}"
+        )
+        jq -e --slurpfile standard "${RENDER_DIR}/${topology}.json" '
+            (.services |= with_entries(
+                if .key != "hubble" then .value.image |= sub("-topling$"; "")
+                else . end)) |
+            {services, volumes, networks, name} ==
+                ($standard[0] | {services, volumes, networks, name})
+        ' "${RENDER_DIR}/${topology}-topling.json" >/dev/null
+    done
+    (
+        BUILD_RUNTIME_ENV=(RUNTIME_VARIANT=topling TOPLING_JNI_URL=https://example.invalid/jni.jar
+                           TOPLING_JNI_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)
+        render "${RENDER_DIR}/dev-topling.json" \
+               -f "${DOCKER_DIR}/docker-compose-hstore.yml" \
+               -f "${DOCKER_DIR}/docker-compose.dev.yml"
+    )
+    jq -e '
+        .services.pd.build.args.RUNTIME_VARIANT == "topling" and
+        .services.store.build.args.RUNTIME_VARIANT == "topling" and
+        .services.pd.build.args.TOPLING_JNI_SHA256 ==
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" and
+        .services.server.build.args.RUNTIME_VARIANT == null and
+        .services.server.environment.HG_SERVER_BACKEND == "hstore"
+    ' "${RENDER_DIR}/dev-topling.json" >/dev/null
+}
+
 run_render() {
     RENDER_DIR="$(mktemp -d)"
     trap cleanup EXIT INT TERM
@@ -406,6 +448,8 @@ run_render() {
     assert_ha "${RENDER_DIR}/ha.json"
     assert_dev_override "${RENDER_DIR}/dev.json" \
                         "${RENDER_DIR}/override.json"
+
+    assert_topling_variants
 
     # An absent host value renders the entrypoint default in every topology and
     # a host value overrides it, so the container budget can be lowered to meet

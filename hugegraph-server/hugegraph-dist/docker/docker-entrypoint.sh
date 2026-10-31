@@ -26,6 +26,12 @@ mkdir -p "${DOCKER_FOLDER}"
 
 log() { echo "[hugegraph-server-entrypoint] $*"; }
 
+ROCKSDB_PROVIDER="${TOPLINGDB_ROCKSDB_PROVIDER:-rocksdb}"
+case "${ROCKSDB_PROVIDER}" in
+    rocksdb | topling) ;;
+    *) log "ERROR: TOPLINGDB_ROCKSDB_PROVIDER must be rocksdb or topling"; exit 2 ;;
+esac
+
 source ./bin/util.sh
 record_jvm_startup_diagnostics
 run_startup_step() {
@@ -68,7 +74,7 @@ set_prop_encoded() {
     key_re="^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)"
 
     if grep -qE "${key_re}" "${file}"; then
-        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
+        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}" || return
         sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
     else
         printf '%s=%s\n' "$key" "$encoded_val" >> "${file}"
@@ -180,6 +186,49 @@ if [[ -n "${PASSWORD:-}" &&
     exit 1
 fi
 
+# Same accepted spellings as HG_SERVER_INIT_STORE_ENABLED below, checked
+# before the mapping so an invalid value leaves both conf files untouched.
+# URLs hold no whitespace, and the Server splits the list on bare commas, so
+# "a, b" would otherwise register an escaped space in front of the second URL.
+URLS_TO_PD=$(printf '%s' "${HG_SERVER_URLS_TO_PD:-}" | tr -d '[:space:]')
+# Only surrounding whitespace is trimmed, so a value such as "t rue" stays invalid.
+DEPLOY_IN_K8S="${HG_SERVER_DEPLOY_IN_K8S:-}"
+DEPLOY_IN_K8S="${DEPLOY_IN_K8S#"${DEPLOY_IN_K8S%%[![:space:]]*}"}"
+DEPLOY_IN_K8S="${DEPLOY_IN_K8S%"${DEPLOY_IN_K8S##*[![:space:]]}"}"
+DEPLOY_IN_K8S=$(printf '%s' "${DEPLOY_IN_K8S}" | tr '[:upper:]' '[:lower:]')
+case "${DEPLOY_IN_K8S}" in
+    "" | y | t | yes | on | true | n | f | no | off | false) ;;
+    *) log "ERROR: invalid HG_SERVER_DEPLOY_IN_K8S '${HG_SERVER_DEPLOY_IN_K8S}'"
+       exit 1 ;;
+esac
+
+# An old nonempty volume or a bind mount hides the image's seeded graphs.
+# Only initialize a missing target of the image-owned link; existing graph
+# definitions and explicitly mounted conf/graphs directories remain authoritative.
+prepare_graph_directory() {
+    local graphs=./conf/graphs defaults=./conf/graphs.default
+    local parent=./rocksdb-data/.hugegraph-config target staging
+    [[ -L "$graphs" && "$(readlink "$graphs")" == ../rocksdb-data/.hugegraph-config/graphs ]] || return 0
+    [[ ! -d "$graphs" ]] || return 0
+    target="$parent/graphs"
+    if [[ -e "$target" || -L "$target" || ! -d "$defaults" ]]; then
+        log "ERROR: cannot initialize graph definitions at $target from $defaults"
+        return 1
+    fi
+    mkdir -p "$parent"
+    staging=$(mktemp -d "$parent/.graphs-init.XXXXXX")
+    if ! cp -a "$defaults/." "$staging/" || ! mv -T -n "$staging" "$target"; then
+        rm -rf -- "$staging"
+        log "ERROR: failed to initialize graph definitions at $target"
+        return 1
+    fi
+    rm -rf -- "$staging"
+    [[ -d "$graphs" ]] || { log "ERROR: graph definitions target is not a directory: $target"; return 1; }
+    log "Initialized graph definitions in the existing data volume"
+}
+prepare_graph_directory
+
+# Read persisted authentication only after a missing graph directory is seeded.
 AUTH_TOKEN_SECRET_ENCODED=""
 if [[ -n "${PASSWORD:-}" && -z "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
     rest_secret=$(get_prop_encoded "auth.token_secret" "${REST_SERVER_CONF}")
@@ -206,28 +255,36 @@ if [[ -n "${PASSWORD:-}" ]]; then
     AUTH_ADMIN_PASSWORD_ENCODED=$(encode_auth_prop_value "${PASSWORD}")
 fi
 
-# Same accepted spellings as HG_SERVER_INIT_STORE_ENABLED below, checked
-# before the mapping so an invalid value leaves both conf files untouched.
-# URLs hold no whitespace, and the Server splits the list on bare commas, so
-# "a, b" would otherwise register an escaped space in front of the second URL.
-URLS_TO_PD=$(printf '%s' "${HG_SERVER_URLS_TO_PD:-}" | tr -d '[:space:]')
-# Only surrounding whitespace is trimmed, so a value such as "t rue" stays invalid.
-DEPLOY_IN_K8S="${HG_SERVER_DEPLOY_IN_K8S:-}"
-DEPLOY_IN_K8S="${DEPLOY_IN_K8S#"${DEPLOY_IN_K8S%%[![:space:]]*}"}"
-DEPLOY_IN_K8S="${DEPLOY_IN_K8S%"${DEPLOY_IN_K8S##*[![:space:]]}"}"
-DEPLOY_IN_K8S=$(printf '%s' "${DEPLOY_IN_K8S}" | tr '[:upper:]' '[:lower:]')
-case "${DEPLOY_IN_K8S}" in
-    "" | y | t | yes | on | true | n | f | no | off | false) ;;
-    *) log "ERROR: invalid HG_SERVER_DEPLOY_IN_K8S '${HG_SERVER_DEPLOY_IN_K8S}'"
-       exit 1 ;;
-esac
-
 # ── Map env → properties file ─────────────────────────────────────────
 # TODO: drop the Helm chart's (helm/hugegraph) rest-server.properties wrapper once its minimum
 # Server image has the server.urls_to_pd and server.deploy_in_k8s mappings below. A read-only root
 # filesystem also needs the conf files on a writable path, since set_prop in this script edits them
 # in place; the chart refuses readOnlyRootFilesystem until then.
 [[ -n "${HG_SERVER_BACKEND:-}"  ]] && set_prop "backend"  "${HG_SERVER_BACKEND}"  "${GRAPH_CONF}"
+# Apply the image's selected JNI provider to every embedded graph in the normal
+# container graphs directory, including mounted additional graph definitions.
+# Distributed graphs keep backend=hstore and do not select a local provider.
+if [[ -n "${TOPLINGDB_ROCKSDB_PROVIDER:-}" ]]; then
+    for graph_conf in ./conf/graphs/*.properties; do
+        [[ -f "${graph_conf}" ]] || continue
+        if [[ "$(get_prop_encoded backend "${graph_conf}")" == rocksdb ]]; then
+            current_provider=$(get_prop_encoded rocksdb.provider "${graph_conf}")
+            current_provider="${current_provider%"${current_provider##*[![:space:]]}"}"
+            # RocksDBOptions defaults an absent property to rocksdb. Do not
+            # touch matching configurations, including read-only mounts.
+            if ! grep -qE '^[[:space:]]*rocksdb[.]provider([[:space:]]*[:=]|[[:space:]]|$)' "${graph_conf}"; then
+                current_provider=rocksdb
+            fi
+            if [[ "${current_provider}" != "${ROCKSDB_PROVIDER}" ]] &&
+               ! set_prop "rocksdb.provider" "${ROCKSDB_PROVIDER}" "${graph_conf}"; then
+                log "ERROR: cannot change rocksdb.provider from '${current_provider}' to" \
+                    "'${ROCKSDB_PROVIDER}' in ${graph_conf}; make the graph configuration" \
+                    "writable or configure the provider to match the selected image"
+                exit 1
+            fi
+        fi
+    done
+fi
 [[ -n "${HG_SERVER_PD_PEERS:-}" ]] && set_prop "pd.peers" "${HG_SERVER_PD_PEERS}" "${GRAPH_CONF}"
 [[ -n "${HG_SERVER_USE_PD:-}" ]] && \
     set_prop "usePD" "${HG_SERVER_USE_PD}" "${REST_SERVER_CONF}"

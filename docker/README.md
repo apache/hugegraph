@@ -272,6 +272,172 @@ The Hubble `latest` image is expected to work with HugeGraph Server 1.7 and Serv
 
 </details>
 
+### ToplingDB images
+
+Select the ToplingDB variant with the existing image-version parameter. The same
+Compose files, credentials, ports and lifecycle commands apply:
+
+```bash
+export HUGEGRAPH_VERSION=latest-topling
+# Standalone Server with embedded ToplingDB
+# First deployment
+docker compose -p hugegraph-topling-standalone -f docker-compose.yml up -d --wait
+
+# Or PD + Store using ToplingDB, with an HStore Server
+# Generate conf/hubble/hstore.local.properties as described above first.
+docker compose -p hugegraph-topling-hstore -f docker-compose-hstore.yml up -d --wait
+```
+
+Use the same project name on subsequent `ps`, `stop`, `down` and `up` commands.
+Persist `HUGEGRAPH_VERSION=latest-topling` in that deployment's `.env` if preferred.
+A published version uses `<version>-topling`; the unsuffixed tag keeps RocksDB.
+Topling images support **Linux amd64 on a Haswell-compatible CPU**, including
+AVX2 and BMI2, as required by the current JNI build. All HugeGraph images in a deployment set
+use the same source revision. HStore Server keeps `backend=hstore` and delegates
+storage to PD/Store; it does not load a local Topling JNI runtime. Hubble keeps its
+independent image tag.
+
+The images include the verified JNI runtime and set both launcher and business
+provider configuration. No JAR download or `LD_PRELOAD` setting is needed at startup.
+The default image uses the community JNI with SkipList memtables and BlockBasedTable
+SSTs; it includes no proprietary trial modules. Its native profile starts with a
+64 MiB block cache and three 16 MiB write buffers per column family. Native memory
+still scales with databases and column families; these settings do not cap total
+process memory. Mount a tuned `conf/toplingdb.yaml` or select an external file with
+`TOPLINGDB_EASY_MIGRATE_CONF` when sizing a production deployment. CSPP and other
+optional modules require your own compatible JNI artifact and native profile.
+The unpacked distribution's full profile is unchanged. The default community
+profile uses standard BlockBasedTable SSTs and supports opening compatible RocksDB
+data after a normal shutdown. The publication check seeds data using standard
+images from the same source commit, switches to Topling on the same volumes, and
+checks schema, indexes, graph operations and restart persistence. See
+[Topling runtime preparation and validation](../docs/storage-lifecycle.md#storage-provider-selection-and-toplingdb)
+for the native configuration and tested compatibility boundary.
+
+Standalone images retain graph definitions in
+`rocksdb-data/.hugegraph-config/graphs`, reached through the `conf/graphs` symlink.
+The supplied `server-data` volume therefore keeps API-created graph definitions
+as well as database files through container replacement. If an older nonempty
+volume or a bind mount lacks this directory, the entrypoint initializes it once
+from the image's `conf/graphs.default`. Existing definitions and database files
+are preserved; explicitly mounted `conf/graphs` directories take precedence.
+
+An explicitly mounted graph directory or file may be read-only when its
+`rocksdb.provider` already matches the selected image. An absent property means
+`rocksdb`, so a Topling configuration must explicitly select `topling`. Matching
+files are left unchanged. If the provider differs, startup reports the graph
+file and required change; supply a matching configuration or use a writable
+directory mount before switching images. A single-file bind mount cannot be
+replaced by the entrypoint's in-place editor, even when mounted writable.
+Other environment-driven configuration changes, authentication setup, and API
+graph creation/deletion still require writable configuration where they apply.
+
+For the first upgrade from an older image, preserve **custom graph definitions
+and settings** that existed only in its installation directory. Default seeding
+does not recover those files from the database. Stop the old Server and copy its
+definitions while that container still exists:
+
+```bash
+docker compose -f docker-compose.yml stop server
+docker compose -f docker-compose.yml cp server:/hugegraph-server/conf/graphs ./graphs-backup
+cp -a ./graphs-backup ./graph-config
+```
+
+Keep `graphs-backup` untouched. Save a writable configuration mount for the working
+copy as `docker-compose.graph-config.yml`, and retain it on every subsequent start:
+
+```yaml
+services:
+  server:
+    volumes:
+      - ./graph-config:/hugegraph-server/conf/graphs
+```
+
+Apply this override alongside the normal Compose file when starting the new
+image. Verify all expected definitions and their data/WAL paths before replacement.
+Custom `graphs` directories need equivalent backup and mounts. This one-time step
+preserves older configuration files that are outside the data volume; it does not
+migrate old anonymous volumes. Subsequent API-created definitions persist in the
+selected configuration directory, either the default data-volume location above
+or this explicit mount.
+
+Then stop incoming work, stop the services normally, and
+select the matching Topling images. Keep the same Compose project, credentials and
+data mounts. For standalone, from this directory:
+
+```bash
+docker compose -f docker-compose.yml stop
+HUGEGRAPH_VERSION='<matching-version>-topling' \
+  docker compose -f docker-compose.yml up -d --wait
+```
+
+If you use the working configuration mount above, retain
+`-f docker-compose.graph-config.yml` after the base Compose file on subsequent
+commands. Deployments using the default data-volume configuration need no override.
+
+Use `docker-compose-hstore.yml` for the corresponding distributed deployment.
+The named data volumes are reattached automatically; no export/import or new
+project is needed for the compatible database files. To return to standard
+RocksDB, use the same stop/up sequence and matching unsuffixed tag. Standard
+images explicitly select `rocksdb`, so the entrypoint resets the provider in all
+persisted or writable mounted `backend=rocksdb` graph definitions. Topling images
+select `topling` in the same way. Other graph settings and `backend=hstore`
+definitions remain unchanged. Retain any configuration override used above.
+Prefer versioned tags or verified digests: Topling
+`latest-topling` is published on demand and can lag standard `latest`. Changing
+storage providers does not bypass HugeGraph or RocksDB version compatibility.
+Back up the data and qualify representative existing data before production use.
+
+The images declare only database directories as Docker volumes, so replacing an
+image also replaces its binaries, configuration defaults and JNI. The supplied
+Compose files mount these database directories separately and standalone graph
+definitions live in that data volume. Older custom definitions require the
+one-time configuration preservation described above. If an older
+custom deployment kept data only in an anonymous whole-application volume, first
+identify and preserve that volume's database directories; they are not copied
+automatically into a new data volume. Custom data/WAL paths must remain mounted.
+
+Source builds use the community JNI release and trusted SHA-256 pinned in
+[`topling-runtime.env`](topling-runtime.env). The image build downloads and verifies
+that artifact once; selecting the variant is the only required build input.
+For a local HStore source build, use the existing development overlay:
+
+```bash
+export RUNTIME_VARIANT=topling
+docker compose -p hugegraph-topling-dev \
+  -f docker-compose-hstore.yml -f docker-compose.dev.yml up -d --build --wait
+```
+
+The overlay uses the usual local `:dev` tags. Build it on Linux amd64. For direct Docker and
+Bake builds, use `--build-arg RUNTIME_VARIANT=topling` or `RUNTIME_VARIANT=topling`
+respectively; the same pinned JNI defaults apply.
+
+To use a different compatible JNI release, optionally override both
+`TOPLING_JNI_URL` and `TOPLING_JNI_SHA256`. Compose and Bake accept them as environment
+variables; direct Docker builds accept the same names as build arguments:
+
+```bash
+export TOPLING_JNI_URL='https://your-artifact-host/immutable/rocksdbjni.jar'
+export TOPLING_JNI_SHA256='<trusted-64-character-sha256>'
+```
+
+For a verified local JNI JAR, put it in a directory as `rocksdbjni.jar` and supply
+that directory as a named build context instead of a download URL:
+
+```bash
+docker buildx build --platform linux/amd64 -f ../hugegraph-server/Dockerfile \
+  --build-arg RUNTIME_VARIANT=topling \
+  --build-arg TOPLING_JNI_SHA256='<trusted-64-character-sha256>' \
+  --build-context topling-jni=/absolute/path/to/jni-directory \
+  -t hugegraph/hugegraph:local-topling --load ..
+```
+
+Run this example from the `docker` directory. Bake accepts the same directory
+with `--set '*.contexts.topling-jni=/absolute/path/to/jni-directory'`. The checksum
+and normal native capability probe still apply. Networks with a private CA can additionally supply
+`--secret id=proxy_ca,src=/absolute/path/ca.pem`; the CA is mounted only while
+Maven, package installation and artifact download run.
+
 ### Data persistence
 
 Each topology creates its own normal Compose network and named volumes. No network or volume needs to be created in advance.
@@ -280,6 +446,11 @@ Each topology creates its own normal Compose network and named volumes. No netwo
 <summary>Data locations inside the containers</summary>
 
 Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore topologies keep PD and Store data in topology-local volumes. Hubble uses `jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE` and stores uploaded files under `/hubble/data/upload-files`.
+
+Standalone API-created graph definitions are separate files under `conf/graphs`.
+Before any first replacement of an older root-volume image, including a standard
+to standard upgrade, follow the [configuration backup and mount steps](#toplingdb-images).
+The data volume alone does not preserve or reload those definitions.
 
 </details>
 
@@ -371,7 +542,22 @@ Both Server images (`hugegraph/hugegraph` and `hugegraph/server`) write the Huge
 
 `/hugegraph-server/logs` holds `hugegraph-server.log`, JVM crash logs (`hs_err_pid<pid>_<host>_<launch time>.log`) and out-of-memory heap dumps (`heapdump_<host>_<launch time>/java_pid<pid>.hprof`), where `<launch time>` is the container's local time as `YYYYMMDD-HHMMSS`. Each start gets its own `heapdump_*` directory, so the Server and the JVMs it starts, such as computer jobs, write separate dumps. HotSpot names each dump and crash log after the JVM's PID, so a JVM that reuses the PID of an earlier one from the same start cannot write its dump, and its crash log replaces the earlier one's. The host name (on Kubernetes, the pod name, or `spec.hostname` when that is set) and a `-1`, `-2`, ... counter keep names from clashing; the counter also separates pods that share a host name. If the directory cannot be created, for example on a full volume, the Server still starts and dumps go to `logs/` itself as `java_pid<pid>.hprof`. That is best effort: a full volume may have no room for the dump either, and a restarted container that reuses a PID cannot write over an earlier dump with the same name. If the logs path contains a double quote or `%`, the launcher warns and heap dumps go to `logs/` itself, with no per-launch directory and no crash log default; the `JAVA_TOOL_OPTIONS` opt-out below still applies. A path that contains both quote characters gets no heap dump default at all.
 
-Both images declare `VOLUME /hugegraph-server`, so `docker restart` and a Compose recreate keep the files in that anonymous volume. `docker compose down` leaves the volume behind but the next `up` does not attach it, so the files become hard to reach and keep using disk. A later `docker compose down -v` does not remove that orphaned volume either, since it only removes anonymous volumes of the containers it removes; note the volume name with `docker inspect` before `down` and delete it with `docker volume rm <name>`, or stop with `docker compose down -v` in the first place. Avoid `docker volume prune` for this: it deletes every unused anonymous volume on the Docker host, including other projects' data. Mount a named volume or a bind mount at `/hugegraph-server/logs` to keep the files reachable. Kubernetes starts a new container on every restart and does not turn the image's `VOLUME` into a pod volume, so mount an `emptyDir` or a PersistentVolumeClaim at `/hugegraph-server/logs`; for a PersistentVolumeClaim, set `fsGroup: 10001` in the Server pod security context so the non-root user can write it. Give each pod its own volume, or a per-pod directory on a shared PVC: crash files get distinct names, but `hugegraph-server.log`, the audit log and the slow-query log have fixed names, and pods sharing them would roll them over for each other. For a per-pod directory, pass the pod name in through the Downward API and use it in `subPathExpr` (the Helm chart sets neither):
+The images persist database directories rather than the application installation. A
+`docker restart` keeps logs in the existing container; replacing the container requires
+a named volume or bind mount at `/hugegraph-server/logs` to retain them. Older images
+declared `VOLUME /hugegraph-server`, which could also retain old binaries and JNI during
+an image change. Do not mount an old installation directory over a replacement image;
+keep database and any custom configuration mounts separate. An old anonymous root volume
+can remain after its container is removed. Inspect its contents before removing that
+specific volume; it may contain logs or data from a deployment without explicit data
+mounts. Kubernetes starts a new container on every restart, so mount an `emptyDir` or a
+PersistentVolumeClaim at `/hugegraph-server/logs` to preserve logs across container
+restarts. For a PersistentVolumeClaim, set `fsGroup: 10001` in the Server pod
+security context so the non-root user can write it. Give each pod its own volume, or a per-pod directory on a shared PVC: crash
+files get distinct names, but `hugegraph-server.log`, the audit log and the slow-query
+log have fixed names, and pods sharing them would roll them over for each other. For a
+per-pod directory, pass the pod name in through the Downward API and use it in
+`subPathExpr` (the Helm chart sets neither):
 
 ```yaml
 env:

@@ -31,6 +31,27 @@ variable "SOURCE_REVISION" {
   default = "local"
 }
 
+variable "SOURCE_URL" {
+  default = "https://github.com/apache/hugegraph"
+}
+
+variable "RUNTIME_VARIANT" {
+  default = "standard"
+
+  validation {
+    condition     = RUNTIME_VARIANT == "standard" || RUNTIME_VARIANT == "topling"
+    error_message = "RUNTIME_VARIANT must be standard or topling"
+  }
+}
+
+variable "TOPLING_JNI_URL" {
+  default = null
+}
+
+variable "TOPLING_JNI_SHA256" {
+  default = null
+}
+
 variable "IMAGE_TAG" {
   default = "local"
 }
@@ -50,8 +71,13 @@ target "_common" {
     MAVEN_PROJECTS     = MAVEN_PROJECTS
     RUNTIME_DEPS_EPOCH = RUNTIME_DEPS_EPOCH
     SOURCE_REVISION    = SOURCE_REVISION
+    SOURCE_REPOSITORY  = SOURCE_URL
+    RUNTIME_VARIANT    = RUNTIME_VARIANT
+    TOPLING_JNI_URL    = TOPLING_JNI_URL
+    TOPLING_JNI_SHA256 = TOPLING_JNI_SHA256
   }
-  platforms = [
+  # The published Topling JNI currently contains Linux x86_64 native code only.
+  platforms = RUNTIME_VARIANT == "topling" ? ["linux/amd64"] : [
     "linux/amd64",
     "linux/arm64",
   ]

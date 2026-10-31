@@ -30,9 +30,14 @@ jobs:
   docker-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [standard, topling]
     env:
-      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
       SOURCE_REVISION: ${{ github.sha }}
+      RUNTIME_VARIANT: ${{ matrix.runtime }}
     steps:
       - name: Checkout
         id: checkout
@@ -89,7 +94,7 @@ jobs:
           set -euo pipefail
 
           docker buildx bake --file docker/bake.hcl --print > /tmp/hugegraph-bake.json
-          jq -e '
+          jq -e --arg runtime "$RUNTIME_VARIANT" '
             .group.default.targets == [
               "build-cache",
               "pd",
@@ -98,7 +103,8 @@ jobs:
               "store"
             ] and
             ([.target[] | .platforms] |
-              all(. == ["linux/amd64", "linux/arm64"])) and
+              all(. == (if $runtime == "topling" then ["linux/amd64"]
+                        else ["linux/amd64", "linux/arm64"] end))) and
             .target["build-cache"].target == "build" and
             .target["build-cache"].output[0].type == "cacheonly" and
             ([.target | to_entries[] |

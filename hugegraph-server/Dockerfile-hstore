@@ -29,14 +29,38 @@ ARG MAVEN_PROJECTS="hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,huge
 ARG SOURCE_REVISION=local
 
 RUN --mount=type=cache,id=hugegraph-maven-${SOURCE_REVISION},target=/root/.m2,sharing=locked \
+    --mount=type=secret,id=proxy_ca,required=false \
+    --mount=type=secret,id=maven_settings,required=false \
+    set -e; \
+    if [ -f /run/secrets/proxy_ca ]; then \
+        cp "$JAVA_HOME/lib/security/cacerts" /tmp/hugegraph-build-cacerts; \
+        keytool -importcert -noprompt -alias hugegraph-build-proxy \
+            -file /run/secrets/proxy_ca -keystore /tmp/hugegraph-build-cacerts -storepass changeit; \
+        export MAVEN_OPTS="${MAVEN_OPTS:-} -Djavax.net.ssl.trustStore=/tmp/hugegraph-build-cacerts"; \
+    fi; \
+    if [ -f /run/secrets/maven_settings ]; then \
+        MAVEN_ARGS="-s /run/secrets/maven_settings ${MAVEN_ARGS:-}"; \
+    fi; \
     mvn install -pl "$MAVEN_PROJECTS" \
-        -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
-    && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
+        -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true; \
+    rm -f /tmp/hugegraph-build-cacerts; \
+    rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
+
+# Optional local JNI directory: --build-context topling-jni=/path/to/directory.
+# An empty default stage keeps ordinary and URL-based builds self-contained.
+FROM scratch AS topling-jni
+# HStore intentionally does not consume this stage and keeps its standard runtime.
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
 FROM eclipse-temurin:17-jdk-jammy
 # Local Arthas attach requires the JDK attach and compiler modules.
+
+ARG SOURCE_REVISION=local
+ARG SOURCE_REPOSITORY=https://github.com/apache/hugegraph
+LABEL org.opencontainers.image.source="$SOURCE_REPOSITORY" \
+      org.opencontainers.image.revision="$SOURCE_REVISION" \
+      org.apache.hugegraph.rocksdb-runtime="hstore"
 
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
@@ -53,8 +77,13 @@ WORKDIR /hugegraph-server/
 # permanently inconclusive and a duplicate start is no longer caught.  It
 # replaces lsof, which no shipped script calls any more.
 ARG RUNTIME_DEPS_EPOCH=1
-RUN apt-get -q update \
-    && apt-get -q install -y --no-install-recommends --no-install-suggests \
+RUN --mount=type=secret,id=proxy_ca,required=false \
+    --mount=type=secret,id=maven_settings,required=false \
+    set -e; \
+    apt_ca=/etc/ssl/certs/ca-certificates.crt; \
+    if [ -f /run/secrets/proxy_ca ]; then apt_ca=/run/secrets/proxy_ca; fi; \
+    apt-get -q -o Acquire::https::CaInfo="$apt_ca" update \
+    && apt-get -q -o Acquire::https::CaInfo="$apt_ca" install -y --no-install-recommends --no-install-suggests \
        dumb-init \
        procps \
        curl \
@@ -88,7 +117,6 @@ COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/
 COPY --chown=${HG_UID}:${HG_GID} --chmod=755 hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
 
 EXPOSE 8080
-VOLUME /hugegraph-server
 
 HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -fsS http://localhost:8080/versions >/dev/null

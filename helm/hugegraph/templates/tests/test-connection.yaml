@@ -45,6 +45,11 @@ metadata:
     # run replaces it, so both forms exit 0 and a failed Pod keeps its logs.
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  {{- if eq (get (.Values.global | default dict) "runtimeVariant" | default "standard") "topling" }}
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+  {{- end }}
   {{- with .Values.imagePullSecrets }}
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}

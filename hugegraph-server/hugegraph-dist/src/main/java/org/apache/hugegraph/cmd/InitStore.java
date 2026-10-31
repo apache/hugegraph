@@ -29,6 +29,8 @@ import java.util.Map;
 
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.auth.HugeAuthenticator.User;
+import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.StandardAuthenticator;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.config.CoreOptions;
@@ -37,6 +39,7 @@ import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.constant.ServiceConstant;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.meta.PdMetaDriver.PDAuthConfig;
+import org.apache.hugegraph.task.TaskManager;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -292,7 +295,7 @@ public class InitStore {
                  * Init the required information for creating the admin account
                  * (when switch from non-auth mode to auth mode)
                  */
-                graph.initSystemInfo();
+                initSystemInfo(graph);
                 LOG.info("Skip init-store due to the backend store of '{}' " +
                          "had been initialized", graph.name());
             } else {
@@ -308,5 +311,15 @@ public class InitStore {
     private static void initBackend(final HugeGraph graph) {
         // Only explicitly transient backend failures can be retried safely
         graph.initBackend();
+    }
+
+    private static void initSystemInfo(HugeGraph graph) {
+        // Persisted API-created graphs use the auth proxy. Their task-schema
+        // initialization runs on a pre-existing executor, so it must receive
+        // this local bootstrap command's admin context explicitly.
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            TaskManager.setContext(User.ADMIN.toJson());
+            graph.initSystemInfo();
+        });
     }
 }

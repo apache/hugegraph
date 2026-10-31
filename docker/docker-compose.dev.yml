@@ -22,6 +22,10 @@ services:
     build:
       context: ..
       dockerfile: hugegraph-pd/Dockerfile
+      args:
+        RUNTIME_VARIANT: ${RUNTIME_VARIANT:-standard}
+        TOPLING_JNI_URL: ${TOPLING_JNI_URL:-}
+        TOPLING_JNI_SHA256: ${TOPLING_JNI_SHA256:-}
     healthcheck:
       start_period: 20s
 
@@ -31,6 +35,10 @@ services:
     build:
       context: ..
       dockerfile: hugegraph-store/Dockerfile
+      args:
+        RUNTIME_VARIANT: ${RUNTIME_VARIANT:-standard}
+        TOPLING_JNI_URL: ${TOPLING_JNI_URL:-}
+        TOPLING_JNI_SHA256: ${TOPLING_JNI_SHA256:-}
     healthcheck:
       start_period: 30s
 

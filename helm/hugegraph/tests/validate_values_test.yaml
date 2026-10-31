@@ -260,3 +260,12 @@ tests:
                 cidr: 10.0.0.0/8
     asserts:
       - notFailedTemplate: {}
+
+  - it: rejects contradictory architecture scheduling
+    set:
+      global.runtimeVariant: topling
+      pd.nodeSelector:
+        kubernetes.io/arch: arm64
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.nodeSelector.kubernetes.io/arch must be amd64"

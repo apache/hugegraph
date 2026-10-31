@@ -26,6 +26,9 @@ mode: easy
 metadataCluster: hg-test
 global:
   imageRegistry: ""
+  # standard: normal RocksDB images; topling: matching -topling tags on Linux amd64.
+  # Matching compatible images reuse existing data/PVCs after normal shutdown.
+  runtimeVariant: standard
 persistence:
   enabled: true
 

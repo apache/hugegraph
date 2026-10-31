@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import unittest
 from unittest.mock import patch
 
@@ -68,6 +69,22 @@ class ImageIdentityTest(unittest.TestCase):
                 deployment.smoke("ci-1-1", "docker-compose.yml", {"server": "hugegraph/hugegraph"})
             self.assertEqual(run.call_args_list[-1].args[0][-3:], ["down", "-v", "--remove-orphans"])
 
+    def test_standalone_recreates_after_graph_checks(self):
+        with patch.object(deployment, "command",
+                          side_effect=["sha256:server", "server", "sha256:server", "healthy"]), \
+             patch.object(deployment.subprocess, "run") as run, \
+             patch.object(deployment, "verify_server") as server, \
+             patch.object(deployment, "verify_graph") as graph, \
+             patch.object(deployment, "verify_standalone_recreate") as recreate:
+            deployment.smoke("ci-1-1", "docker-compose.yml", {"server": "hugegraph/hugegraph"})
+            args = recreate.call_args.args
+            self.assertEqual(args[1:], ("server", "hugegraph/hugegraph:ci-1-1", "sha256:server"))
+            self.assertEqual(args[0][:4], ["docker", "compose", "-p",
+                                          "hg-pr-ci-1-1-docker-compose"])
+            server.assert_called_once_with()
+            graph.assert_called_once_with("hg_pr_ci_1_1_docker_compose")
+            self.assertEqual(run.call_args_list[-1].args[0][-3:], ["down", "-v", "--remove-orphans"])
+
     def test_hstore_starts_only_pr_services_and_cleans_after_checks(self):
         images = {"pd": "hugegraph/pd", "store": "hugegraph/store", "server": "hugegraph/server"}
         identities = ["sha256:pd", "sha256:store", "sha256:server"]
@@ -85,6 +102,74 @@ class ImageIdentityTest(unittest.TestCase):
             storage.assert_called_once_with()
             graph.assert_called_once_with("hg_pr_ci_1_1_docker_compose_hstore")
             self.assertEqual(run.call_args_list[-1].args[0][-3:], ["down", "-v", "--remove-orphans"])
+
+
+class ReadOnlyGraphFixtureTest(unittest.TestCase):
+    def test_fixture_is_usable_by_image_uid_before_readonly_mount_under_restrictive_umask(self):
+        inspected = []
+
+        def command(*args):
+            if args[:3] == ("docker", "image", "inspect"):
+                return json.dumps(["TOPLINGDB_ROCKSDB_PROVIDER=rocksdb"])
+            if "--entrypoint" in args:
+                return "backend=rocksdb\n"
+            mount = args[args.index("--mount") + 1]
+            source = Path(dict(option.split("=", 1) for option in mount.split(",") if "=" in option)["src"])
+            directory_mode = stat.S_IMODE(source.stat().st_mode)
+            file_mode = stat.S_IMODE((source / "hugegraph.properties").stat().st_mode)
+            self.assertEqual(directory_mode & (stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH),
+                             stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)
+            self.assertEqual(file_mode & (stat.S_IROTH | stat.S_IWOTH), stat.S_IROTH | stat.S_IWOTH)
+            inspected.append(source)
+            raise RuntimeError("fixture inspected before Docker startup")
+
+        previous_umask = os.umask(0o077)
+        try:
+            with patch.object(deployment, "command", side_effect=command), \
+                 patch.object(deployment.subprocess, "run"):
+                with self.assertRaisesRegex(RuntimeError, "fixture inspected"):
+                    deployment.verify_readonly_graphs("hugegraph/hugegraph:fixture")
+            self.assertEqual(len(inspected), 1)
+            self.assertFalse(inspected[0].exists())
+        finally:
+            os.umask(previous_umask)
+
+
+class GraphDefinitionPersistenceTest(unittest.TestCase):
+    def test_force_recreate_keeps_graph_config_in_data_volume(self):
+        compose = ["docker", "compose", "-p", "fixture", "-f", "/repo/docker/docker-compose.yml"]
+        with patch.object(deployment, "command",
+                          side_effect=[deployment.GRAPH_CONFIG_LINK, "replacement", "healthy"]) as command, \
+             patch.object(deployment.subprocess, "run") as run, \
+             patch.object(deployment, "verify_image") as image, \
+             patch.object(deployment, "verify_server") as server, \
+             patch.object(deployment, "create_persisted_graph") as create, \
+             patch.object(deployment, "verify_persisted_graph") as verify:
+            deployment.verify_standalone_recreate(
+                compose, "original", "hugegraph/hugegraph:ci-1-1", "sha256:pr")
+
+            recreate = run.call_args.args[0]
+            self.assertEqual(recreate[:len(compose)], compose)
+            for option in ("--force-recreate", "--no-deps", "--wait"):
+                self.assertIn(option, recreate)
+            self.assertEqual(recreate[-1], "server")
+            image.assert_called_once_with("replacement", "hugegraph/hugegraph:ci-1-1", "sha256:pr")
+            server.assert_called_once_with()
+            create.assert_called_once_with()
+            verify.assert_called_once_with()
+            self.assertEqual(command.call_args_list[0].args,
+                             ("docker", "exec", "original", "readlink",
+                              "/hugegraph-server/conf/graphs"))
+
+    def test_rejects_missing_graph_after_recreate(self):
+        with patch.object(deployment, "response", return_value=(404, "missing graph")):
+            with self.assertRaisesRegex(RuntimeError, "expected 200"):
+                deployment.verify_persisted_graph()
+
+    def test_rejects_missing_vertex_even_when_graph_exists(self):
+        with patch.object(deployment, "response", return_value=(200, '{"properties":{}}')):
+            with self.assertRaisesRegex(RuntimeError, "did not survive"):
+                deployment.verify_persisted_graph()
 
 
 class GraphSmokeTest(unittest.TestCase):

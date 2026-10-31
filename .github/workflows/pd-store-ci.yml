@@ -189,6 +189,7 @@ jobs:
         run: |
           bash $TRAVIS_DIR/test-topling-selection.sh
           bash hugegraph-store/hg-store-dist/src/assembly/travis/test-store-preloads.sh
+          bash docker/test-topling-images.sh
 
       - name: Run PD docker entrypoint secret override tests
         run: |

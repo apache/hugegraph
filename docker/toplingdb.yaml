@@ -1,0 +1,53 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Community image defaults. Memory grows with databases and column families;
+# these are individual native budgets, not a process memory limit.
+http:
+  auto_start_http: false
+Cache:
+  lru_cache:
+    class: LRUCache
+    params:
+      capacity: 64M
+MemTableRepFactory:
+  skiplist:
+    class: SkipList
+    params:
+      lookahead: 0
+TableFactory:
+  block_based:
+    class: BlockBasedTable
+    params:
+      block_cache: "${lru_cache}"
+CFOptions:
+  default:
+    memtable_factory: "${skiplist}"
+    table_factory: block_based
+    write_buffer_size: 16M
+    max_write_buffer_number: 3
+    merge_operator: uint64add
+DBOptions:
+  log:
+    create_if_missing: true
+    create_missing_column_families: true
+  default:
+    create_if_missing: true
+    create_missing_column_families: false
+    max_background_jobs: 2
+    # Java WriteBatch does not carry Topling's mmap WAL references.
+    memtable_as_log_index: false

@@ -23,11 +23,32 @@ import org.apache.hugegraph.backend.store.AbstractBackendStoreProvider;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.util.ConfigUtil;
+import org.apache.hugegraph.util.E;
 
 public class RocksDBStoreProvider extends AbstractBackendStoreProvider {
 
+    private static final String IMAGE_PROVIDER = "TOPLINGDB_ROCKSDB_PROVIDER";
+
     protected String database() {
         return this.graph().toLowerCase();
+    }
+
+    @Override
+    public BackendStore loadSchemaStore(HugeConfig config) {
+        applyImageProvider(config);
+        return super.loadSchemaStore(config);
+    }
+
+    @Override
+    public BackendStore loadGraphStore(HugeConfig config) {
+        applyImageProvider(config);
+        return super.loadGraphStore(config);
+    }
+
+    @Override
+    public BackendStore loadSystemStore(HugeConfig config) {
+        applyImageProvider(config);
+        return super.loadSystemStore(config);
     }
 
     @Override
@@ -66,6 +87,22 @@ public class RocksDBStoreProvider extends AbstractBackendStoreProvider {
     @Override
     protected BackendStore newSystemStore(HugeConfig config, String store) {
         return new RocksDBStore.RocksDBSystemStore(this, this.database(), store);
+    }
+
+    private static void applyImageProvider(HugeConfig config) {
+        applyImageProvider(config, System.getenv(IMAGE_PROVIDER));
+    }
+
+    private static void applyImageProvider(HugeConfig config, String provider) {
+        if (config == null || config.containsKey(RocksDBOptions.PROVIDER.name()) ||
+            provider == null || provider.isBlank()) {
+            return;
+        }
+        E.checkArgument("rocksdb".equals(provider) || "topling".equals(provider),
+                        "Unsupported %s value '%s'", IMAGE_PROVIDER, provider);
+        // Keep image selection above persisted graph/PD configuration so an
+        // image rollback can switch the runtime without rewriting metadata.
+        config.setProperty(RocksDBOptions.PROVIDER.name(), provider);
     }
 
     @Override

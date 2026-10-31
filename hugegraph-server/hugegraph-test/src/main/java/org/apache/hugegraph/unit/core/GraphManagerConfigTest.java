@@ -114,6 +114,52 @@ import com.alipay.sofa.jraft.util.Endpoint;
 public class GraphManagerConfigTest {
 
     @Test
+    public void testDynamicRocksGraphInheritsImageProvider() {
+        OptionSpace.register("core", CoreOptions.instance());
+        OptionSpace.register("rocksdb", RocksDBOptions.instance());
+        for (String provider : new String[]{"rocksdb", "topling"}) {
+            PropertiesConfiguration properties = new PropertiesConfiguration();
+            properties.setProperty("backend", "rocksdb");
+            HugeConfig config = new HugeConfig(properties);
+            applyImageProvider(config, provider);
+            Assert.assertEquals(provider, config.get(RocksDBOptions.PROVIDER));
+        }
+    }
+
+    @Test
+    public void testDynamicProviderPreservesExplicitAndDistributedConfiguration() {
+        PropertiesConfiguration properties = new PropertiesConfiguration();
+        properties.setProperty("backend", "rocksdb");
+        properties.setProperty("rocksdb.provider", "rocksdb");
+        HugeConfig explicit = new HugeConfig(properties);
+        applyImageProvider(explicit, "topling");
+        Assert.assertEquals("rocksdb", explicit.getProperty("rocksdb.provider"));
+        properties.clearProperty("rocksdb.provider");
+        properties.setProperty("backend", "hstore");
+        HugeConfig distributed = new HugeConfig(properties);
+        applyImageProvider(distributed, "topling");
+        Assert.assertFalse(distributed.containsKey("rocksdb.provider"));
+    }
+
+    @Test
+    public void testDynamicProviderKeepsDefaultWithoutOptInAndRejectsInvalidSelection() {
+        PropertiesConfiguration properties = new PropertiesConfiguration();
+        properties.setProperty("backend", "rocksdb");
+        HugeConfig config = new HugeConfig(properties);
+        applyImageProvider(config, null);
+        applyImageProvider(config, "");
+        Assert.assertFalse(config.containsKey("rocksdb.provider"));
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> applyImageProvider(config, "invalid"));
+        Assert.assertFalse(config.containsKey("rocksdb.provider"));
+    }
+
+    private static void applyImageProvider(HugeConfig config, String provider) {
+        Whitebox.invoke(GraphManager.class, new Class<?>[]{HugeConfig.class, String.class},
+                        "applyImageProvider", null, config, provider);
+    }
+
+    @Test
     public void testGraphSpaceDropCleansPdStatisticsBeforeRemovingConfiguration() throws Exception {
         this.checkGraphSpaceStatisticsCleanup(null, false);
     }

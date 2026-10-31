@@ -287,7 +287,11 @@ sys.exit(int((work / 'child-exit').read_text()))
                         os.kill(int((work / 'bin/pid').read_text()), signal.SIGKILL)
                     else:
                         status = 42 if mode in ['partition42', 'partitionDiagnostic42'] else int(mode[4:])
-                        (work / 'child-exit').write_text(str(status))
+                        # Publish the exit status only after its contents are
+                        # complete; the launcher polls for the final path.
+                        pending = work / 'child-exit.pending'
+                        pending.write_text(str(status))
+                        pending.replace(work / 'child-exit')
                 actual = process.wait(timeout=5)
                 assert actual == expected, (mode, expected, actual, (work / 'output').read_text())
                 diagnostic = (work / 'output').read_text()

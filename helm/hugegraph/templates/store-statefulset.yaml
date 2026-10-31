@@ -20,6 +20,8 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ include "hugegraph.store.name" . }}
+  annotations:
+    hugegraph.apache.org/rocksdb-runtime: {{ get (.Values.global | default dict) "runtimeVariant" | default "standard" | quote }}
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: store
