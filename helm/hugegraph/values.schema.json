@@ -122,6 +122,51 @@
       "minLength": 1,
       "pattern": "^[A-Za-z0-9_.-]+$",
       "description": "Shared Server/Store PD metadata namespace. Preserve the initialized Server value; changing it does not migrate data."
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "pdReplicas": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^$|^[1-9][0-9]*$"
+            }
+          ]
+        },
+        "storeReplicas": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^$|^[1-9][0-9]*$"
+            }
+          ]
+        },
+        "initialStoreCount": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^$|^[1-9][0-9]*$"
+            }
+          ]
+        }
+      }
     }
   },
   "definitions": {

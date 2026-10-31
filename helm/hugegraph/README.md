@@ -34,6 +34,12 @@ use `latest` images; pin component `image.digest` values when needed.
 The source installation and configuration examples below assume a repository
 checkout and commands run from its root.
 
+The [stable bootstrap configuration](docs/operations.md#stable-bootstrap-topology)
+separates initialization inputs from node replicas. It is disabled by default
+and requires PD images with separate bootstrap and runtime quorum checks before
+using it for node operations. It does not implement safe node admission or
+retirement by itself.
+
 ## Install from source and open Hubble
 
 ```bash

@@ -1,0 +1,74 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Bootstrap import rejects a PD StatefulSet owned by another release
+templates:
+- pd-statefulset.yaml
+- bootstrap-configmap.yaml
+set:
+  fullnameOverride: cluster
+  bootstrap.enabled: true
+  pd.auth.existingSecret: fixture-pd
+  server.auth.admin.existingSecret: fixture-admin
+  server.auth.token.existingSecret: fixture-token
+  pd.replicas: 3
+  store.replicas: 3
+  pd.pdb.minAvailable: 2
+  store.pdb.minAvailable: 2
+release:
+  upgrade: true
+kubernetesProvider:
+  scheme:
+    v1/ConfigMap:
+      gvr:
+        version: v1
+        resource: configmaps
+      namespaced: true
+    apps/v1/StatefulSet:
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: cluster-pd
+      namespace: NAMESPACE
+      labels:
+        app.kubernetes.io/name: hugegraph
+        app.kubernetes.io/instance: OTHER-RELEASE
+        app.kubernetes.io/component: pd
+    spec:
+      template:
+        spec:
+          containers:
+          - name: pd
+            env:
+            - name: HG_PD_RAFT_PEERS_LIST
+              value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
+            - name: HG_PD_INITIAL_STORE_LIST
+              value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500
+            - name: HG_PD_INITIAL_STORE_COUNT
+              value: '3'
+tests:
+- it: fails before importing another release's initialization history
+  template: pd-statefulset.yaml
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap import found a PD StatefulSet owned by another release

@@ -1,0 +1,64 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Disabled bootstrap refuses to discard retained live topology
+templates:
+- pd-statefulset.yaml
+set:
+  fullnameOverride: cluster
+  bootstrap.enabled: false
+  pd.auth.existingSecret: fixture-pd
+  server.auth.admin.existingSecret: fixture-admin
+  server.auth.token.existingSecret: fixture-token
+  pd.replicas: 3
+  store.replicas: 3
+  pd.pdb.minAvailable: 2
+  store.pdb.minAvailable: 2
+release:
+  upgrade: true
+kubernetesProvider:
+  scheme:
+    apps/v1/StatefulSet:
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: cluster-pd
+      namespace: NAMESPACE
+      annotations:
+        hugegraph.apache.org/bootstrap-retained: 'true'
+      labels:
+        app.kubernetes.io/name: hugegraph
+        app.kubernetes.io/instance: RELEASE-NAME
+        app.kubernetes.io/component: pd
+    spec:
+      template:
+        spec:
+          containers:
+          - name: pd
+            env: []
+tests:
+- it: requires bootstrap to remain enabled after the retained marker is recorded
+  template: pd-statefulset.yaml
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.enabled cannot be disabled while the live PD StatefulSet records retained bootstrap topology

@@ -1,0 +1,123 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Experimental bootstrap rejects incomplete live initialization
+templates:
+- pd-statefulset.yaml
+- store-statefulset.yaml
+- server-deployment.yaml
+- bootstrap-configmap.yaml
+set:
+  fullnameOverride: cluster
+  bootstrap.enabled: true
+  pd.auth.existingSecret: fixture-pd
+  server.auth.admin.existingSecret: fixture-admin
+  server.auth.token.existingSecret: fixture-token
+  pd.replicas: 3
+  store.replicas: 4
+  pd.pdb.minAvailable: 2
+  store.pdb.minAvailable: 3
+release:
+  upgrade: true
+kubernetesProvider:
+  scheme:
+    v1/ConfigMap:
+      gvr:
+        version: v1
+        resource: configmaps
+      namespaced: true
+    apps/v1/StatefulSet:
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: cluster-pd
+      namespace: NAMESPACE
+      labels: &id001
+        app.kubernetes.io/name: hugegraph
+        app.kubernetes.io/instance: RELEASE-NAME
+        app.kubernetes.io/component: pd
+    spec:
+      replicas: '3'
+      volumeClaimTemplates:
+      - metadata:
+          name: pd-data
+      selector:
+        matchLabels: *id001
+      template:
+        spec:
+          containers:
+          - name: pd
+            ports:
+            - name: grpc
+              containerPort: '8686'
+            - name: rest
+              containerPort: '8620'
+            - name: raft
+              containerPort: '8610'
+            env:
+            - name: HG_PD_RAFT_PEERS_LIST
+              value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
+            - name: HG_PD_INITIAL_STORE_LIST
+              value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500,cluster-store-3.cluster-store.NAMESPACE.svc:8500
+            - name: HG_PD_INITIAL_STORE_COUNT
+              valueFrom:
+                configMapKeyRef:
+                  name: custom
+                  key: count
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: cluster-store
+      namespace: NAMESPACE
+      labels: &id002
+        app.kubernetes.io/name: hugegraph
+        app.kubernetes.io/instance: RELEASE-NAME
+        app.kubernetes.io/component: store
+    spec:
+      replicas: '4'
+      volumeClaimTemplates:
+      - metadata:
+          name: store-data
+      selector:
+        matchLabels: *id002
+      template:
+        spec:
+          containers:
+          - name: store
+            ports:
+            - name: grpc
+              containerPort: '8500'
+            - name: rest
+              containerPort: '8520'
+            - name: raft
+              containerPort: '8510'
+tests:
+- it: does not guess a live valueFrom count even with pins
+  template: store-statefulset.yaml
+  set:
+    bootstrap.pdReplicas: 3
+    bootstrap.storeReplicas: 4
+    bootstrap.initialStoreCount: 3
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap import requires the existing PD peer list
