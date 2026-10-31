@@ -72,7 +72,7 @@ class PolicyTest(unittest.TestCase):
         event = event or {"before": "base"}
         if event_name == "pull_request":
             event = {"pull_request": {"number": 7, "head": {"sha": "head", "ref": "feature",
-                     "repo": {"full_name": "alice/server"}}, "base": {"sha": "base"}}}
+                     "repo": {"full_name": "alice/server"}}, "base": {"sha": "base", "ref": "master"}}}
         with patch.object(policy, "git", side_effect=git), patch.object(
                 policy, "unsafe_documentation", return_value=False), patch.object(
                 policy, "require_current_pr"), patch.dict(os.environ, {"GITHUB_SHA": "merge"}):
@@ -283,19 +283,25 @@ class PolicyTest(unittest.TestCase):
 
     def test_toolchain_gate_keeps_summary_current_pr_and_cli_all(self):
         plan = {"schema": 1, "repository": "apache/toolchain", "project": "toolchain", "pr": 7,
-                "source": "alice/toolchain", "branch": "feature", "base": "base", "head": "head",
-                "testedMergeSHA": "merge", "selected": ["client"], "expected": ["client"]}
+                "source": "alice/toolchain", "branch": "feature", "target": "master", "base": "base",
+                "head": "head", "testedMergeSHA": "merge", "selected": ["client"], "expected": ["client"]}
         live = {"state": "open", "head": {"sha": "head", "ref": "feature", "repo": {"full_name": "alice/toolchain"}},
-                "base": {"repo": {"full_name": "apache/toolchain"}}}
+                "base": {"ref": "master", "repo": {"full_name": "apache/toolchain"}}}
+        def current(pr, status="ahead"):
+            return lambda path: {"status": status} if "/compare/" in path else pr
         results = {"plan": {"result": "success"}, "client": {"result": "success"}, "fixture": {"result": "success"}}
         with tempfile.TemporaryDirectory() as directory, patch("builtins.print"):
             root = Path(directory)
             summary = root / "summary.md"
             with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
-                policy.gate(plan, results, lambda _: live)
+                policy.gate(plan, results, current(live))
             self.assertIn("| client | yes | advisory | affected inputs | success |", summary.read_text())
             with self.assertRaises(policy.StaleInputError):
-                policy.gate(plan, results, lambda _: dict(live, head=dict(live["head"], sha="new-head")))
+                policy.gate(plan, results, current(dict(live, head=dict(live["head"], sha="new-head"))))
+            with self.assertRaises(policy.StaleInputError):
+                policy.gate(plan, results, current(dict(live, base=dict(live["base"], ref="release"))))
+            with self.assertRaises(policy.StaleInputError):
+                policy.gate(plan, results, current(live, "diverged"))
             (root / "plan.json").write_text(json.dumps(dict(plan, pr=0)))
             (root / "results.json").write_text(json.dumps(results))
             outcome = subprocess.run(["python3", str(Path(policy.__file__).resolve()), "gate", "--mode", "all",
@@ -654,23 +660,39 @@ class PolicyTest(unittest.TestCase):
                                 "-p", base, "-p", head, "-m", "PR merge")
             fixture.git("checkout", "--detach", "-q", merge)
             live = {"number": 7, "state": "open", "head": {"sha": head, "ref": "feature",
-                    "repo": {"full_name": "alice/server"}}, "base": {"sha": base, "repo": {"full_name": "apache/server"}}}
+                    "repo": {"full_name": "alice/server"}}, "base": {"sha": base, "ref": "master",
+                                                                     "repo": {"full_name": "apache/server"}}}
+            fixture.git("branch", "-f", "master", base)
             calls = []
-            def fetch(path):
+            def fetch(path, pr=live):
                 calls.append(path)
-                return live
+                if "/compare/" not in path:
+                    return pr
+                tested, target = path.rsplit("/", 1)[1].split("...")
+                if subprocess.run(["git", "merge-base", "--is-ancestor", tested, target], cwd=fixture.root).returncode:
+                    return {"status": "diverged"}
+                return {"status": "identical" if fixture.git("rev-parse", target) == tested else "ahead"}
             plan = fixture.plan({"pull_request": live}, fetch)
-            self.assertEqual(["repos/apache/server/pulls/7"], calls)
+            self.assertEqual(["repos/apache/server/pulls/7", "repos/apache/server/compare/" + base + "...master"],
+                             calls)
             self.assertTrue(plan["server"])
             self.assertFalse(plan["pd_store"])
             self.assertFalse(plan["security"])
             self.assertIn("hugegraph-server/A.java", plan["changedPaths"])
             for section, field, value in [("head", "sha", "new-head"), ("head", "ref", "other"),
                                           ("head", "repo", {"full_name": "other/fork"}),
-                                          ("base", "repo", {"full_name": "other/target"})]:
+                                          ("base", "repo", {"full_name": "other/target"}),
+                                          ("base", "ref", "release")]:
                 changed = dict(live, **{section: dict(live[section], **{field: value})})
                 with self.subTest(section=section, field=field), self.assertRaises(policy.StaleInputError):
-                    fixture.plan({"pull_request": live}, lambda _: changed)
+                    fixture.plan({"pull_request": live}, lambda path: fetch(path, changed))
+            # Target advancement keeps the tested base; a force-push to unrelated history does not.
+            tree = fixture.git("rev-parse", base + "^{tree}")
+            fixture.git("branch", "-f", "master", fixture.git("commit-tree", tree, "-p", base, "-m", "advance"))
+            self.assertTrue(fixture.plan({"pull_request": live}, fetch)["server"])
+            fixture.git("branch", "-f", "master", fixture.git("commit-tree", tree, "-m", "unrelated"))
+            with self.assertRaises(policy.StaleInputError):
+                fixture.plan({"pull_request": live}, fetch)
             with self.assertRaises(policy.StaleInputError):
                 fixture.plan({"pull_request": live}, lambda _: dict(live, state="closed"))
             fixture.git("checkout", "--detach", "-q", head)
@@ -679,7 +701,10 @@ class PolicyTest(unittest.TestCase):
 
     def test_queued_merge_uses_actual_target_parent_and_api_outage_keeps_pr_identity(self):
         live = {"number": 7, "state": "open", "head": {"sha": "head", "ref": "feature",
-                "repo": {"full_name": "alice/server"}}, "base": {"sha": "event-base", "repo": {"full_name": "apache/server"}}}
+                "repo": {"full_name": "alice/server"}}, "base": {"sha": "event-base", "ref": "master",
+                                                                 "repo": {"full_name": "apache/server"}}}
+        def current(path):
+            return {"status": "ahead"} if "/compare/" in path else live
         def git(*args):
             if args[0] == "show":
                 return "current-base head"
@@ -688,7 +713,7 @@ class PolicyTest(unittest.TestCase):
             return "merge"
         with patch.dict(os.environ, {"GITHUB_SHA": "merge", "GITHUB_EVENT_NAME": ""}), patch.object(
                 policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
-            plan = policy.create_plan("server", {"pull_request": live}, "apache/server", lambda _: live)
+            plan = policy.create_plan("server", {"pull_request": live}, "apache/server", current)
             self.assertEqual("current-base", plan["base"])
             self.assertEqual([], plan["expected"])
             def unavailable(_):
