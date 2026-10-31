@@ -539,6 +539,31 @@ public class GraphsAPI extends API {
         return result;
     }
 
+    @POST
+    @Timed
+    @Path("{name}/schema-clone")
+    @StatusFilter.Status(StatusFilter.Status.CREATED)
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space"})
+    public Object cloneSchema(@Context GraphManager manager,
+                              @PathParam("graphspace") String graphSpace,
+                              @PathParam("name") String name,
+                              @QueryParam("source") String source,
+                              Map<String, Object> options) {
+        E.checkArgument(StringUtils.isNotBlank(source), "The source graph is required");
+        E.checkArgument(options == null || options.keySet().stream().allMatch("nickname"::equals),
+                        "Only nickname is supported when cloning a schema");
+        Object nickname = options == null ? null : options.get("nickname");
+        E.checkArgument(nickname == null || nickname instanceof String,
+                        "The nickname must be a string");
+        HugeGraph graph = manager.cloneGraphSchema(graphSpace, source, name,
+                                                  (String) nickname,
+                                                  HugeGraphAuthProxy.username());
+        return ImmutableMap.of("name", graph.name(), "nickname", graph.nickname(),
+                               "backend", graph.backend());
+    }
+
     /**
      * Create graph via text/plain (hugegraph-client compatibility).
      * Client sends: POST /graphspaces/{graphspace}/graphs/{name}

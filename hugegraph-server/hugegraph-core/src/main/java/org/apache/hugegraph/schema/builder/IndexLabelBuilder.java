@@ -83,8 +83,8 @@ public class IndexLabelBuilder extends AbstractBuilder
                              HugeGraph graph, IndexLabel copy) {
         super(transaction, graph);
         E.checkNotNull(copy, "copy");
-        // Get base element from self graph
-        SchemaLabel schemaLabel = IndexLabel.getBaseLabel(graph,
+        // The copied ID belongs to the source graph, not the target graph.
+        SchemaLabel schemaLabel = IndexLabel.getBaseLabel(copy.graph(),
                                                           copy.baseType(),
                                                           copy.baseValue());
         this.id = null;
