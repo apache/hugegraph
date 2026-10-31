@@ -1,0 +1,255 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Experimental bootstrap fresh installs
+templates:
+- bootstrap-configmap.yaml
+- pd-statefulset.yaml
+- store-statefulset.yaml
+- server-deployment.yaml
+set:
+  fullnameOverride: cluster
+  bootstrap.enabled: true
+  pd.auth.existingSecret: fixture-pd
+  server.auth.admin.existingSecret: fixture-admin
+  server.auth.token.existingSecret: fixture-token
+tests:
+- it: records fresh 1 PD and Store topology
+  template: bootstrap-configmap.yaml
+  set: &id001
+    pd.replicas: 1
+    store.replicas: 1
+    pd.pdb.minAvailable: 1
+    store.pdb.minAvailable: 1
+  asserts:
+  - equal:
+      path: data.pdReplicas
+      value: '1'
+  - equal:
+      path: data.storeReplicas
+      value: '1'
+  - equal:
+      path: data.initialStoreCount
+      value: '1'
+  - equal:
+      path: immutable
+      value: true
+- it: initializes all 1 fresh PD voters
+  template: pd-statefulset.yaml
+  set: *id001
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_RAFT_PEERS_LIST
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_LIST
+        value: cluster-store-0.cluster-store.NAMESPACE.svc:8500
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_COUNT
+        value: '1'
+- it: gives fresh 1 topology matching client seeds
+  template: store-statefulset.yaml
+  set: *id001
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_STORE_PD_ADDRESS
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686
+- it: records fresh 3 PD and Store topology
+  template: bootstrap-configmap.yaml
+  set: &id002
+    pd.replicas: 3
+    store.replicas: 3
+    pd.pdb.minAvailable: 2
+    store.pdb.minAvailable: 2
+  asserts:
+  - equal:
+      path: data.pdReplicas
+      value: '3'
+  - equal:
+      path: data.storeReplicas
+      value: '3'
+  - equal:
+      path: data.initialStoreCount
+      value: '3'
+  - equal:
+      path: immutable
+      value: true
+- it: initializes all 3 fresh PD voters
+  template: pd-statefulset.yaml
+  set: *id002
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_RAFT_PEERS_LIST
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_LIST
+        value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_COUNT
+        value: '3'
+- it: gives fresh 3 topology matching client seeds
+  template: store-statefulset.yaml
+  set: *id002
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_STORE_PD_ADDRESS
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686
+- it: records fresh 5 PD and Store topology
+  template: bootstrap-configmap.yaml
+  set: &id003
+    pd.replicas: 5
+    store.replicas: 5
+    pd.pdb.minAvailable: 3
+    store.pdb.minAvailable: 4
+  asserts:
+  - equal:
+      path: data.pdReplicas
+      value: '5'
+  - equal:
+      path: data.storeReplicas
+      value: '5'
+  - equal:
+      path: data.initialStoreCount
+      value: '5'
+  - equal:
+      path: immutable
+      value: true
+- it: initializes all 5 fresh PD voters
+  template: pd-statefulset.yaml
+  set: *id003
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_RAFT_PEERS_LIST
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610,cluster-pd-3.cluster-pd.NAMESPACE.svc:8610,cluster-pd-4.cluster-pd.NAMESPACE.svc:8610
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_LIST
+        value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500,cluster-store-3.cluster-store.NAMESPACE.svc:8500,cluster-store-4.cluster-store.NAMESPACE.svc:8500
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_COUNT
+        value: '5'
+- it: gives fresh 5 topology matching client seeds
+  template: store-statefulset.yaml
+  set: *id003
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_STORE_PD_ADDRESS
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686,cluster-pd-3.cluster-pd.NAMESPACE.svc:8686,cluster-pd-4.cluster-pd.NAMESPACE.svc:8686
+- it: rejects fresh PD5 with a three-voter bootstrap
+  template: store-statefulset.yaml
+  set:
+    pd.replicas: 5
+    pd.pdb.minAvailable: 3
+    bootstrap.pdReplicas: 3
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.pdReplicas must equal pd.replicas on a fresh install
+- it: rejects fresh Store1 with a three-Store bootstrap
+  template: store-statefulset.yaml
+  set:
+    store.replicas: 1
+    store.pdb.minAvailable: 1
+    bootstrap.storeReplicas: 3
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.storeReplicas must equal store.replicas on a fresh install
+- it: rejects fresh Store3 with a one-Store bootstrap
+  template: store-statefulset.yaml
+  set:
+    store.replicas: 3
+    store.pdb.minAvailable: 2
+    bootstrap.storeReplicas: 1
+    bootstrap.initialStoreCount: 1
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.storeReplicas must equal store.replicas on a fresh install
+- it: rejects unreachable startup Store threshold
+  template: store-statefulset.yaml
+  set:
+    bootstrap.initialStoreCount: 4
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.initialStoreCount cannot exceed bootstrap.storeReplicas
+- it: rejects bootstrap counts above the chart replica limit
+  template: store-statefulset.yaml
+  set:
+    bootstrap.pdReplicas: 100
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.pdReplicas must be an integer between 1 and 99
+- it: requires offline upgrades to pin all history
+  release:
+    upgrade: true
+  template: store-statefulset.yaml
+  asserts:
+  - failedTemplate:
+      errorPattern: must all be pinned for an upgrade without a live bootstrap record
+- it: rejects internally inconsistent offline history
+  release:
+    upgrade: true
+  template: store-statefulset.yaml
+  set:
+    bootstrap.pdReplicas: 3
+    bootstrap.storeReplicas: 3
+    bootstrap.initialStoreCount: 4
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap.initialStoreCount cannot exceed bootstrap.storeReplicas
+- it: allows an offline upgrade with explicitly pinned history
+  release:
+    upgrade: true
+  template: pd-statefulset.yaml
+  set:
+    store.replicas: 4
+    store.pdb.minAvailable: 3
+    bootstrap.pdReplicas: 3
+    bootstrap.storeReplicas: 3
+    bootstrap.initialStoreCount: 3
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_COUNT
+        value: '3'
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_INITIAL_STORE_LIST
+        value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500

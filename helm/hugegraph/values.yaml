@@ -29,6 +29,16 @@ global:
 persistence:
   enabled: true
 
+# Opt-in stable initialization topology, separate from desired node replicas.
+# Online renders capture the first topology in a kept ConfigMap, or import the
+# existing PD environment on the first upgrade. Offline upgrades must pin all
+# three counts and render with --is-upgrade. This does not change membership.
+bootstrap:
+  enabled: false
+  pdReplicas: ""
+  storeReplicas: ""
+  initialStoreCount: ""
+
 fullnameOverride: ""
 nameOverride: ""
 

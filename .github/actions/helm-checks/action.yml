@@ -59,6 +59,10 @@ runs:
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_metadata_cluster.py' -v
 
+  - name: Stable bootstrap topology regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_bootstrap.py' -v
+
   - name: helm unittest
     shell: 'bash -e {0}'
     run: |

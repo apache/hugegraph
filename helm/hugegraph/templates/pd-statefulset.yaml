@@ -23,6 +23,10 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: pd
+  {{- if get (.Values.bootstrap | default dict) "enabled" }}
+  annotations:
+    hugegraph.apache.org/bootstrap-retained: "true"
+  {{- end }}
 spec:
   serviceName: {{ include "hugegraph.pd.name" . }}
   replicas: {{ .Values.pd.replicas }}
@@ -122,7 +126,7 @@ spec:
             - name: HG_PD_INITIAL_STORE_LIST
               value: {{ include "hugegraph.store.initialStoreList" . | quote }}
             - name: HG_PD_INITIAL_STORE_COUNT
-              value: {{ .Values.store.replicas | quote }}
+              value: {{ .Values.__hugegraphBootstrap.initialStoreCount | quote }}
             - name: HG_PD_DATA_PATH
               value: {{ .Values.pd.dataPath | quote }}
             - name: HG_PD_AUTH_SECRET_KEY
