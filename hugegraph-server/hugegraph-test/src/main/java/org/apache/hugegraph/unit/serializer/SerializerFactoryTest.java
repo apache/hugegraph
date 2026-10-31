@@ -25,13 +25,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
 import org.apache.hugegraph.backend.serializer.BinaryScatterSerializer;
 import org.apache.hugegraph.backend.serializer.BinarySerializer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.serializer.TextSerializer;
+import org.apache.hugegraph.backend.store.BackendStoreProvider;
+import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
@@ -57,6 +61,37 @@ public class SerializerFactoryTest extends BaseUnitTest {
         }, e -> {
             Assert.assertContains("Not exists serializer:", e.getMessage());
         });
+    }
+
+    /** The backend chooses: hstore and rocksdb are binary-only, memory is text, an override is legal elsewhere. */
+    @Test
+    public void testSerializerNameComesFromTheBackend() {
+        HugeConfig config = FakeObjects.newConfig();
+        BackendStoreProvider binaryOnly = provider("hstore", "binary", false);
+        Assert.assertEquals("binary", StandardHugeGraph.serializerName(config, binaryOnly, "g"));
+        config.setProperty(CoreOptions.SERIALIZER.name(), "binary");
+        Assert.assertEquals("binary", StandardHugeGraph.serializerName(config, binaryOnly, "g"));
+        config.setProperty(CoreOptions.SERIALIZER.name(), "text");
+        Assert.assertThrows(HugeException.class, () -> {
+            StandardHugeGraph.serializerName(config, binaryOnly, "smoketext");
+        }, e -> {
+            Assert.assertContains("hstore backend requires serializer=binary, but got 'text'", e.getMessage());
+            Assert.assertContains("smoketext", e.getMessage());
+        });
+        HugeConfig memory = FakeObjects.newConfig();
+        BackendStoreProvider text = provider("memory", "text", false);
+        Assert.assertEquals("text", StandardHugeGraph.serializerName(memory, text, "g"));
+        BackendStoreProvider lenient = provider("custom", "binary", true);
+        memory.setProperty(CoreOptions.SERIALIZER.name(), "text");
+        Assert.assertEquals("text", StandardHugeGraph.serializerName(memory, lenient, "g"));
+    }
+
+    private static BackendStoreProvider provider(String type, String serializer, boolean lenient) {
+        BackendStoreProvider p = org.mockito.Mockito.mock(BackendStoreProvider.class);
+        org.mockito.Mockito.doReturn(type).when(p).type();
+        org.mockito.Mockito.doReturn(serializer).when(p).serializerName();
+        org.mockito.Mockito.doReturn(lenient).when(p).acceptsOtherSerializer();
+        return p;
     }
 
     @Test

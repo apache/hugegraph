@@ -85,6 +85,12 @@ public class InMemoryDBStoreProvider extends AbstractBackendStoreProvider {
         return TYPE;
     }
 
+    /** The in-memory tables hold TextBackendEntry rows. */
+    @Override
+    public String serializerName() {
+        return "text";
+    }
+
     @Override
     public String driverVersion() {
         /*
