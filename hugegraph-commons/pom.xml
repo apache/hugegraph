@@ -92,7 +92,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <top.level.dir>${project.basedir}/..</top.level.dir>
         <maven.compiler.release>11</maven.compiler.release>
-        <log4j2.version>2.18.0</log4j2.version>
+        <log4j2.version>2.25.4</log4j2.version>
         <commons.configuration.version>1.10</commons.configuration.version>
         <commons.configuration2.version>2.10.1</commons.configuration2.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
