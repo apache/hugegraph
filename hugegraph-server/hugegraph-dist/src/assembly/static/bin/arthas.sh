@@ -123,18 +123,26 @@ stop_agent() {
     local session attempt agent_pid="" line endpoint rows=0
     connect_ip=$(cat "$state_dir/connect-ip")
     endpoint=$(format_endpoint)
-    if ! session=$(bounded_client session 2>&1); then
+    for attempt in 1 2 3; do
+        if session=$(bounded_client session 2>&1); then
+            break
+        fi
         if [[ "$session" == *"Connection refused"* ]]; then
             echo "Arthas listener closed at $endpoint" >&2
             return 0
         fi
         if [[ "$session" == *"not permitted"* ]]; then
             echo "Error: Arthas credentials rejected at $endpoint; agent left running" >&2
-        else
-            echo "Error: could not verify Arthas cleanup at $endpoint; agent left running" >&2
+            return 1
         fi
-        return 1
-    fi
+        if [ "$attempt" -eq 3 ]; then
+            echo "Error: could not verify Arthas cleanup at $endpoint; agent left running" >&2
+            return 1
+        fi
+        # An explicit stop can close the connection during this probe. Retry
+        # until the listener refuses connections or its PID can be checked.
+        sleep 0.2
+    done
     # AuthCommand echoes the username. Trust only one complete session table row.
     while IFS= read -r line; do
         if [[ "$line" =~ ^[[:space:]]*JAVA_PID[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then

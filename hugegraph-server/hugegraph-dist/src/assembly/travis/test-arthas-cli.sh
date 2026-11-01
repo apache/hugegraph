@@ -97,8 +97,8 @@ with tempfile.TemporaryDirectory(prefix="arthas-test-") as work:
     script = ["bash", str(root / "bin/arthas.sh")]
     client = script + ["--telnet-port", str(safe_port)]
 
-    def run(arguments, success=True):
-        result = subprocess.run(arguments, env=client_env, text=True,
+    def run(arguments, success=True, env=None):
+        result = subprocess.run(arguments, env=client_env if env is None else env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, input="", timeout=45)
         assert (result.returncode == 0) == success, result.stdout
         return result.stdout
@@ -320,7 +320,32 @@ with tempfile.TemporaryDirectory(prefix="arthas-test-") as work:
                 endpoint = f"[{connect_host}]:{safe_port}" if ":" in connect_host else f"{connect_host}:{safe_port}"
                 assert output.count(f"Arthas listener closed at {endpoint}") == 1, output
                 wait_port(False, connect_host)
-            run(client + ["--command", "stop"])
+            # Reproduce the cleanup race after an explicit stop: the first
+            # session probe loses its connection while the agent shuts down.
+            # All attachment, stop and subsequent probes still use the real JVM.
+            wrapper_home = root / "java-wrapper"
+            (wrapper_home / "bin").mkdir(parents=True)
+            marker = root / "cleanup-race"
+            injected = root / "cleanup-race-injected"
+            wrapper = wrapper_home / "bin/java"
+            wrapper.write_text(f"#!{sys.executable}\n" +
+                               "import pathlib, subprocess, sys\n" +
+                               f"marker = pathlib.Path({str(marker)!r})\n" +
+                               "args = sys.argv[1:]\n" +
+                               "if '-f' in args and marker.exists():\n" +
+                               "    batch = pathlib.Path(args[args.index('-f') + 1]).read_text()\n" +
+                               "    if batch.strip() == 'session':\n" +
+                               f"        marker.rename({str(injected)!r})\n" +
+                               "        print('Connection reset during shutdown', file=sys.stderr)\n" +
+                               "        sys.exit(1)\n" +
+                               f"status = subprocess.call([{java!r}] + args)\n" +
+                               "if '--command' in args and args[args.index('--command') + 1] == 'stop':\n" +
+                               "    marker.touch()\n" +
+                               "sys.exit(status)\n")
+            wrapper.chmod(0o755)
+            output = run(client + ["--command", "stop"], env=dict(client_env, JAVA_HOME=str(wrapper_home)))
+            assert injected.is_file() and not marker.exists(), "Shutdown race was not exercised"
+            assert output.count(f"Arthas listener closed at 127.0.0.1:{safe_port}") == 1, output
             wait_port(False)
             # Disable native local authentication bypass for the following
             # attachments; earlier signal cases exercise native no-auth defaults.
