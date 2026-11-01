@@ -326,6 +326,47 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
+    public void testToplingOlapClearRollsBackFailedCommit() throws Exception {
+        Id id = IdGenerator.of(123L);
+        String table = "store+ap_123";
+        RocksDBStore store = this.adapterStore(true, ImmutableList.of(TABLE));
+        store.createOlapTable(id);
+        RocksDBSessions.Session session = this.rocks.session();
+        session.put(table, getBytes("m"), getBytes("old"));
+        session.put(table, getBytes("n"), getBytes("old"));
+        session.commit();
+        session.put(table, getBytes("z"), getBytes("pending"));
+        AtomicReference<?> owner = Whitebox.getInternalState(this.rocks, "rocksdb");
+        Object opened = owner.get();
+        Map<String, ?> handles = Whitebox.getInternalState(opened, "cfHandles");
+        Object handle = handles.get(table);
+        Object references = Whitebox.getInternalState(session, "refs");
+        RocksDB realDB = Whitebox.getInternalState(opened, "rocksdb");
+        RocksDB faultDB = Mockito.mock(RocksDB.class, AdditionalAnswers.delegatesTo(realDB));
+        RocksDBException writeFailure = new RocksDBException("injected clear commit failure");
+        Mockito.doThrow(writeFailure).when(faultDB).write(Mockito.any(WriteOptions.class),
+                                                        Mockito.any(WriteBatch.class));
+        Whitebox.setInternalState(opened, "rocksdb", faultDB);
+        try {
+            Throwable failure = Assert.assertThrows(BackendException.class, () -> store.clearOlapTable(id));
+            Assert.assertSame(writeFailure, failure.getCause());
+        } finally {
+            Whitebox.setInternalState(opened, "rocksdb", realDB);
+        }
+        Assert.assertEquals(references, Whitebox.getInternalState(session, "refs"));
+        Assert.assertSame(handle, handles.get(table));
+        Assert.assertFalse(session.hasChanges());
+        session.commit();
+        Assert.assertArrayEquals(getBytes("old"), session.get(table, getBytes("m")));
+        Assert.assertArrayEquals(getBytes("old"), session.get(table, getBytes("n")));
+        Assert.assertNull(session.get(table, getBytes("z")));
+        store.clearOlapTable(id);
+        Assert.assertNull(session.keyRange(table));
+        Assert.assertSame(handle, handles.get(table));
+        Assert.assertEquals(references, Whitebox.getInternalState(session, "refs"));
+    }
+
+    @Test
     public void testToplingOlapClearPreservesOtherThreadPendingWrites() throws Exception {
         Id id = IdGenerator.of(123L);
         String path = DB_PATH + "/olap-clear-concurrent";
