@@ -503,7 +503,18 @@ Use a stopped Server distribution on Linux x86_64 with a Java 17 JDK. If your
 distribution lacks these scripts, [build it from this source](#build-and-prepare) first.
 Prepare the runtime once, select it, then initialize and start the Server. The graph
 APIs and normal start/stop commands stay the same; Topling's native options are
-configured in `conf/toplingdb.yaml`. Use new, empty, service-writable data and WAL
+configured in `conf/toplingdb.yaml`. The shipped native profile uses community-compatible SkipList
+memtables and BlockBasedTable files; it does not require CSPP, DispatcherTable
+or private compression plugins. Its 64 MiB cache and 16 MiB write buffers are
+individual native budgets, not a process memory limit. Budget for every database
+and column family and tune the profile for the deployment.
+
+Custom profiles can require additional plugins in the chosen JNI. Preparation
+imports the selected profile to verify its plugins before installing the
+runtime. Existing data written with other table formats still requires those
+formats' readers; changing this default does not convert existing SST files.
+
+Use new, empty, service-writable data and WAL
 directories outside the distribution for this example.
 
 **1. Prepare the runtime.** Supply your ToplingDB JNI JAR and its trusted SHA-256:
@@ -569,8 +580,13 @@ entry, the ELF architecture and native dependencies. Before installation, it ope
 closes a disposable database with the selected JNI and checks that a probe configuration
 changes the persisted write-buffer size. A marker or matching hash alone is
 insufficient: builds without the EasyMigrate configuration entry point are rejected. The
-probe validates the configuration entry point, not existing-data compatibility or every
-setting in your production profile. Its checksum receipt binds the probe to the
+probe validates the configuration entry point. A second native import validates
+`TOPLINGDB_EASY_MIGRATE_CONF` when set, otherwise the component's
+`conf/toplingdb.yaml`; unavailable plugins fail preparation before publication.
+It does not open databases using production WAL/log paths.
+This is not an existing-data compatibility test or validation of every production
+column family. Keep an explicit profile override in the service environment too.
+The checksum receipt binds the capability probe to the
 installed JAR and native library. Launchers reject missing or stale receipts; prepare a
 fresh distribution when upgrading from an older preparation script. It installs
 `topling/rocksdbjni.jar`, its matching native library and optional web resources outside

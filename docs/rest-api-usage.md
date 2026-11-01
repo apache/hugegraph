@@ -26,10 +26,34 @@ are query variables; they do not create graph bindings. An alias target must be
 an existing graph or traversal-source binding, rather than a Gremlin expression
 such as `graph.traversal()`.
 
-For a standalone legacy graph with no GraphSpace, use `<graph>` and
-`__g_<graph>` instead. The Java client builds the appropriate aliases from its
-configured GraphSpace and graph. Verify the configured names before treating a
-`Could not rebind` response as a graph-registration failure.
+Server 1.8 uses these GraphSpace-scoped bindings in standalone RocksDB mode too:
+the default graph is `DEFAULT-hugegraph`, and its traversal source is
+`__g_DEFAULT-hugegraph`. Disabling PD does not select legacy aliases. Only older
+Servers without GraphSpace bindings use `<graph>` and `__g_<graph>`. Select the
+Java client's GraphSpace to match the Server, and verify the configured names
+before treating a `Could not rebind` response as a graph-registration failure.
+
+## Export a shard with bounded pages
+
+Both `GET .../traversers/vertices/scan` and `GET .../traversers/edges/scan`
+require `start` and `end`. Missing either parameter returns HTTP 400 with its
+name. An explicitly empty value is valid and represents an open bound. Use the
+boundaries returned by the corresponding `.../shards?split_size=1048576`
+request when exporting separate shards; their encoding depends on the backend.
+
+```bash
+curl -G 'http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/traversers/vertices/scan' \
+  --data-urlencode 'start=' --data-urlencode 'end=' \
+  --data-urlencode 'page=' --data-urlencode 'page_limit=1000'
+```
+
+Pass `page=` explicitly for the first page, then URL-encode the returned `page`
+token on subsequent requests, keeping the same bounds. Stop when the returned
+token is null or empty. Edge scans use the same pagination contract.
+
+Omitting `page` retains the existing unpaged scan behavior: `page_limit` does
+not bound that response and the result has no continuation token. Exporters
+must pass the empty initial page to avoid reading an entire shard at once.
 
 ## Run long queries as tasks
 
