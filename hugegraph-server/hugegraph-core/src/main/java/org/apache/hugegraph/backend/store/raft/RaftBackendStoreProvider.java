@@ -29,6 +29,7 @@ import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.StoreType;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
+import org.apache.hugegraph.util.CloseFailure;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.Log;
@@ -43,6 +44,9 @@ public class RaftBackendStoreProvider implements BackendStoreProvider {
 
     private final BackendStoreProvider provider;
     private final RaftContext context;
+
+    private boolean providerClosed;
+    private boolean contextClosed;
 
     private RaftBackendStore schemaStore;
     private RaftBackendStore graphStore;
@@ -158,10 +162,29 @@ public class RaftBackendStoreProvider implements BackendStoreProvider {
     }
 
     @Override
-    public void close() {
-        this.provider.close();
-        if (this.context != null) {
-            this.context.close();
+    public synchronized void close() {
+        Throwable failure = null;
+        try {
+            if (!this.providerClosed) {
+                this.provider.close();
+                this.providerClosed = true;
+            }
+        } catch (RuntimeException | Error error) {
+            failure = error;
+        }
+        try {
+            if (!this.contextClosed && this.context != null) {
+                this.context.close();
+                this.contextClosed = true;
+            }
+        } catch (RuntimeException | Error error) {
+            failure = CloseFailure.collect(failure, error);
+        }
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
         }
     }
 

@@ -27,6 +27,7 @@ SERVER_DIR=$(cd "$1" && pwd)
 SERVER_URL=${SERVER_URL:-http://127.0.0.1:8080}
 EXPECTED_ARCH=${EXPECTED_ARCH:-riscv64}
 SERVER_START_ATTEMPTED=false
+SERVER_START_COUNT=0
 SERVER_STARTUP_TIMEOUT=${SERVER_STARTUP_TIMEOUT:-300}
 SERVER_START_COMMAND_TIMEOUT=$((SERVER_STARTUP_TIMEOUT + 30))
 STORE_DUMP_TIMEOUT=${STORE_DUMP_TIMEOUT:-120}
@@ -47,18 +48,32 @@ cleanup() {
 trap cleanup EXIT
 
 start_server() {
-    if ! command -v timeout >/dev/null 2>&1; then
-        echo "Required command is unavailable: timeout" >&2
+    if command -v timeout >/dev/null 2>&1; then
+        TIMEOUT_COMMAND=timeout
+    elif command -v gtimeout >/dev/null 2>&1; then
+        TIMEOUT_COMMAND=gtimeout
+    else
+        echo "Required command is unavailable: timeout or gtimeout" >&2
         return 1
     fi
-    timeout --foreground --kill-after=15s \
+    local start_options=(-t "$SERVER_STARTUP_TIMEOUT")
+    if [[ -n "${SERVER_JAVA_OPTIONS:-}" ]]; then
+        start_options+=(-j "$SERVER_JAVA_OPTIONS")
+    fi
+    SERVER_START_COUNT=$((SERVER_START_COUNT + 1))
+    local startup_log="$WORK_DIR/startup-$SERVER_START_COUNT.log" status=0
+    # Daemon stdout must go to a file so a pipe reader does not wait for JVM exit.
+    "$TIMEOUT_COMMAND" --foreground --kill-after=15s \
             "${SERVER_START_COMMAND_TIMEOUT}s" \
-            "$SERVER_DIR/bin/start-hugegraph.sh" -t "$SERVER_STARTUP_TIMEOUT"
+            "$SERVER_DIR/bin/start-hugegraph.sh" "${start_options[@]}" \
+            >"$startup_log" 2>&1 || status=$?
+    cat "$startup_log"
+    return "$status"
 }
 
-"$TRAVIS_DIR/run-rocksdb-jni-smoke-test.sh" "$SERVER_DIR"
+"$TRAVIS_DIR/run-rocksdb-jni-smoke-test.sh" "$SERVER_DIR" 2>&1 | tee "$WORK_DIR/jni.log"
 
-"$SERVER_DIR/bin/init-store.sh"
+"$SERVER_DIR/bin/init-store.sh" 2>&1 | tee "$WORK_DIR/init-store.log"
 SERVER_START_ATTEMPTED=true
 start_server
 "$TRAVIS_DIR/run-server-e2e-smoke-test.sh" "$SERVER_URL" create "$RUN_ID" | \
@@ -66,8 +81,8 @@ start_server
 grep -q '^server-e2e-smoke-create-ok$' "$WORK_DIR/create.log"
 
 "$SERVER_DIR/bin/stop-hugegraph.sh" -m false
-timeout --foreground --kill-after=15s "${STORE_DUMP_TIMEOUT}s" \
-        "$SERVER_DIR/bin/dump-store.sh" | tee "$WORK_DIR/store-dump.log"
+"$TIMEOUT_COMMAND" --foreground --kill-after=15s "${STORE_DUMP_TIMEOUT}s" \
+        "$SERVER_DIR/bin/dump-store.sh" 2>&1 | tee "$WORK_DIR/store-dump.log"
 grep -q 'Dump table VERTEX (offset 0 limit 20):' "$WORK_DIR/store-dump.log"
 grep -Fq "riscv-smoke-v1-$RUN_ID" "$WORK_DIR/store-dump.log"
 grep -Fq "riscv-smoke-v2-$RUN_ID" "$WORK_DIR/store-dump.log"
@@ -78,13 +93,11 @@ start_server
     tee "$WORK_DIR/verify.log"
 grep -q '^server-e2e-smoke-verify-ok$' "$WORK_DIR/verify.log"
 
-if [[ -d "$SERVER_DIR/logs" ]] && \
-   grep -Eirq 'undefined symbol|UnsatisfiedLinkError|UnsupportedClassVersionError|NoClassDefFoundError' \
-        "$SERVER_DIR/logs"; then
-    echo "Native linkage or Java compatibility error found in $SERVER_DIR/logs" >&2
-    grep -Eirn 'undefined symbol|UnsatisfiedLinkError|UnsupportedClassVersionError|NoClassDefFoundError' \
-        "$SERVER_DIR/logs" >&2
-    exit 1
+LOG_INPUTS=("$WORK_DIR")
+if [[ "${STDOUT_MODE:-false}" != true ]] || \
+   [[ -n "$(find "$SERVER_DIR/logs" -type f -name '*.log' -print -quit 2>/dev/null)" ]]; then
+    LOG_INPUTS+=("$SERVER_DIR/logs")
 fi
+"$TRAVIS_DIR/check-java-runtime-logs.sh" --native "${LOG_INPUTS[@]}"
 
 echo "native-runtime-smoke-ok"

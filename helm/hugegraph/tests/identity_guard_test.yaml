@@ -45,6 +45,9 @@ kubernetesProvider:
           app.kubernetes.io/instance: RELEASE-NAME
           app.kubernetes.io/component: pd
       spec:
+        volumeClaimTemplates:
+          - metadata:
+              name: pd-data
         replicas: "3"
         selector:
           matchLabels:
@@ -71,6 +74,9 @@ kubernetesProvider:
           app.kubernetes.io/instance: RELEASE-NAME
           app.kubernetes.io/component: store
       spec:
+        volumeClaimTemplates:
+          - metadata:
+              name: store-data
         replicas: "3"
         selector:
           matchLabels:
@@ -90,6 +96,8 @@ kubernetesProvider:
                     containerPort: "8520"
 tests:
   - it: lets an unchanged upgrade through
+    release:
+      upgrade: true
     template: server-deployment.yaml
     asserts:
       - equal:
@@ -97,6 +105,8 @@ tests:
           value: 3
 
   - it: refuses a PD raft port change on an initialized release
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       pd.ports.raft: 8611
@@ -105,6 +115,8 @@ tests:
           errorPattern: "pd.ports.raft cannot change from 8610 to 8611 on an initialized release"
 
   - it: refuses a Store raft port change on an initialized release
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       store.ports.raft: 8511
@@ -113,6 +125,8 @@ tests:
           errorPattern: "store.ports.raft cannot change from 8510 to 8511 on an initialized release"
 
   - it: leaves the other ports routinely mutable
+    release:
+      upgrade: true
     template: pd-statefulset.yaml
     set:
       pd.ports.rest: 8621
@@ -123,6 +137,8 @@ tests:
           value: 8621
 
   - it: refuses a rename through fullnameOverride on an initialized release
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       fullnameOverride: renamed
@@ -131,6 +147,8 @@ tests:
           errorPattern: "already owns the pd StatefulSet RELEASE-NAME-hugegraph-pd, but the values now name it renamed-pd"
 
   - it: refuses a rename through nameOverride on an initialized release
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       nameOverride: graph
@@ -139,6 +157,8 @@ tests:
           errorPattern: "already owns the (pd|store) StatefulSet RELEASE-NAME-hugegraph-(pd|store), but the values now name it RELEASE-NAME-graph-(pd|store)"
 
   - it: refuses a Store replica shrink against the live StatefulSet
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       store.replicas: 2
@@ -148,6 +168,8 @@ tests:
           errorPattern: "store.replicas cannot shrink from 3 to 2 through a helm upgrade"
 
   - it: refuses PD growth against the live StatefulSet
+    release:
+      upgrade: true
     template: server-deployment.yaml
     set:
       pd.replicas: 5
@@ -155,3 +177,17 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "pd.replicas cannot grow from 3 to 5 through a helm upgrade"
+
+  - it: ignores existing StatefulSet identity and membership on a fresh install
+    template: server-deployment.yaml
+    release:
+      upgrade: false
+    set:
+      fullnameOverride: fresh
+      pd.replicas: 1
+      pd.ports.raft: 8611
+      store.ports.raft: 8511
+    asserts:
+      - equal:
+          path: metadata.name
+          value: fresh-server

@@ -298,7 +298,8 @@ public class TaskScheduleService {
             return null;
         }
 
-        int activeStores = storeService.getActiveStores().size();
+        List<Metapb.Store> placementStores = storeService.getPlacementStores();
+        int activeStores = placementStores.size();
         if (activeStores == 0) {
             log.warn("balancePartitionShard non active stores, skip to balancePartitionShard");
             return null;
@@ -318,7 +319,7 @@ public class TaskScheduleService {
 
         // Count the partitions on each store, StoreId -> PartitionID, ShardRole
         Map<Long, Map<Integer, Metapb.ShardRole>> partitionMap = new HashMap<>();
-        storeService.getActiveStores().forEach(store -> {
+        placementStores.forEach(store -> {
             partitionMap.put(store.getId(), new HashMap<>());
         });
 
@@ -449,20 +450,59 @@ public class TaskScheduleService {
             maxHeap.addAll(tmpList);
         }
 
-        kvService.put(BALANCE_SHARD_KEY, "DOING", 180 * 1000);
-
-        // Start the migration
-        movedPartitions.forEach((partId, storePair) -> {
-            // Neither the source nor destination storeID is 0
-            if (storePair.getKey() > 0 && storePair.getValue() > 0) {
-                partitionService.movePartitionsShard(partId, storePair.getKey(),
-                                                     storePair.getValue());
-            } else {
+        boolean submitted = false;
+        Iterator<Map.Entry<Integer, KVPair<Long, Long>>> submission =
+                movedPartitions.entrySet().iterator();
+        while (submission.hasNext()) {
+            Map.Entry<Integer, KVPair<Long, Long>> move = submission.next();
+            KVPair<Long, Long> stores = move.getValue();
+            if (stores.getKey() <= 0 || stores.getValue() <= 0) {
                 log.warn("balancePartitionShard key or value is zero, partId:{} storePair:{}",
-                         partId, storePair);
+                         move.getKey(), stores);
+                submission.remove();
+                continue;
             }
-        });
+            if (!movePartitionIfPlacementStore(move.getKey(), stores.getKey(),
+                                               stores.getValue())) {
+                submission.remove();
+                continue;
+            }
+            submitted = true;
+        }
+        if (submitted) {
+            kvService.put(BALANCE_SHARD_KEY, "DOING", 180 * 1000);
+        }
         return movedPartitions;
+    }
+
+    /**
+     * Revalidate destination liveness and state while serializing with Store state changes.
+     * Preserve the existing service lock order: PartitionService then StoreNodeService.
+     */
+    private boolean movePartitionIfPlacementStore(int partitionId, long sourceStoreId,
+                                                  long destStoreId) {
+        synchronized (partitionService) {
+            synchronized (storeService) {
+                try {
+                    boolean eligible = storeService.getPlacementStores().stream()
+                                                   .anyMatch(store ->
+                                                           store.getId() == destStoreId);
+                    if (!eligible) {
+                        log.warn("Skip moving partition {} from store {} to store {}: " +
+                                 "destination is no longer an Up placement store",
+                                 partitionId, sourceStoreId, destStoreId);
+                        return false;
+                    }
+                    partitionService.movePartitionsShard(partitionId, sourceStoreId,
+                                                         destStoreId);
+                    return true;
+                } catch (PDException e) {
+                    log.error("Cannot revalidate destination store {} for partition {}",
+                              destStoreId, partitionId, e);
+                    return false;
+                }
+            }
+        }
     }
 
     /**
@@ -751,12 +791,15 @@ public class TaskScheduleService {
         Map<Integer, Long> partitionDataSize = new HashMap<>();
 
         storeService.getActiveStores().forEach(store -> {
+            if (store.getId() == sourceStore.getId()) {
+                resultMap.put("current_store_is_online", true);
+            }
+        });
+        storeService.getPlacementStores().forEach(store -> {
             if (store.getId() != sourceStore.getId()) {
                 otherPartitionMap.put(store.getId(), new HashMap<>());
                 // Records the remaining disk space of other stores, in bytes
                 availableDiskSpace.put(store.getId(), store.getStats().getAvailable());
-            } else {
-                resultMap.put("current_store_is_online", true);
             }
         });
         // Count the size of the partition to be migrated (from storeStats in KB)
@@ -791,10 +834,9 @@ public class TaskScheduleService {
         }
         // Count the number of partitions of other stores and save them with a small top heap, so
         // that stores with fewer partitions are always prioritized
-        PriorityQueue<KVPair<Long, Integer>> minHeap = new PriorityQueue<>(otherPartitionMap.size(),
-                                                                           (o1, o2) -> o1.getValue()
-                                                                                         .compareTo(
-                                                                                                 o2.getValue()));
+        PriorityQueue<KVPair<Long, Integer>> minHeap =
+                new PriorityQueue<>(Math.max(1, otherPartitionMap.size()),
+                                    (o1, o2) -> o1.getValue().compareTo(o2.getValue()));
         otherPartitionMap.forEach((storeId, shards) -> {
             minHeap.add(new KVPair(storeId, shards.size()));
         });
@@ -870,15 +912,19 @@ public class TaskScheduleService {
         if (!isLeader()) {
             return null;
         }
-        // Start the migration
+        // Start the migration, but revalidate every destination because a plan may be stale.
         log.info("begin move partitions:");
-        movedPartitions.forEach((partId, storePair) -> {
-            // Neither the source nor destination storeID is 0
-            if (storePair.getKey() > 0 && storePair.getValue() > 0) {
-                partitionService.movePartitionsShard(partId, storePair.getKey(),
-                                                     storePair.getValue());
+        Iterator<Map.Entry<Integer, KVPair<Long, Long>>> iterator =
+                movedPartitions.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Integer, KVPair<Long, Long>> move = iterator.next();
+            KVPair<Long, Long> stores = move.getValue();
+            if (stores.getKey() <= 0 || stores.getValue() <= 0 ||
+                !movePartitionIfPlacementStore(move.getKey(), stores.getKey(),
+                                               stores.getValue())) {
+                iterator.remove();
             }
-        });
+        }
         return movedPartitions;
     }
 

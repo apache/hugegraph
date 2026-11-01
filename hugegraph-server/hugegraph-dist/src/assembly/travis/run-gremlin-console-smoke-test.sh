@@ -20,6 +20,7 @@ set -euo pipefail
 SERVER_DIR=${1:?Usage: run-gremlin-console-smoke-test.sh <server-dir>}
 SMOKE_MARKER="gremlin-console-smoke-ok"
 REMOTE_CONFIG="$SERVER_DIR/conf/remote.yaml"
+TRAVIS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if [ ! -d "$SERVER_DIR" ]; then
     echo "Server directory does not exist: $SERVER_DIR"
@@ -60,6 +61,9 @@ EOF
 cat > "$SMOKE_SCRIPT" <<EOF
 import org.apache.tinkerpop.gremlin.driver.Cluster
 
+Class.forName('org.apache.hugegraph.auth.HugeFactoryAuthProxy')
+println('gremlin-console-auth-ok')
+
 cluster = Cluster.open('conf/remote.yaml')
 client = cluster.connect().alias(['g': '__g_DEFAULT-hugegraph'])
 try {
@@ -88,7 +92,9 @@ EOF
 (
     cd "$SERVER_DIR"
     bin/gremlin-console.sh -- -e "$SMOKE_SCRIPT"
-) | tee "$SMOKE_LOG"
+) 2>&1 | tee "$SMOKE_LOG"
 
+bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$SMOKE_LOG"
+grep -q "gremlin-console-auth-ok" "$SMOKE_LOG"
 grep -q "$SMOKE_MARKER" "$SMOKE_LOG"
 grep -q "gremlin-console-gstring-ok" "$SMOKE_LOG"

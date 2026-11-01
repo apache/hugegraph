@@ -26,6 +26,7 @@ import org.apache.commons.lang.NotImplementedException;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.iterator.Metadatable;
@@ -231,16 +232,25 @@ public abstract class IdHolder {
 
         @Override
         public Set<Id> all() {
+            Set<Id> ids;
             try {
-                Set<Id> ids = this.fetcher.apply(this.remaining());
+                ids = this.fetcher.apply(this.remaining());
                 if (this.currentBatch != null) {
                     ids.addAll(this.getFromCurrentBatch(Query.NO_LIMIT).ids());
                 }
                 this.count += ids.size();
-                return ids;
-            } finally {
-                this.close();
+            } catch (Throwable failure) {
+                try {
+                    this.close();
+                } catch (Throwable closing) {
+                    if (closing != failure) {
+                        failure.addSuppressed(closing);
+                    }
+                }
+                throw QueryBatch.propagate(failure);
             }
+            this.close();
+            return ids;
         }
 
         public PageIds peekNext(long size) {

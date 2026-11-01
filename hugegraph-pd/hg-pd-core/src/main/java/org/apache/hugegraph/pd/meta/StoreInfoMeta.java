@@ -107,16 +107,35 @@ public class StoreInfoMeta extends MetadataRocksDBStore {
      */
     public List<Metapb.Store> getActiveStores(String graphName) throws PDException {
         byte[] activePrefix = MetadataKeyHelper.getActiveStorePrefix();
-        List listWithTTL = getInstanceListWithTTL(Metapb.Store.parser(),
-                                                  activePrefix);
-        return listWithTTL;
+        List<Metapb.Store> activeStores = getInstanceListWithTTL(Metapb.Store.parser(),
+                                                                 activePrefix);
+        return resolveActiveStores(activeStores);
     }
 
     public List<Metapb.Store> getActiveStores() throws PDException {
         byte[] activePrefix = MetadataKeyHelper.getActiveStorePrefix();
-        List listWithTTL = getInstanceListWithTTL(Metapb.Store.parser(),
-                                                  activePrefix);
-        return listWithTTL;
+        List<Metapb.Store> activeStores = getInstanceListWithTTL(Metapb.Store.parser(),
+                                                                 activePrefix);
+        return resolveActiveStores(activeStores);
+    }
+
+    /**
+     * TTL entries carry the Store snapshot from the last heartbeat. Resolve the current
+     * metadata state so a stale Up lease cannot make Pending or retired capacity vote.
+     * Exiting Stores remain eligible because they still serve replicas during drain.
+     */
+    private List<Metapb.Store> resolveActiveStores(List<Metapb.Store> activeStores)
+            throws PDException {
+        List<Metapb.Store> stores = new LinkedList<>();
+        for (Metapb.Store activeStore : activeStores) {
+            Metapb.Store store = getStore(activeStore.getId());
+            if (store != null &&
+                (store.getState() == Metapb.StoreState.Up ||
+                 store.getState() == Metapb.StoreState.Exiting)) {
+                stores.add(store);
+            }
+        }
+        return stores;
     }
 
     /**

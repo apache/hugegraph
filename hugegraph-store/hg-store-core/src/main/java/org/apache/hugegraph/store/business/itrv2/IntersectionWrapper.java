@@ -53,8 +53,8 @@ public class IntersectionWrapper<T> {
     }
 
     public void proc() {
-        if (matchAll && iterator instanceof MultiListIterator) {
-            var mIterators = ((MultiListIterator) iterator).getIterators();
+        if (matchAll && iterator instanceof MultiListIterator multiIterator) {
+            var mIterators = multiIterator.getIterators();
             if (mIterators.size() > 1) {
                 procMulti(mIterators);
             }

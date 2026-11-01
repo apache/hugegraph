@@ -86,6 +86,33 @@ Keep the core imports for `SnowflakeIdGenerator` and the query execution helpers
 `QueryResults`, `ConditionQueryFlatten`, `EdgesQueryIterator`, `QueryBatch` and `QueryResultContext`.
 The table applies to shared types, not entire packages. `SchemaManager`, schema mutation builders and backend-specific serializers remain in core. There is no general compatibility package for removed core classes. Relocated types also change method descriptors that expose IDs, schema, queries and indexes, so update implementations and call sites and recompile every affected integration against matching artifacts. Changing source imports does not make old binaries compatible.
 
+### Resolve conditions through the shared query type
+
+Server and Store now use `org.apache.hugegraph.query.ConditionQuery` from struct.
+The explicit resolution methods operate on top-level `EQ` and `IN` relations
+for a key and intersect their candidate values. Nested conditions and other
+operators remain outside this resolution.
+
+| Method | Result |
+|--------|--------|
+| `containsCondition(HugeKeys)` | Reports whether any top-level relation exists for the system key. |
+| `containsConditionValues(key)` | Reports whether a top-level `EQ` or `IN` relation exists, including an empty `IN`. |
+| `conditionValues(key)` | Returns the candidate intersection. Pair it with `containsConditionValues` to distinguish absence from an empty intersection. |
+| `conditionValue(key)` | Returns `null` for an empty intersection, the value for a singleton, and throws for multiple candidates. |
+| `singleConditionValueOrNull(key)` | Returns the value for a singleton and `null` for every other candidate count. |
+
+The existing `condition(key)` method keeps its legacy behavior, including
+returning the original list for a sole `IN` relation. Use strict
+`conditionValue` when a serializer requires one value; use
+`singleConditionValueOrNull` when an optimization applies only to one candidate.
+For example, `IN [1, 2]` combined with `EQ 2` resolves to `2`, while an
+additional `EQ 3` produces an empty intersection.
+
+SEARCH index construction and local SEARCH matching share the analyzer and
+term handling in struct's `IndexBuilder`. Engine callers use
+`HugeGraph.searchPredicate(text)` so the graph selects its configured analyzer
+and the authorization proxy checks access before delegation.
+
 ### Check API and SPI implementations
 
 | Integration point | Required change or preserved contract |

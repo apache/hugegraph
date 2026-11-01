@@ -22,6 +22,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.apache.commons.configuration2.BaseConfiguration;
@@ -32,6 +33,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
+import org.apache.hugegraph.backend.tx.IdCounter;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
@@ -42,11 +44,15 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Utils;
+import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.EdgeLabelType;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.GraphFactory;
 import org.junit.Assume;
 import org.junit.Test;
+import org.mockito.Mockito;
 import org.rocksdb.RocksDBException;
 
 import com.google.common.collect.ImmutableList;
@@ -115,6 +121,51 @@ public class MultiGraphsTest extends BaseCoreTest {
             graph.addVertex(T.label, "person", "name", "marko");
             graph.tx().commit();
             Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.clearBackend();
+        } finally {
+            destroyGraphs(ImmutableList.of(graph));
+        }
+    }
+
+    @Test
+    public void testHstoreTruncateBackendKeepsSchemaIdCounters() {
+        Assume.assumeTrue("only hstore keeps the schema id counters in PD",
+                          "hstore".equals(graph().backend()));
+
+        HugeGraph graph = openGraphs("truncate_hs").get(0);
+        try {
+            graph.clearBackend();
+            graph.initBackend();
+            graph.serverStarted(GlobalMasterInfo.master("server-truncate"));
+
+            SchemaManager schema = graph.schema();
+            PropertyKey name = schema.propertyKey("name").asText().create();
+
+            graph.truncateBackend();
+
+            // The schema lives in PD meta and survives the truncate
+            Assert.assertEquals(name.id(), schema.getPropertyKey("name").id());
+
+            // Another Server holds no cached id range, it asks PD for one: drop
+            // the range this process cached for the graph's property key
+            // counter, under the key the counter itself builds
+            Object schemaTx = Whitebox.invoke(graph.getClass(),
+                                              "schemaTransaction", graph);
+            IdCounter counter = Whitebox.getInternalState(schemaTx, "idCounter");
+            String key = Whitebox.invoke(IdCounter.class,
+                                         new Class<?>[]{String.class,
+                                                        HugeType.class},
+                                         "toKey", counter,
+                                         Whitebox.getInternalState(counter,
+                                                                   "graphName"),
+                                         HugeType.PROPERTY_KEY);
+            Map<String, ?> ranges = Whitebox.getInternalState(IdCounter.class, "ids");
+            Assert.assertNotNull(ranges.remove(key));
+
+            PropertyKey age = schema.propertyKey("age").asInt().create();
+            Assert.assertTrue(String.format("id %s reused after %s", age.id(), name.id()),
+                              age.id().asLong() > name.id().asLong());
 
             graph.clearBackend();
         } finally {
@@ -256,6 +307,103 @@ public class MultiGraphsTest extends BaseCoreTest {
             graph.clearBackend();
         }
         destroyGraphs(graphs);
+    }
+
+    @Test
+    public void testCopySchemaIndexUsesSourceLabelNameWhenIdsDiffer() {
+        List<HugeGraph> graphs = openGraphs("schema_origin", "schema_target");
+        try {
+            for (HugeGraph graph : graphs) {
+                graph.initBackend();
+                graph.serverStarted(GlobalMasterInfo.master("schema-index-copy"));
+            }
+            HugeGraph source = graphs.get(0);
+            HugeGraph target = graphs.get(1);
+            source.schema().propertyKey("name").asText().create();
+            source.schema().vertexLabel("person").properties("name").useAutomaticId().create();
+            source.schema().indexLabel("personByName").onV("person").secondary()
+                  .by("name").create();
+            EdgeLabel parent = source.schema().edgeLabel("zParent").asBase().create();
+            EdgeLabel child = source.schema().edgeLabel("aChild").withBase("zParent")
+                                    .link("person", "person").create();
+            target.schema().vertexLabel("unrelated").useAutomaticId().create();
+            SchemaManager sourceSchema = Mockito.spy(source.schema());
+            // Storage iteration order must not be relied on for parent dependencies.
+            Mockito.doReturn(ImmutableList.of(child, parent)).when(sourceSchema).getEdgeLabels();
+
+            target.schema().copyFrom(sourceSchema);
+
+            Assert.assertEquals(target.schema().getEdgeLabel("zParent").id(),
+                                target.schema().getEdgeLabel("aChild").fatherId());
+            Assert.assertNotEquals(source.schema().getVertexLabel("person").id(),
+                                   target.schema().getVertexLabel("person").id());
+            Assert.assertEquals(target.schema().getVertexLabel("person").id(),
+                                target.schema().getIndexLabel("personByName").baseValue());
+        } finally {
+            for (HugeGraph graph : graphs) {
+                graph.clearBackend();
+            }
+            destroyGraphs(graphs);
+        }
+    }
+
+    @Test
+    public void testCopySchemaRebuildsDerivedParentSortKeys() {
+        List<HugeGraph> graphs = openGraphs("sort_origin", "sort_target");
+        try {
+            for (HugeGraph graph : graphs) {
+                graph.initBackend();
+                graph.serverStarted(GlobalMasterInfo.master("schema-sort-copy"));
+            }
+            HugeGraph source = graphs.get(0);
+            HugeGraph target = graphs.get(1);
+            source.schema().propertyKey("time").asInt().create();
+            source.schema().vertexLabel("person").useAutomaticId().create();
+            source.schema().edgeLabel("singleParent").asBase().create();
+            source.schema().edgeLabel("singleChild").withBase("singleParent")
+                  .link("person", "person").multiTimes()
+                  .properties("time").sortKeys("time").create();
+            source.schema().edgeLabel("multiParent").asBase().multiTimes()
+                  .properties("time").sortKeys("time").create();
+            source.schema().edgeLabel("multiChild").withBase("multiParent")
+                  .link("person", "person").multiTimes()
+                  .properties("time").sortKeys("time").create();
+
+            // This backend currently does not persist parent/subtype metadata.
+            // Supply typed labels explicitly to exercise builder reconstruction;
+            // the public clone endpoint rejects edge labels until metadata is safe.
+            EdgeLabel singleParent = source.schema().getEdgeLabel("singleParent");
+            EdgeLabel singleChild = source.schema().getEdgeLabel("singleChild");
+            EdgeLabel multiParent = source.schema().getEdgeLabel("multiParent");
+            EdgeLabel multiChild = source.schema().getEdgeLabel("multiChild");
+            singleParent.edgeLabelType(EdgeLabelType.PARENT);
+            singleChild.edgeLabelType(EdgeLabelType.SUB);
+            singleChild.fatherId(singleParent.id());
+            multiParent.edgeLabelType(EdgeLabelType.PARENT);
+            multiChild.edgeLabelType(EdgeLabelType.SUB);
+            multiChild.fatherId(multiParent.id());
+            SchemaManager sourceSchema = Mockito.spy(source.schema());
+            Mockito.doReturn(ImmutableList.of(singleChild, multiChild, singleParent, multiParent))
+                   .when(sourceSchema).getEdgeLabels();
+            target.schema().copyFrom(sourceSchema);
+
+            for (String parent : new String[]{"singleParent", "multiParent"}) {
+                EdgeLabel original = source.schema().getEdgeLabel(parent);
+                EdgeLabel copied = target.schema().getEdgeLabel(parent);
+                Assert.assertEquals(original.frequency(), copied.frequency());
+                Assert.assertEquals(ImmutableList.of(target.schema().getPropertyKey("time").id()),
+                                    copied.sortKeys());
+            }
+            Assert.assertEquals(target.schema().getEdgeLabel("singleParent").id(),
+                                target.schema().getEdgeLabel("singleChild").fatherId());
+            Assert.assertEquals(target.schema().getEdgeLabel("multiParent").id(),
+                                target.schema().getEdgeLabel("multiChild").fatherId());
+        } finally {
+            for (HugeGraph graph : graphs) {
+                graph.clearBackend();
+            }
+            destroyGraphs(graphs);
+        }
     }
 
     @Test

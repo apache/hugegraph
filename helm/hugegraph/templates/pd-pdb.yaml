@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- if and .Values.pd.pdb.enabled (gt (int .Values.pd.replicas) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget

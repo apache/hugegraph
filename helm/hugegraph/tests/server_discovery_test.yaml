@@ -39,6 +39,17 @@ tests:
           path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_URLS_TO_PD")].value
           value: http://graph.example.com:30080
 
+  # The wrapper always registers server.urls_to_pd; the image would let an
+  # extraEnv value turn that off again or crash-loop the Pod on a bad flag.
+  - it: refuses an operator extraEnv that would override the PD registration flag
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_DEPLOY_IN_K8S
+          value: "false"
+    asserts:
+      - failedTemplate:
+          errorPattern: "server.extraEnv must not set the chart-managed variable HG_SERVER_DEPLOY_IN_K8S"
+
   - it: refuses an operator extraEnv that would shadow POD_IP
     set:
       server.extraEnv:
@@ -47,3 +58,75 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "POD_IP"
+
+  - it: preserves the image service identity by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")]
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_GRAPHSPACE")]
+
+  - it: selects a non-default service identity
+    set:
+      server.serviceId: analytics
+      server.graphSpace: team_a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: analytics
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_GRAPHSPACE")].value
+          value: team_a
+
+  - it: refuses an extraEnv that shadows the service ID
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_SERVICE_ID
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "HG_SERVER_SERVICE_ID"
+
+  - it: refuses an extraEnv that shadows the graph space
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_GRAPHSPACE
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "HG_SERVER_GRAPHSPACE"
+
+  - it: retains a service name containing spaces
+    set:
+      server.serviceId: ops team
+      server.graphSpace: team_a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: ops team
+
+  - it: refuses an extraEnv that shadows the legacy service ID
+    set:
+      server.extraEnv:
+        - name: SERVICE_ID
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "SERVICE_ID"
+
+  - it: refuses an extraEnv that shadows the legacy graph space
+    set:
+      server.extraEnv:
+        - name: GRAPH_SPACE
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "GRAPH_SPACE"
+
+  - it: escapes all dollars so Kubernetes retains a literal service ID
+    set:
+      server.serviceId: 'x-$(POD_IP)-$$(POD_IP)-$(UNKNOWN)-$name-$'
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: 'x-$$(POD_IP)-$$$$(POD_IP)-$$(UNKNOWN)-$$name-$$'

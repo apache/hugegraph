@@ -39,6 +39,7 @@ import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.meta.PdMetaDriver.PDAuthConfig;
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.client.PDConfig;
@@ -123,6 +124,15 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     public void open() throws Exception {
+        this.registerGraph();
+        this.session.open();
+    }
+
+    /**
+     * Registers the graph with PD once per JVM. clear() deletes the graph in PD and forgets the
+     * registration, so the next open() or createTable() registers it again.
+     */
+    private void registerGraph() throws PDException {
         if (!infoInitializedGraph.contains(this.graphName)) {
             synchronized (infoInitializedGraph) {
                 if (!infoInitializedGraph.contains(this.graphName)) {
@@ -138,7 +148,6 @@ public class HstoreSessionsImpl extends HstoreSessions {
                 }
             }
         }
-        this.session.open();
     }
 
     @Override
@@ -153,6 +162,15 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     public synchronized void createTable(String... tables) {
+        // After clear() the store's sessions can still be open, as clearBackend() closes the
+        // stores without closing sessions the running graph holds, so initBackend()'s open()
+        // returns early and reaches here without registering the graph again
+        try {
+            this.registerGraph();
+        } catch (PDException e) {
+            throw new BackendException("Failed to register graph '%s' with PD", e,
+                                       this.graphName);
+        }
         for (String table : tables) {
             this.session.createTable(table);
             this.tables.put(table, tableCode++);
@@ -179,11 +197,14 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     public void clear() {
-        this.session.deleteGraph();
         try {
+            this.session.deleteGraph();
             hgStoreClient.getPdClient().delGraph(this.graphName);
-        } catch (PDException ignored) {
-
+        } catch (PDException e) {
+            throw new BackendException("Failed to remove graph '%s' from PD", e, this.graphName);
+        } finally {
+            // The graph is gone from PD, or partly deleted: register it again before reuse
+            infoInitializedGraph.remove(this.graphName);
         }
     }
 
@@ -812,9 +833,9 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
         @Override
         public void truncate() throws Exception {
+            // The schema lives in PD meta and survives a truncate, so the schema
+            // id counters in PD must survive too: a reset hands out ids again
             this.graph.truncate();
-            HstoreSessionsImpl.getDefaultPdClient()
-                              .resetIdByKey(this.getGraphName());
         }
 
         @Override

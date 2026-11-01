@@ -30,16 +30,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hugegraph.pd.common.HgAssert;
 
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
 public final class HgExecutorUtil {
 
     private static final Map<String, ThreadPoolExecutor> EXECUTOR_MAP = new ConcurrentHashMap<>();
     private static final Executor COMMON_EXECUTOR
             = new ThreadPoolExecutor(0, Integer.MAX_VALUE,
                                      60L, TimeUnit.SECONDS,
-                                     new SynchronousQueue<Runnable>(),
+                                     new SynchronousQueue<>(),
                                      newThreadFactory("pd-common"));
 
     public static void execute(Runnable command) {
@@ -67,20 +64,10 @@ public final class HgExecutorUtil {
     }
 
     /**
-     * @see HgExecutorUtil:createExecutor(String , int , int , int )
+     * @see #createExecutor(String, int, int, int)
      */
     @Deprecated
     public static Executor createExecutor(String name, int coreThreads, int maxThreads) {
-/*        ThreadPoolExecutor res =
-                new ThreadPoolExecutor(coreThreads, maxThreads,
-                        60L, TimeUnit.SECONDS,
-                        new LinkedBlockingQueue<Runnable>(),
-                        newThreadFactory(name));
-        if (threadPoolMap.containsKey(name)) {
-            threadPoolMap.put(name + "-1", res);
-        } else {
-            threadPoolMap.put(name, res);
-        }*/
         return createExecutor(name, coreThreads, maxThreads, Integer.MAX_VALUE);
     }
 
@@ -98,10 +85,10 @@ public final class HgExecutorUtil {
                 return res;
             }
 
-            BlockingQueue queue = null;
+            BlockingQueue<Runnable> queue;
 
             if (queueSize <= 0) {
-                queue = new SynchronousQueue();
+                queue = new SynchronousQueue<>();
             } else {
                 queue = new LinkedBlockingQueue<>(queueSize);
             }
@@ -131,7 +118,6 @@ public final class HgExecutorUtil {
         HgThreadFactory(String namePrefix, int priority) {
             this.namePrefix = namePrefix;
             this.priority = priority;
-            SecurityManager s = System.getSecurityManager();
         }
 
         @Override
@@ -159,7 +145,6 @@ public final class HgExecutorUtil {
         private final String namePrefix;
 
         HgDefaultThreadFactory(String threadNamePrefix) {
-            SecurityManager s = System.getSecurityManager();
             this.namePrefix = threadNamePrefix + "-" +
                               POOL_NUMBER.getAndIncrement() +
                               "-thread-";

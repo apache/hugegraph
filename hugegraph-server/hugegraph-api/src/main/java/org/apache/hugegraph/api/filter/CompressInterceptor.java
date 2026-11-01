@@ -22,15 +22,21 @@ import java.io.OutputStream;
 import java.lang.annotation.Annotation;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.text.ParseException;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
 
 import org.apache.hugegraph.api.filter.CompressInterceptor.Compress;
 import org.apache.hugegraph.util.Log;
+import org.glassfish.jersey.message.internal.AcceptableToken;
+import org.glassfish.jersey.message.internal.HttpHeaderReader;
 import org.slf4j.Logger;
 
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.NameBinding;
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.ext.Provider;
 import jakarta.ws.rs.ext.WriterInterceptor;
@@ -45,16 +51,28 @@ public class CompressInterceptor implements WriterInterceptor {
 
     private static final Logger LOG = Log.logger(CompressInterceptor.class);
 
+    private static final Pattern TRAILING_DOT_QUALITY =
+            Pattern.compile("(;[ \t]*[qQ]=[01])\\.(?=[ \t]*(?:[,;]|\\z))");
+
     // Set compress output buffer size to 4KB (about 40~600 vertices)
     public static final int BUFFER_SIZE = 1024 * 4;
+
+    @Context
+    private jakarta.inject.Provider<HttpHeaders> requestHeaders;
 
     @Override
     public void aroundWriteTo(WriterInterceptorContext context)
             throws IOException, WebApplicationException {
-        // If there is no annotation(like exception), we don't compress it
-        if (context.getAnnotations().length > 0) {
+        // Exceptions and other responses without @Compress remain unchanged.
+        Compress compression = getCompressAnnotation(context);
+        if (compression != null && !context.getHeaders().containsKey(HttpHeaders.CONTENT_ENCODING)) {
+            addVaryHeader(context.getHeaders());
+        }
+        if (compression != null &&
+            !context.getHeaders().containsKey(HttpHeaders.CONTENT_ENCODING) &&
+            this.acceptsGzip()) {
             try {
-                this.compress(context);
+                this.compress(context, compression);
             } catch (Throwable e) {
                 LOG.warn("Failed to compress response", e);
                 /*
@@ -68,10 +86,49 @@ public class CompressInterceptor implements WriterInterceptor {
         context.proceed();
     }
 
-    private void compress(WriterInterceptorContext context)
+    private boolean acceptsGzip() {
+        String accept = this.requestHeaders.get().getHeaderString(HttpHeaders.ACCEPT_ENCODING);
+        if (accept == null || accept.isEmpty()) {
+            return false;
+        }
+        // Jersey 3.0.3 misreads legal q=0. and q=1.; retain its token/quality validation.
+        accept = TRAILING_DOT_QUALITY.matcher(accept).replaceAll("$1");
+        int gzip = -1;
+        int wildcard = 0;
+        int identity = 0;
+        try {
+            // Jersey parses HTTP tokens and quality factors; explicit encodings override '*'.
+            for (AcceptableToken token : HttpHeaderReader.readAcceptToken(accept)) {
+                if (GZIP.equalsIgnoreCase(token.getToken())) {
+                    gzip = token.getQuality();
+                } else if ("*".equals(token.getToken())) {
+                    wildcard = token.getQuality();
+                } else if ("identity".equalsIgnoreCase(token.getToken())) {
+                    identity = token.getQuality();
+                }
+            }
+        } catch (ParseException e) {
+            return false;
+        }
+        int quality = gzip >= 0 ? gzip : wildcard;
+        // If no encoding is acceptable, retain the plain response (RFC 9110, 12.4.1).
+        // Rejecting it here could hide a POST that has already changed graph data.
+        return quality > 0 && quality >= identity;
+    }
+
+    private static void addVaryHeader(MultivaluedMap<String, Object> headers) {
+        for (Object value : headers.getOrDefault(HttpHeaders.VARY, java.util.Collections.emptyList())) {
+            for (String field : value.toString().split(",")) {
+                if ("*".equals(field.trim()) || HttpHeaders.ACCEPT_ENCODING.equalsIgnoreCase(field.trim())) {
+                    return;
+                }
+            }
+        }
+        headers.add(HttpHeaders.VARY, HttpHeaders.ACCEPT_ENCODING);
+    }
+
+    private void compress(WriterInterceptorContext context, Compress compression)
             throws IOException {
-        // Get compress info from the @Compress annotation
-        final Compress compression = getCompressAnnotation(context);
         final String encoding = compression.value();
         final int buffer = compression.buffer();
 
@@ -97,7 +154,7 @@ public class CompressInterceptor implements WriterInterceptor {
                 return (Compress) annotation;
             }
         }
-        throw new AssertionError("Unable find @Compress annotation");
+        return null;
     }
 
     @NameBinding

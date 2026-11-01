@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.exception.HugeException;
@@ -53,6 +54,7 @@ import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.util.Bytes;
+import org.apache.hugegraph.util.CloseFailure;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.Log;
@@ -102,6 +104,9 @@ public final class RaftContext {
     private final ExecutorService backendExecutor;
 
     private RpcServer raftRpcServer;
+    private boolean nodeClosed;
+    private boolean rpcClosed;
+    private boolean sharedRpcServer;
     private PeerId endpoint;
 
     private RaftNode raftNode;
@@ -169,15 +174,61 @@ public final class RaftContext {
         node.waitRaftLogSynced(RaftContext.NO_TIMEOUT);
     }
 
-    public void close() {
+    public synchronized void close() {
         LOG.info("Stop raft server: {}", this.endpoint());
 
-        RaftNode node = this.node();
-        if (node != null) {
-            node.shutdown();
+        Throwable failure = null;
+        try {
+            RaftNode node = this.node();
+            if (!this.nodeClosed) {
+                if (node != null) {
+                    node.shutdown();
+                }
+                this.nodeClosed = true;
+            }
+        } catch (RuntimeException | Error error) {
+            failure = error;
         }
+        try {
+            this.shutdownRpcServer();
+        } catch (RuntimeException | Error error) {
+            failure = CloseFailure.collect(failure, error);
+        }
+        // Only a joined node has stopped producing work for these per-context executors.
+        if (this.nodeClosed) {
+            for (ExecutorService executor : new ExecutorService[]{this.readIndexExecutor,
+                                                                  this.snapshotExecutor,
+                                                                  this.backendExecutor}) {
+                try {
+                    this.closeExecutor(executor);
+                } catch (RuntimeException | Error error) {
+                    failure = CloseFailure.collect(failure, error);
+                }
+            }
+        }
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
+        }
+    }
 
-        this.shutdownRpcServer();
+    private void closeExecutor(ExecutorService executor) {
+        if (executor == null || executor.isTerminated()) {
+            return;
+        }
+        // Keep queued work: shutdownNow() would discard pending apply/snapshot operations.
+        executor.shutdown();
+        try {
+            long timeout = this.config().get(CoreOptions.TASK_WAIT_TIMEOUT);
+            if (!executor.awaitTermination(timeout, TimeUnit.SECONDS)) {
+                throw new RaftException("Raft executor is still active, please retry close later");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new RaftException("Interrupted while draining raft executor", interrupted);
+        }
     }
 
     public RaftNode node() {
@@ -372,6 +423,7 @@ public final class RaftContext {
 
     @SuppressWarnings("unused")
     private RpcServer initAndStartRpcServer() {
+        this.sharedRpcServer = false;
         Integer lowWaterMark = this.config().get(
                 CoreOptions.RAFT_RPC_BUF_LOW_WATER_MARK);
         System.setProperty("bolt.channel_write_buf_low_water_mark",
@@ -390,6 +442,8 @@ public final class RaftContext {
     }
 
     private RpcServer wrapRpcServer(com.alipay.remoting.rpc.RpcServer rpcServer) {
+        // GraphManager owns this listener, which is shared by all local graph contexts.
+        this.sharedRpcServer = true;
         // TODO: pass ServerOptions instead of CoreOptions, to share by graphs
         Integer lowWaterMark = this.config().get(
                 CoreOptions.RAFT_RPC_BUF_LOW_WATER_MARK);
@@ -408,9 +462,17 @@ public final class RaftContext {
     }
 
     private void shutdownRpcServer() {
-        this.raftRpcServer.shutdown();
+        if (this.sharedRpcServer) {
+            return;
+        }
+        if (!this.rpcClosed && this.raftRpcServer != null) {
+            this.raftRpcServer.shutdown();
+            this.rpcClosed = true;
+        }
         PeerId endpoint = this.endpoint();
-        NodeManager.getInstance().removeAddress(endpoint.getEndpoint());
+        if (endpoint != null) {
+            NodeManager.getInstance().removeAddress(endpoint.getEndpoint());
+        }
     }
 
     private void registerRpcRequestProcessors() {

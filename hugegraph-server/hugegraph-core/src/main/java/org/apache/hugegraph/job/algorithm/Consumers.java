@@ -17,39 +17,16 @@
 
 package org.apache.hugegraph.job.algorithm;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-
-import org.apache.hugegraph.exception.HugeException;
-import org.apache.hugegraph.task.TaskManager.ContextCallable;
-import org.apache.hugegraph.util.ExecutorUtil;
-import org.apache.hugegraph.util.Log;
-import org.slf4j.Logger;
 
 public class Consumers<V> {
 
     public static final int CPUS = Runtime.getRuntime().availableProcessors();
-    public static final int THREADS = 4 + CPUS / 4;
-    public static final int QUEUE_WORKER_SIZE = 1000;
+    public static final int THREADS = org.apache.hugegraph.util.Consumers.THREADS;
+    public static final int QUEUE_WORKER_SIZE = org.apache.hugegraph.util.Consumers.QUEUE_WORKER_SIZE;
 
-    private static final Logger LOG = Log.logger(Consumers.class);
-
-    private final ExecutorService executor;
-    private final Consumer<V> consumer;
-    private final Runnable done;
-
-    private final int workers;
-    private final int queueSize;
-    private final CountDownLatch latch;
-    private final BlockingQueue<V> queue;
-
-    private volatile boolean ending = false;
-    private volatile Throwable exception = null;
+    private final org.apache.hugegraph.util.Consumers<V> delegate;
 
     public Consumers(ExecutorService executor, Consumer<V> consumer) {
         this(executor, consumer, null);
@@ -57,138 +34,44 @@ public class Consumers<V> {
 
     public Consumers(ExecutorService executor,
                      Consumer<V> consumer, Runnable done) {
-        this.executor = executor;
-        this.consumer = consumer;
-        this.done = done;
-
-        int workers = THREADS;
-        if (this.executor instanceof ThreadPoolExecutor) {
-            workers = ((ThreadPoolExecutor) this.executor).getCorePoolSize();
-        }
-        this.workers = workers;
-        this.queueSize = QUEUE_WORKER_SIZE * workers;
-        this.latch = new CountDownLatch(workers);
-        this.queue = new ArrayBlockingQueue<>(this.queueSize);
+        this.delegate = new org.apache.hugegraph.util.Consumers<>(executor, consumer, done);
     }
 
     public void start(String name) {
-        this.ending = false;
-        this.exception = null;
-        if (this.executor == null) {
-            return;
-        }
-        LOG.info("Starting {} workers[{}] with queue size {}...",
-                 this.workers, name, this.queueSize);
-        for (int i = 0; i < this.workers; i++) {
-            this.executor.submit(new ContextCallable<>(this::runAndDone));
-        }
+        this.delegate.start(name);
     }
 
-    private Void runAndDone() {
+    public void provide(V value) throws Throwable {
         try {
-            this.run();
-            this.done();
-        } catch (Throwable e) {
-            // Only the first exception to one thread can be stored
-            this.exception = e;
-            if (!(e instanceof StopExecution)) {
-                LOG.error("Error when running task", e);
+            this.delegate.provide(value);
+        } catch (org.apache.hugegraph.util.Consumers.StopExecution e) {
+            // Preserve the algorithm API's control-flow exception type.
+            if (e instanceof StopExecution stop) {
+                throw stop;
             }
-            this.done();
-        } finally {
-            this.latch.countDown();
-        }
-        return null;
-    }
-
-    private void run() {
-        LOG.debug("Start to work...");
-        while (!this.ending) {
-            this.consume();
-        }
-        assert this.ending;
-        while (this.consume()) {
-        }
-
-        LOG.debug("Worker finished");
-    }
-
-    private boolean consume() {
-        V elem;
-        try {
-            elem = this.queue.poll(1, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            // ignore
-            return true;
-        }
-        if (elem == null) {
-            return false;
-        }
-        // do job
-        this.consumer.accept(elem);
-        return true;
-    }
-
-    private void done() {
-        if (this.done != null) {
-            this.done.run();
-        }
-    }
-
-    public void provide(V v) throws Throwable {
-        if (this.executor == null) {
-            assert this.exception == null;
-            // do job directly if without thread pool
-            this.consumer.accept(v);
-        } else if (this.exception != null) {
-            throw this.exception;
-        } else {
-            try {
-                this.queue.put(v);
-            } catch (InterruptedException e) {
-                LOG.warn("Interrupted", e);
-            }
+            throw new StopExecution(e.getMessage());
         }
     }
 
     public void await() {
-        this.ending = true;
-        if (this.executor == null) {
-            // call done() directly if without thread pool
-            this.done();
-        } else {
-            try {
-                this.latch.await();
-            } catch (InterruptedException e) {
-                LOG.warn("Interrupted", e);
-            }
+        try {
+            this.delegate.await();
+        } catch (Error error) {
+            throw error;
+        } catch (Throwable e) {
+            throw wrapException(e);
         }
     }
 
     public static ExecutorService newThreadPool(String prefix, int workers) {
-        if (workers == 0) {
-            return null;
-        } else {
-            if (workers < 0) {
-                assert workers == -1;
-                workers = Consumers.THREADS;
-            } else if (workers > Consumers.CPUS * 2) {
-                workers = Consumers.CPUS * 2;
-            }
-            String name = prefix + "-worker-%d";
-            return ExecutorUtil.newFixedThreadPool(workers, name);
-        }
+        return org.apache.hugegraph.util.Consumers.newThreadPool(prefix, workers);
     }
 
     public static RuntimeException wrapException(Throwable e) {
-        if (e instanceof RuntimeException) {
-            throw (RuntimeException) e;
-        }
-        throw new HugeException("Error when running task: %s",
-                                HugeException.rootCause(e).getMessage(), e);
+        return org.apache.hugegraph.util.Consumers.wrapException(e);
     }
 
-    public static class StopExecution extends HugeException {
+    public static class StopExecution extends org.apache.hugegraph.util.Consumers.StopExecution {
 
         private static final long serialVersionUID = -371829356182454517L;
 

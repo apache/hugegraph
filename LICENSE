@@ -218,3 +218,4 @@ hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/Cyp
 hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/CypherPlugin.java from https://github.com/opencypher/cypher-for-gremlin
 hugegraph-struct/src/main/java/org/apache/hugegraph/type/define/Cardinality.java from https://github.com/JanusGraph/janusgraph
 hugegraph-struct/src/main/java/org/apache/hugegraph/type/Namifiable.java from https://github.com/JanusGraph/janusgraph
+helm/hugegraph/templates/seatunnel.yaml adapts the native hybrid Kubernetes deployment from Apache SeaTunnel 3.0.0 (Apache License 2.0).

@@ -38,6 +38,7 @@ import org.junit.runners.Suite;
         RaysApiTest.class,
         RingsApiTest.class,
         SameNeighborsApiTest.class,
+        SameNeighborsBatchApiTest.class,
         ShortestPathApiTest.class,
         SingleSourceShortestPathApiTest.class,
         TemplatePathsApiTest.class,

@@ -23,16 +23,87 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.commons.configuration2.Configuration;
+import org.apache.commons.configuration2.YAMLConfiguration;
+import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.tinkerpop.gremlin.process.traversal.Path;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.MutablePath;
 import org.apache.tinkerpop.gremlin.util.Tokens;
 import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
 import org.junit.Test;
+import org.mockito.Mockito;
+
+import jakarta.ws.rs.NotAuthorizedException;
+import jakarta.ws.rs.core.HttpHeaders;
 
 public class CypherClientTest extends BaseUnitTest {
+
+    @Test
+    public void testAnonymousClientDoesNotInheritCredentials() {
+        YAMLConfiguration source = new YAMLConfiguration();
+        source.addProperty("hosts", "localhost");
+        source.addProperty("port", 8182);
+        source.addProperty("username", "service-user");
+        source.addProperty("password", "service-secret");
+        CypherManager manager = CypherManager.configOf("unused.yaml");
+        Whitebox.setInternalState(manager, "configuration", source);
+
+        Configuration config = clientConfig(manager.getAnonymousClient());
+
+        Assert.assertFalse(config.containsKey("username"));
+        Assert.assertFalse(config.containsKey("password"));
+        Assert.assertEquals(8182, config.getInt("port"));
+        Assert.assertEquals("service-user", source.getString("username"));
+        Assert.assertEquals("service-secret", source.getString("password"));
+    }
+
+    @Test
+    public void testAnonymousServerDoesNotRequireAuthorization() {
+        Configuration config = clientConfig(apiClient(false, null));
+
+        Assert.assertFalse(config.containsKey("username"));
+        Assert.assertFalse(config.containsKey("password"));
+    }
+
+    @Test
+    public void testAuthenticatedServerRejectsMissingAuthorization() {
+        Assert.assertThrows(NotAuthorizedException.class,
+                            () -> apiClient(true, null));
+    }
+
+    @Test
+    public void testAuthenticatedServerRejectsUnsupportedAuthorization() {
+        Assert.assertThrows(NotAuthorizedException.class,
+                            () -> apiClient(true, "Unsupported credential"));
+    }
+
+    @Test
+    public void testAuthenticatedServerPreservesBasicCredentials() {
+        Configuration config = clientConfig(apiClient(true, "Basic dXNlcjpwYXNz"));
+
+        Assert.assertEquals("user", config.getString("username"));
+        Assert.assertEquals("pass", config.getString("password"));
+    }
+
+    @Test
+    public void testAuthenticatedServerPreservesBearerCredentials() {
+        Configuration config = clientConfig(apiClient(true, "Bearer test-token"));
+
+        Assert.assertEquals("test-token", config.getString("username"));
+        Assert.assertEquals("", config.getString("password"));
+    }
+
+    @Test
+    public void testAuthenticatedServerRejectsMalformedCredentials() {
+        Assert.assertThrows(RuntimeException.class,
+                            () -> apiClient(true, "Basic invalid-base64"));
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> apiClient(true, "Bearer "));
+    }
 
     @Test
     public void testRequestPreservesQueryAndParameterValues() {
@@ -151,5 +222,23 @@ public class CypherClientTest extends BaseUnitTest {
         Assert.assertTrue(firstLabels.contains("a"));
         Assert.assertTrue(secondLabels.contains("b"));
         Assert.assertTrue(secondLabels.contains("software"));
+    }
+
+    private static CypherClient apiClient(boolean authentication, String authorization) {
+        GraphManager graphManager = Mockito.mock(GraphManager.class);
+        Mockito.when(graphManager.requireAuthentication()).thenReturn(authentication);
+        HttpHeaders headers = Mockito.mock(HttpHeaders.class);
+        Mockito.when(headers.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn(authorization);
+        CypherManager manager = CypherManager.configOf("unused.yaml");
+        Whitebox.setInternalState(manager, "configuration", new YAMLConfiguration());
+        CypherAPI api = new CypherAPI();
+        Whitebox.setInternalState(api, "cypherManager", manager);
+        return Whitebox.invoke(CypherAPI.class,
+                              new Class<?>[]{GraphManager.class, HttpHeaders.class},
+                              "client", api, graphManager, headers);
+    }
+
+    private static Configuration clientConfig(CypherClient client) {
+        return Whitebox.invoke(CypherClient.class, "getConfig", client);
     }
 }

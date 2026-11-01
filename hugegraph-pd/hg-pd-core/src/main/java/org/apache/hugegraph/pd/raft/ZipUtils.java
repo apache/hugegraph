@@ -23,6 +23,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Paths;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.CheckedOutputStream;
@@ -32,8 +33,6 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.output.NullOutputStream;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,6 +46,8 @@ public final class ZipUtils {
              final CheckedOutputStream cos = new CheckedOutputStream(fos, checksum);
              final ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(cos))) {
             ZipUtils.compressDirectoryToZipFile(rootDir, sourceDir, zos);
+            // Write the central directory before flushing and syncing the archive.
+            zos.finish();
             zos.flush();
             fos.getFD().sync();
         }
@@ -56,6 +57,9 @@ public final class ZipUtils {
                                                    final ZipOutputStream zos) throws IOException {
         final String dir = Paths.get(rootDir, sourceDir).toString();
         final File[] files = new File(dir).listFiles();
+        if (files == null) {
+            throw new IOException("Unable to list snapshot directory: " + dir);
+        }
         for (final File file : files) {
             final String child = Paths.get(sourceDir, file.getName()).toString();
             if (file.isDirectory()) {
@@ -64,7 +68,7 @@ public final class ZipUtils {
                 zos.putNextEntry(new ZipEntry(child));
                 try (final FileInputStream fis = new FileInputStream(file);
                      final BufferedInputStream bis = new BufferedInputStream(fis)) {
-                    IOUtils.copy(bis, zos);
+                    bis.transferTo(zos);
                 }
             }
         }
@@ -88,12 +92,12 @@ public final class ZipUtils {
                 FileUtils.forceMkdir(entryFile.getParentFile());
                 try (final FileOutputStream fos = new FileOutputStream(entryFile);
                      final BufferedOutputStream bos = new BufferedOutputStream(fos)) {
-                    IOUtils.copy(zis, bos);
+                    zis.transferTo(bos);
                     bos.flush();
                     fos.getFD().sync();
                 }
             }
-            IOUtils.copy(cis, NullOutputStream.NULL_OUTPUT_STREAM);
+            cis.transferTo(OutputStream.nullOutputStream());
         }
     }
 }

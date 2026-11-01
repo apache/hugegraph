@@ -19,9 +19,13 @@ package org.apache.hugegraph.api;
 
 import static org.apache.hugegraph.testutil.Assert.assertContains;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
@@ -30,10 +34,16 @@ import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
 public class CypherApiTest extends BaseApiTest {
@@ -47,15 +57,15 @@ public class CypherApiTest extends BaseApiTest {
         String schema = URL_PREFIX + "/schema/";
         for (String[] property : new String[][]{{"name", "TEXT"}, {"age", "INT"},
                                                 {"city", "TEXT"}, {"active", "BOOLEAN"},
-                                                {"note", "TEXT"}}) {
+                                                {"note", "TEXT"}, {"birthday", "DATE"}}) {
             createAndAssert(schema + "propertykeys", JsonUtil.toJson(ImmutableMap.of(
                     "name", property[0], "data_type", property[1],
                     "cardinality", "SINGLE")), 202);
         }
         createAndAssert(schema + "vertexlabels", "{\"name\":\"cypher_person\", " +
-                        "\"id_strategy\":\"PRIMARY_KEY\",\"primary_keys\":[\"name\"]," +
-                        "\"properties\":[\"name\",\"age\",\"city\",\"active\",\"note\"]," +
-                        "\"nullable_keys\":[\"active\",\"note\"]}");
+                        "\"id_strategy\":\"PRIMARY_KEY\",\"primary_keys\":[\"name\"], " +
+                        "\"properties\":[\"name\",\"age\",\"city\",\"active\",\"note\"," +
+                        "\"birthday\"],\"nullable_keys\":[\"active\",\"note\",\"birthday\"]}");
         createAndAssert(schema + "edgelabels", "{\"name\":\"cypher_knows\", " +
                         "\"source_label\":\"cypher_person\",\"target_label\":\"cypher_person\"," +
                         "\"frequency\":\"SINGLE\",\"properties\":[],\"nullable_keys\":[]}");
@@ -69,7 +79,7 @@ public class CypherApiTest extends BaseApiTest {
                     .put("fields", Collections.singletonList(index[0]))
                     .put("rebuild", false).build()), 202);
         }
-        addVertex("marko", 20, "Beijing", true);
+        addVertex("marko", 20, "Beijing", true, "2000-01-01");
         addVertex("peter", 30, "Beijing", false);
         addVertex("alice", 40, "Shanghai", true);
         addVertex("dave", 30, "Shanghai", false);
@@ -110,6 +120,19 @@ public class CypherApiTest extends BaseApiTest {
                        "RETURN n.name AS name";
         String content = this.testCypherQueryAndContains(query, "data");
         Assert.assertTrue(assertCypherSuccessData(content).isEmpty());
+    }
+
+    @Test
+    public void testDateFunctionMatchesDateProperty() {
+        assertColumn(query("MATCH (n:cypher_person) WHERE n.birthday = date('2000-01-01') " +
+                           "RETURN n.name AS name"), "name", "marko");
+    }
+
+    @Test
+    public void testDateFunctionYieldsNoMatchOnTextProperty() {
+        Map<?, ?> row = assertSingleMapRow(query(
+                "MATCH (n:cypher_person {note: date('2024-02-05')}) RETURN count(n) AS count"));
+        Assert.assertEquals(0L, ((Number) row.get("count")).longValue());
     }
 
     @Test
@@ -260,6 +283,41 @@ public class CypherApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testOrderByNullableBooleanGroupingKey() {
+        // #3319: sorting a Boolean-or-null grouping key once crashed with a
+        // ClassCastException when the translator null marker met ordered values
+        createAndAssert(URL_PREFIX + "/graph/vertices", JsonUtil.toJson(ImmutableMap.of(
+                "label", "cypher_person",
+                "properties", ImmutableMap.of("name", "noactive", "age", 50,
+                                              "city", "Beijing"))));
+        String cypher = "MATCH (n:cypher_person) " +
+                        "OPTIONAL MATCH (n)-[r0:cypher_knows]->(n1 {city: 'Nowhere'}) " +
+                        "WITH n.active AS g, count(n1.name) AS c " +
+                        "RETURN g, c ORDER BY g ";
+        List<?> rows = query(cypher + "DESC");
+        Assert.assertEquals(3, rows.size());
+        assertGroupRow(rows.get(0), null);
+        assertGroupRow(rows.get(1), true);
+        assertGroupRow(rows.get(2), false);
+
+        rows = query(cypher + "ASC");
+        Assert.assertEquals(3, rows.size());
+        assertGroupRow(rows.get(0), false);
+        assertGroupRow(rows.get(1), true);
+        assertGroupRow(rows.get(2), null);
+
+        query("MATCH (n:cypher_person {name: 'noactive'}) DETACH DELETE n");
+        Assert.assertEquals(4, nativeVertices().size());
+    }
+
+    private static void assertGroupRow(Object row, Object groupKey) {
+        Map<?, ?> map = assertMapValue(Collections.singletonList(row), 0);
+        Assert.assertEquals(2, map.size());
+        Assert.assertEquals(groupKey, map.get("g"));
+        Assert.assertEquals(0L, ((Number) map.get("c")).longValue());
+    }
+
+    @Test
     public void testParameters() {
         assertColumn(bound("MATCH (n:cypher_person) WHERE n.name = $name AND " +
                            "n.age >= $age AND n.active = $active RETURN n.name AS name",
@@ -393,6 +451,128 @@ public class CypherApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testRejectMissingAuthorization() {
+        RestClient anonymous = new RestClient(baseUrl(), false);
+        try {
+            assertResponseStatus(401, anonymous.get(PATH, ImmutableMap.of("cypher", "RETURN 1")));
+            assertResponseStatus(401, anonymous.post(PATH, "RETURN 1"));
+        } finally {
+            anonymous.close();
+        }
+    }
+
+    @Test
+    public void testReadOnlyUserCannotWriteOrReadAnotherGraph() {
+        assumeStandaloneMode();
+        String graph = "cypher_reader_other";
+        String graphPath = "graphspaces/DEFAULT/graphs/" + graph;
+        Deque<String[]> created = new ArrayDeque<>();
+        RestClient reader = null;
+        boolean graphCreated = false;
+        try {
+            String config = JsonUtil.toJson(ImmutableMap.of(
+                    "gremlin.graph", "org.apache.hugegraph.auth.HugeFactoryAuthProxy",
+                    "backend", "memory", "serializer", "text", "store", graph));
+            Response response = client().post(graphPath, Entity.json(config));
+            graphCreated = response.getStatus() == 201;
+            assertResponseStatus(201, response);
+            reader = new RestClient(baseUrl(), "cypher_reader", "cypher-reader-password");
+            String group = this.createAuth(created, "auth/groups",
+                                           "{\"group_name\":\"cypher_read_only_group\"}");
+            String target = this.createAuth(created, "graphspaces/DEFAULT/auth/targets",
+                                            "{\"target_name\":\"cypher_read_only_target\"," +
+                                            "\"target_graph\":\"hugegraph\"," +
+                                            "\"target_resources\":[{\"type\":\"ALL\"}]}");
+            for (String permission : ImmutableList.of("READ", "EXECUTE")) {
+                this.createAuth(created, "graphspaces/DEFAULT/auth/accesses", String.format(
+                        "{\"group\":\"%s\",\"target\":\"%s\",\"access_permission\":\"%s\"}",
+                        group, target, permission));
+            }
+            String user = this.createAuth(created, "graphspaces/DEFAULT/auth/users",
+                                          "{\"user_name\":\"cypher_reader\"," +
+                                          "\"user_password\":\"cypher-reader-password\"}");
+            this.createAuth(created, "graphspaces/DEFAULT/auth/belongs", String.format(
+                    "{\"user\":\"%s\",\"group\":\"%s\"}", user, group));
+
+            assertColumn(assertCypherSuccessData(assertResponseStatus(200, reader.post(PATH, QUERY))),
+                         "name", "marko", "peter");
+            assertPermissionDenied(reader.post(PATH,
+                    "CREATE (n:cypher_person {name:'cypher_denied',age:1,city:'Beijing'}) RETURN n"),
+                    "write", "hugegraph");
+            Assert.assertNull(this.nativeVertex("cypher_denied"));
+            // This existing graph is accessible to the administrator but not to the reader.
+            assertCypherSuccessData(assertResponseStatus(200, client().post(
+                    graphPath + "/cypher", "MATCH (n) RETURN n")));
+            assertPermissionDenied(reader.post(graphPath + "/cypher", "MATCH (n) RETURN n"),
+                                   "execute", graph);
+        } finally {
+            if (reader != null) {
+                reader.close();
+            }
+            try {
+                this.deleteAuth(created);
+            } finally {
+                if (graphCreated) {
+                    assertResponseStatus(204, client().delete(graphPath, ImmutableMap.of(
+                            "confirm_message", "I'm sure to drop the graph")));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBasicAuthWithColonPassword() {
+        // The group, target and access setup below uses the standalone auth API; in PD mode
+        // groups are graphspace-scoped. The header parsing under test is backend-independent.
+        assumeStandaloneMode();
+        // CypherAPI parses the Basic header itself, apart from AuthenticationFilter
+        String user = "cypher_colon_user";
+        // With this user name these encode to standard Base64 containing '+' and '/'
+        Assert.assertTrue(basicCredential(user, "a:b:c~").contains("+"));
+        Assert.assertTrue(basicCredential(user, "a:b:c?").contains("/"));
+        Deque<String[]> created = new ArrayDeque<>();
+        RestClient noAuthClient = new RestClient(baseUrl(), false);
+        try {
+            String groupId = this.createAuth(created, "auth/groups",
+                                             "{\"group_name\":\"cypher_colon_group\"}");
+            String targetId = this.createAuth(created, "graphspaces/DEFAULT/auth/targets",
+                                              "{\"target_name\":\"cypher_colon_target\"," +
+                                              "\"target_graph\":\"hugegraph\"," +
+                                              "\"target_url\":\"127.0.0.1:8080\"," +
+                                              "\"target_resources\":[{\"type\":\"ALL\"}]}");
+            for (String permission : ImmutableList.of("READ", "EXECUTE")) {
+                this.createAuth(created, "graphspaces/DEFAULT/auth/accesses", String.format(
+                        "{\"group\":\"%s\",\"target\":\"%s\",\"access_permission\":\"%s\"}",
+                        groupId, targetId, permission));
+            }
+
+            for (String password : ImmutableList.of("a:b:c", "a:b:c~", "a:b:c?")) {
+                Deque<String[]> member = new ArrayDeque<>();
+                try {
+                    String userId = this.createAuth(member, "graphspaces/DEFAULT/auth/users",
+                                                    String.format("{\"user_name\":\"%s\"," +
+                                                                  "\"user_password\":\"%s\"}",
+                                                                  user, password));
+                    this.createAuth(member, "graphspaces/DEFAULT/auth/belongs", String.format(
+                            "{\"user\":\"%s\",\"group\":\"%s\"}", userId, groupId));
+
+                    Response r = basicAuthCypher(noAuthClient, user, password);
+                    assertColumn(assertCypherSuccessData(assertResponseStatus(200, r)),
+                                 "name", "marko", "peter");
+
+                    r = basicAuthCypher(noAuthClient, user, "wrong" + password);
+                    assertResponseStatus(401, r);
+                } finally {
+                    this.deleteAuth(member);
+                }
+            }
+        } finally {
+            noAuthClient.close();
+            this.deleteAuth(created);
+        }
+    }
+
+    @Test
     public void testSpecifiedGraphRouting() {
         assumeStandaloneMode();
         String graph = "cypher_route_test";
@@ -409,6 +589,40 @@ public class CypherApiTest extends BaseApiTest {
             assertResponseStatus(204, client().delete(path, ImmutableMap.of(
                     "confirm_message", "I'm sure to drop the graph")));
         }
+    }
+
+    private String createAuth(Deque<String[]> created, String path, String body) {
+        String content = assertResponseStatus(201, client().post(path, body));
+        String id = assertJsonContains(content, "id");
+        created.push(new String[]{path, id});
+        return id;
+    }
+
+    private void deleteAuth(Deque<String[]> created) {
+        // Attempt every deletion first, then fail on any record that was left behind
+        List<String> failures = new ArrayList<>();
+        while (!created.isEmpty()) {
+            String[] entry = created.pop();
+            Response r = client().delete(entry[0], entry[1]);
+            if (r.getStatus() != 204) {
+                failures.add(String.format("%s/%s: %s %s", entry[0], entry[1],
+                                           r.getStatus(), r.readEntity(String.class)));
+            }
+        }
+        Assert.assertTrue("Failed to delete auth records: " + failures, failures.isEmpty());
+    }
+
+    private static String basicCredential(String user, String password) {
+        byte[] credential = (user + ":" + password).getBytes(StandardCharsets.UTF_8);
+        return Base64.getEncoder().encodeToString(credential);
+    }
+
+    private static Response basicAuthCypher(RestClient client, String user, String password) {
+        // Built by hand: Jersey's HttpAuthenticationFeature encodes the credential as ISO-8859-1
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        headers.add(HttpHeaders.AUTHORIZATION, "Basic " + basicCredential(user, password));
+        return client.target().path(PATH).queryParam("cypher", QUERY)
+                     .request().headers(headers).get();
     }
 
     private List<?> query(String cypher) {
@@ -440,10 +654,28 @@ public class CypherApiTest extends BaseApiTest {
         Assert.assertNull(assertMapValue(body, "result").get("data"));
     }
 
+    private static void assertPermissionDenied(Response response, String operation, String graph) {
+        String content = assertResponseStatus(200, response);
+        Map<?, ?> body = JsonUtil.fromJson(content, Map.class);
+        Map<?, ?> status = assertMapValue(body, "status");
+        Assert.assertEquals(400, ((Number) status.get("code")).intValue());
+        String message = String.valueOf(status.get("message"));
+        assertContains("Permission denied: " + operation, message);
+        assertContains("graph=" + graph + ",", message);
+        Assert.assertNull(assertMapValue(body, "result").get("data"));
+    }
+
     private void addVertex(String name, int age, String city, boolean active) {
         createAndAssert(URL_PREFIX + "/graph/vertices", JsonUtil.toJson(ImmutableMap.of(
                 "label", "cypher_person", "properties", ImmutableMap.of(
                         "name", name, "age", age, "city", city, "active", active))));
+    }
+
+    private void addVertex(String name, int age, String city, boolean active, String birthday) {
+        createAndAssert(URL_PREFIX + "/graph/vertices", JsonUtil.toJson(ImmutableMap.of(
+                "label", "cypher_person", "properties", ImmutableMap.of(
+                        "name", name, "age", age, "city", city, "active", active,
+                        "birthday", birthday))));
     }
 
     private void addEdge(String source, String target) {
@@ -496,6 +728,54 @@ public class CypherApiTest extends BaseApiTest {
         Assert.assertEquals(name, properties.get("name"));
         Assert.assertEquals(age, ((Number) properties.get("age")).intValue());
         Assert.assertEquals(city, properties.get("city"));
+    }
+
+    @Test
+    public void testSyntaxErrorHasStructuredErrorWithHint() throws Exception {
+        this.assertError("MATCH (n:cypher_person) RETURN not_defined_var",
+                         "HugeGraph.Cypher.SyntaxError",
+                         "Declare the variable in a MATCH, UNWIND or WITH clause " +
+                         "before referencing it");
+    }
+
+    @Test
+    public void testParserErrorHasStructuredErrorWithHint() throws Exception {
+        this.assertError("MATCH (n:cypher_person RETURN n", "HugeGraph.Cypher.SyntaxError",
+                         "Check the query syntax and function names supported by " +
+                         "the built-in Cypher translator");
+    }
+
+    @Test
+    public void testMultipleStatementsHaveStructuredError() throws Exception {
+        this.assertError("MATCH (n) RETURN n; MATCH (m) RETURN m",
+                         "HugeGraph.Cypher.SyntaxError",
+                         "Submit exactly one Cypher statement per request");
+    }
+
+    @Test
+    public void testUndefinedLabelHasSchemaHint() throws Exception {
+        this.assertError("MATCH (n:robot) RETURN n", "HugeGraph.Cypher.ExecutionError",
+                         "Create the schema element via the schema API before running the query");
+    }
+
+    @Test
+    public void testMissingParameterHasFallbackError() throws Exception {
+        this.assertError("RETURN $missing AS value",
+                         "HugeGraph.Cypher.ExecutionError", "");
+    }
+
+    private void assertError(String query, String code, String hint) throws Exception {
+        Response r = client().post(PATH, query);
+        JsonNode response = new ObjectMapper().readTree(assertResponseStatus(200, r));
+        Assert.assertEquals(3, response.size());
+        Assert.assertFalse(response.has("errors"));
+        Assert.assertEquals(400, response.at("/status/code").asInt());
+        Assert.assertFalse(response.at("/status/message").asText().isEmpty());
+        Assert.assertEquals(1, response.at("/status/attributes/errors").size());
+        JsonNode error = response.at("/status/attributes/errors/0");
+        Assert.assertEquals(code, error.get("code").asText());
+        Assert.assertEquals(hint, error.get("hint").asText());
+        Assert.assertFalse(error.get("message").asText().isEmpty());
     }
 
     private String testCypherQueryAndContains(String cypher,

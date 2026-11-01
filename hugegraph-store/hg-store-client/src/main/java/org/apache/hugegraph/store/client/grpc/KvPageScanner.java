@@ -32,6 +32,7 @@ import org.apache.hugegraph.store.HgKvStore;
 import org.apache.hugegraph.store.HgOwnerKey;
 import org.apache.hugegraph.store.HgPageSize;
 import org.apache.hugegraph.store.HgSeekAble;
+import org.apache.hugegraph.store.client.HgStoreNodeManager;
 import org.apache.hugegraph.store.client.HgStoreNodeSession;
 import org.apache.hugegraph.store.client.util.HgBufferProxy;
 import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
@@ -50,6 +51,7 @@ import org.apache.hugegraph.store.grpc.stream.SelectParam;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 
@@ -67,6 +69,8 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
                            StreamObserver<ScanStreamReq>> streamFactory;
     private final boolean orderedScan;
     private final AtomicBoolean completed = new AtomicBoolean(false);
+    // Buffer publication and channel retirement must stay outside this lock.
+    private final Object requestLock = new Object();
     private final SelectParam.Builder selectBuilder = SelectParam.newBuilder();
     private final BlockingQueue<ScanStreamReq> reqQueue = new LinkedBlockingQueue<>();
     private int pageSize = clientConfig.getNetKvScannerPageSize();
@@ -174,7 +178,7 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
     private void serverScan() {
         if (this.completed.get()) {
-            this.proxy.close();
+            // The response callback closes the buffer after publishing its final page or error.
             return;
         }
         if (this.proxy.isClosed()) {
@@ -188,19 +192,38 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
     }
 
     private void send(ScanStreamReq req) {
-        if (!this.completed.get()) {
-            try {
-                this.observer.onNext(req);
-            } catch (IllegalStateException | IllegalArgumentException e) {
+        synchronized (this.requestLock) {
+            if (!this.completed.get()) {
+                try {
+                    this.observer.onNext(req);
+                } catch (IllegalStateException | IllegalArgumentException e) {
 
+                } catch (Exception e) {
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private void completeRequest() {
+        synchronized (this.requestLock) {
+            if (!this.completed.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                this.observer.onCompleted();
             } catch (Exception e) {
-                throw e;
+                log.warn("failed to invoke requestObserver.onCompleted(), reason: {}", e.getMessage());
             }
         }
     }
 
     private void clientError(String msg) {
-        this.observer.onError(GrpcUtil.toErr(msg));
+        synchronized (this.requestLock) {
+            if (this.completed.compareAndSet(false, true)) {
+                this.observer.onError(GrpcUtil.toErr(msg));
+            }
+        }
     }
 
     /*** Iterator ***/
@@ -302,8 +325,7 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
                 return;
             }
             if (value.getOver()) {
-                completed.set(true);
-                observer.onCompleted();
+                completeRequest();
             }
             proxy.send(value.getDataList());
             if (completed.get()) {
@@ -313,11 +335,13 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
         @Override
         public void onError(Throwable t) {
-            completed.set(true);
-            try {
-                observer.onCompleted();
-            } catch (Exception e) {
-                log.warn("failed to invoke requestObserver.onCompleted(), reason:", e.getMessage());
+            completeRequest();
+            // Retire the failed pool before publishing the original iterator error,
+            // so immediate retries cannot reuse it. Cancellation or protocol errors
+            // must not evict healthy nodes, and stale notices preserve replacements.
+            if (Status.fromThrowable(t).getCode() == Status.Code.UNAVAILABLE) {
+                new NotifyingExecutor(session.getGraphName(),
+                                      HgStoreNodeManager.getInstance(), session).handleErr(t);
             }
             proxy.setError(t);
             proxy.close();
@@ -326,7 +350,9 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
         @Override
         public void onCompleted() {
-            completed.set(true);
+            synchronized (requestLock) {
+                completed.set(true);
+            }
             proxy.close();
         }
     }

@@ -192,11 +192,11 @@ public enum UpdateStrategy {
 
     protected static Set<?> combineSet(Object oldProperty, Object newProperty,
                                        UpdateStrategy strategy) {
-        Set<?> oldSet = oldProperty instanceof Set ?
-                        (Set<?>) oldProperty :
+        Set<?> oldSet = oldProperty instanceof Set<?> oldValues ?
+                        oldValues :
                         new HashSet<>((List<?>) oldProperty);
-        Set<?> newSet = newProperty instanceof Set ?
-                        (Set<?>) newProperty :
+        Set<?> newSet = newProperty instanceof Set<?> newValues ?
+                        newValues :
                         new HashSet<>((List<?>) newProperty);
         return strategy == UNION ? Sets.union(oldSet, newSet) :
                Sets.intersection(oldSet, newSet);

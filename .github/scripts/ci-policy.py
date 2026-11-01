@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Conservative CI selection and gating of this run's selected tests."""
+"""Select affected CI checks from the current event and cumulative PR diff."""
 
 import argparse
 import json
@@ -22,8 +22,10 @@ import os
 from pathlib import Path
 import subprocess
 
+MAINLINE = {"server", "commons", "struct", "pd", "store", "hstore", "cluster", "docker", "helm",
+            "dependency_license", "macos", "security", "distributed_smoke"}
 MODULES = {
-    "server": ["server", "commons", "struct", "pd", "store", "hstore", "cluster", "docker", "helm", "dependency_license"],
+    "server": sorted(MAINLINE | {"macos_full", "hbase", "riscv64"}),
     "toolchain": ["client", "loader", "tools", "spark", "hubble", "go"],
 }
 PREFIXES = {
@@ -35,33 +37,80 @@ PREFIXES = {
                   "hugegraph-spark-connector/": "spark", "hugegraph-hubble/": "hubble"},
 }
 WORKFLOWS = {
-    "server": {"server-ci.yml": MODULES["server"], "commons-ci.yml": ["commons"],
-               "pd-store-ci.yml": ["pd", "store", "hstore"], "cluster-test-ci.yml": ["cluster"],
-               "docker-build-ci.yml": ["docker"], "helm-chart-ci.yml": ["helm"],
-               "codeql-analysis.yml": [], "server-memory-ci.yml": ["server"],
-               "server-tests.yml": ["server"], "server-compatibility-ci.yml": ["server", "docker"],
-               "riscv64-ci.yml": ["server"], "check-dependencies.yml": ["dependency_license"]},
-    "toolchain": {"client-ci.yml": ["client"], "client-go-ci.yml": ["go"],
-                  "loader-ci.yml": ["loader"], "tools-ci.yml": ["tools"],
-                  "spark-connector-ci.yml": ["spark"], "hubble-ci.yml": ["hubble"],
-                  "codeql-analysis.yml": []},
+    "server": {"server-ci.yml": MAINLINE, "commons-ci.yml": {"commons"},
+               "pd-store-ci.yml": {"struct", "pd", "store", "hstore"}, "cluster-test-ci.yml": {"cluster"},
+               "docker-build-ci.yml": {"docker"},
+               "codeql-analysis.yml": {"security"}, "server-memory-ci.yml": {"server"},
+               "server-tests.yml": {"server", "hbase"},
+               "server-compatibility-ci.yml": {"macos", "macos_full", "hbase", "riscv64"},
+               "riscv64-ci.yml": {"riscv64"}, "check-dependencies.yml": {"dependency_license"},
+               "submit-dependencies.yml": {"dependency_license"}},
+    "toolchain": {"client-ci.yml": {"client"}, "client-go-ci.yml": {"go"},
+                  "loader-ci.yml": {"loader"}, "tools-ci.yml": {"tools"},
+                  "spark-connector-ci.yml": {"spark"}, "hubble-ci.yml": {"hubble"},
+                  "codeql-analysis.yml": set()},
 }
-# Exact maintenance inputs have no product consumers; their checks run in the planner.
-MAINTENANCE_INPUTS = {
-    ".github/PULL_REQUEST_TEMPLATE.md": [],
-    ".github/dependabot.yml": [],
-    ".github/scripts/check-rerun.py": [],
-    ".github/scripts/test_check_rerun.py": [],
-    ".github/scripts/check-docker-images.sh": ["docker"],
-    ".github/scripts/docker-deployment.py": ["docker"],
-    ".github/scripts/test_docker_deployment.py": ["docker"],
-}
+# Shared runtime consumers; ordinary Server edits do not fan out to PD/Store.
 DEPENDENTS = {
-    "server": {"commons": ["server", "pd", "store", "hstore", "cluster"],
-               "struct": ["server", "pd", "store", "hstore", "cluster"],
-               "server": ["pd", "store", "hstore", "cluster"], "pd": ["store", "hstore", "cluster"],
-               "store": ["hstore", "cluster"], "hstore": ["cluster"]},
-    "toolchain": {"client": ["loader", "tools", "spark", "hubble"], "loader": ["hubble"]},
+    "server": {"commons": {"server", "pd", "store", "hstore", "cluster"},
+               "struct": {"server", "pd", "store", "hstore", "cluster"},
+               "pd": {"store", "hstore", "cluster"}, "store": {"hstore", "cluster"}, "hstore": {"cluster"}},
+    "toolchain": {"client": {"loader", "tools", "spark", "hubble"}, "loader": {"hubble"}},
+}
+MAINTENANCE_INPUTS = {
+    ".github/actions/helm-checks/action.yml": {"helm"},
+    ".github/actions/rocksdb-compatibility/action.yml": {"pd", "store", "hstore"},
+    ".asf.yaml": set(), ".editorconfig": set(), ".licenserc.yaml": set(),
+    ".github/PULL_REQUEST_TEMPLATE.md": set(), ".github/dependabot.yml": set(),
+    ".github/workflows/.java-version": MAINLINE | {"macos_full", "hbase", "riscv64"},
+    ".github/scripts/dependency-snapshot.py": {"dependency_license"},
+    ".github/scripts/dependency-inventory.py": {"dependency_license"},
+    ".github/scripts/test_dependency_snapshot.py": set(),  # Covered by preflight discovery.
+    ".github/scripts/check-docker-images.sh": {"docker"},
+    ".github/scripts/docker-deployment.py": {"docker"},
+    ".github/scripts/test_docker_deployment.py": {"docker"},
+}
+PRESETS = {
+    "mainline": MAINLINE,
+    "dependencies": {"dependency_license"},
+    "distributed": {"struct", "pd", "store", "hstore", "cluster", "distributed_smoke"},
+    "macos-arm": {"macos", "macos_full"}, "hbase": {"hbase"},
+    "riscv64": {"riscv64"}, "codeql": {"security"}, "full": set(MODULES["server"]),
+}
+SERVER_CORE = "hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/"
+SERVER_API = "hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/"
+SECURITY_INPUTS = {
+    SERVER_CORE + "backend/cache/CachedSchemaTransaction.java",
+    SERVER_CORE + "backend/cache/CachedSchemaTransactionV2.java",
+}
+DISTRIBUTED_SERVER_INPUTS = (
+    "hugegraph-server/hugegraph-hstore/", SERVER_CORE + "backend/", SERVER_CORE + "meta/",
+    SERVER_CORE + "space/", SERVER_CORE + "task/", SERVER_CORE + "masterelection/", SERVER_CORE + "HugeGraph",
+    SERVER_CORE + "StandardHugeGraph", SERVER_API + "core/", SERVER_API + "rpc/",
+    SERVER_API + "api/raft/", SERVER_API + "api/space/",
+    "hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/store/",
+    "hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/meta/",
+)
+# Test/resources/templates can contain executable examples and runtime fixtures.
+RUNTIME_PARTS = {"src", "resources", "fixtures", "templates", "static", "bin", "conf", "configs"}
+# These build files declare native JNI dependencies/classifiers or the RISC-V protobuf profile.
+PLATFORM_POMS = {"pom.xml", "hugegraph-server/pom.xml", "hugegraph-server/hugegraph-core/pom.xml",
+                 "hugegraph-server/hugegraph-rocksdb/pom.xml", "hugegraph-server/hugegraph-dist/pom.xml",
+                 "hugegraph-pd/hg-pd-grpc/pom.xml"}
+RISCV_PROTO_ROOTS = ("hugegraph-server/hugegraph-core/", "hugegraph-pd/hg-pd-grpc/")
+TRAVIS = "hugegraph-server/hugegraph-dist/src/assembly/travis/"
+# Contract tests follow their executing suites, without runtime consumer fan-out.
+CONTRACT_SUITES = {
+    TRAVIS + "test-check-java-runtime-logs.sh": {"struct"},
+    TRAVIS + "check-java-runtime-logs.sh": {"server", "commons", "struct", "pd", "store", "hstore", "cluster",
+                                          "macos", "macos_full", "hbase", "riscv64"},
+    TRAVIS + "test-stop-hugegraph-store.sh": {"struct"},
+    TRAVIS + "test-check-jacoco-report.sh": {"struct"},
+    TRAVIS + "test-codecov-upload-config.sh": {"struct"},
+    TRAVIS + "test-riscv64-java-runtime.sh": {"server", "riscv64"},
+    TRAVIS + "test-store-docker-entrypoint.sh": {"store"},
+    TRAVIS + "test-start-hugegraph-store.sh": {"store"},
+    TRAVIS + "test-start-server.sh": {"server"},
 }
 
 
@@ -75,18 +124,17 @@ def api(path):
 
 
 def documentation(path, mode="100644"):
-    """Only prose and static documentation assets; never source or config."""
+    """Only plain prose/static assets outside runtime and fixture directories."""
     if mode != "100644":
         return False
     p = Path(path)
-    prose_names = {"README.md", "README_CN.md", "README_ZH.md", "AGENTS.md"}
-    module_roots = {prefix.rstrip("/") for mapping in PREFIXES.values() for prefix in mapping}
-    module_roots.update("hugegraph-server/" + module for module in [
-        "hugegraph-api", "hugegraph-core", "hugegraph-dist", "hugegraph-example",
-        "hugegraph-hbase", "hugegraph-hstore", "hugegraph-rocksdb", "hugegraph-test"])
-    if p.name in prose_names and (str(p.parent) == "." or str(p.parent) in module_roots):
+    if RUNTIME_PARTS.intersection(p.parts[:-1]):
+        return False
+    if p.suffix.lower() in {".md", ".rst"}:
         return True
-    return path.startswith("docs/") and p.suffix.lower() in {".md", ".rst", ".txt", ".png", ".jpg", ".jpeg", ".svg"}
+    if len(p.parts) == 1 and (p.suffix.lower() == ".txt" or p.name in {"LICENSE", "NOTICE"}):
+        return True
+    return "docs" in p.parts[:-1] and p.suffix.lower() in {".md", ".rst", ".txt", ".png", ".jpg", ".jpeg", ".svg"}
 
 
 def unsafe_documentation(ref, paths):
@@ -103,67 +151,130 @@ def unsafe_documentation(ref, paths):
 
 def select(project, paths):
     selected = set()
+    contracts = set()
     for path in paths:
         if documentation(path):
             continue
-        if project == "server" and path in MAINTENANCE_INPUTS:
-            selected.update(MAINTENANCE_INPUTS[path])
-            continue
-        if project == "server" and (Path(path).name == "pom.xml" or path.startswith("install-dist/")):
-            selected.add("dependency_license")
-        if path.startswith(".github/workflows/") and Path(path).name in WORKFLOWS[project]:
-            selected.update(WORKFLOWS[project][Path(path).name])
-            continue
-        if path.endswith(".proto"):
-            return set(MODULES[project])
-        if project == "server" and path == "hugegraph-commons/hugegraph-common/src/main/resources/version.properties":
-            selected.update(["commons", "docker"])
-            continue
-        if project == "toolchain" and path.startswith("hugegraph-client/assembly/travis/"):
-            selected.update(["client", "go"])
-            continue
+        p = Path(path)
         if project == "server":
+            if path in CONTRACT_SUITES:
+                contracts.update(CONTRACT_SUITES[path])
+                continue
+            if path in MAINTENANCE_INPUTS:
+                selected.update(MAINTENANCE_INPUTS[path])
+                continue
+            if p.name == "pom.xml":
+                selected.update({"dependency_license", "security"})
+            if path in PLATFORM_POMS:
+                selected.update({"macos", "macos_full", "riscv64"})
+            if path.startswith("install-dist/"):
+                selected.add("dependency_license")
+                continue
+            if (path in SECURITY_INPUTS
+                    or {"auth", "security", "permission", "permissions"}.intersection(p.parts)
+                    or p.stem.startswith(("Authentication", "Authorization"))
+                    or p.stem.endswith(("Authentication", "Authenticator", "Permission", "WithAuth"))
+                    or p.name in {"AuthOptions.java", "OkHttpBasicAuthInterceptor.java", "java-security.properties",
+                                  "test-java-security-properties.sh", "enable-auth.sh"}):
+                selected.add("security")
+            if path.startswith(".github/workflows/") and p.name in WORKFLOWS[project]:
+                selected.update(WORKFLOWS[project][p.name])
+                continue
+            if path == TRAVIS + "install-backend.sh":
+                selected.update({"hbase", "hstore"})
+            if path.startswith("docker/hbase/"):
+                selected.update({"docker", "hbase"})
+                continue
+            if path.startswith("hugegraph-server/hugegraph-hbase/") or "hbase" in p.name.lower():
+                selected.add("hbase")
+                continue
+            if "riscv" in path.lower():
+                selected.add("riscv64")
+                continue
+            if path.startswith(DISTRIBUTED_SERVER_INPUTS) or path.endswith(".proto"):
+                selected.update({"hstore", "cluster", "distributed_smoke"})
+            if path.endswith(".proto") and path.startswith(RISCV_PROTO_ROOTS):
+                selected.add("riscv64")
+            if path.startswith("hugegraph-server/hugegraph-dist/docker/"):
+                selected.add("docker")
+                continue
+            if path.startswith("hugegraph-server/hugegraph-dist/"):
+                selected.update({"server", "docker", "macos", "macos_full"})
+                if (path.startswith("hugegraph-server/hugegraph-dist/src/assembly/static/bin/")
+                        or "native-runtime" in p.name or "rocksdb-jni" in p.name
+                        or p.name == "check-rocksdb-only-dist.sh"):
+                    selected.add("riscv64")
+                if any(word in path for word in ("pd", "store", "distributed")):
+                    selected.update({"hstore", "cluster", "distributed_smoke"})
+                continue
+            if path.startswith("hugegraph-server/hugegraph-rocksdb/"):
+                selected.update({"server", "macos", "macos_full"})
+                continue
             if path in {"hugegraph-server/pom.xml", "hugegraph-server/hugegraph-api/pom.xml"}:
                 selected.add("docker")
             if path.startswith(("hugegraph-pd/hg-pd-dist/", "hugegraph-store/hg-store-dist/")):
                 selected.add("docker")
-            if path.startswith("hugegraph-server/hugegraph-hstore/"):
-                selected.update(["server", "hstore"])
-                continue
-            if path.startswith("hugegraph-server/hugegraph-dist/"):
-                selected.update(["server", "pd", "store", "hstore", "docker", "cluster"])
-                continue
-            if path.startswith(("hugegraph-server/hugegraph-core/", "hugegraph-server/hugegraph-api/",
-                                "hugegraph-server/hugegraph-test/")):
-                selected.update(["server", "hstore"])
-                continue
+            if path == "hugegraph-commons/hugegraph-common/src/main/resources/version.properties":
+                selected.add("docker")
+        elif path.endswith(".proto"):
+            selected.update(MODULES[project])
+            continue
+        elif path.startswith(".github/workflows/") and p.name in WORKFLOWS[project]:
+            selected.update(WORKFLOWS[project][p.name])
+            continue
+        elif path.startswith("hugegraph-client/assembly/travis/"):
+            selected.update({"client", "go"})
+            continue
         module = next((value for prefix, value in PREFIXES[project].items() if path.startswith(prefix)), None)
-        if module is None or path.endswith(".proto"):
-            return set(MODULES[project])
-        selected.add(module)
-        if project == "server" and ("Dockerfile" in Path(path).name or "docker-entrypoint" in path):
-            selected.add("docker")
+        if module is None:
+            selected.update(MAINLINE if project == "server" else MODULES[project])
+        else:
+            selected.add(module)
     changed = True
     while changed:
         before = set(selected)
         for module in before:
-            selected.update(DEPENDENTS[project].get(module, []))
+            selected.update(DEPENDENTS[project].get(module, set()))
         changed = before != selected
+    if project == "server":
+        if "server" in selected:
+            selected.add("macos")
+        if selected.intersection({"pd", "store", "hstore", "struct", "cluster"}):
+            selected.add("distributed_smoke")
+        selected.update(contracts)
     return selected
+
+
+def event_selection(project, paths, event, event_name):
+    """Presets and post-merge smoke share the same affected-input classifier."""
+    if project != "server":
+        return select(project, paths)
+    if event_name == "schedule":
+        return set(PRESETS["full"])
+    if event_name == "workflow_dispatch":
+        preset = event.get("inputs", {}).get("test-set", "mainline")
+        if preset not in PRESETS:
+            raise ValueError("unknown test-set: " + str(preset))
+        return set(PRESETS[preset])
+    if event_name == "push" and event.get("ref") == "refs/heads/master":
+        # Test contracts do not change deployed runtime inputs.
+        selected = select(project, [path for path in paths if path not in CONTRACT_SUITES])
+        smoke = selected.intersection({"docker", "helm", "dependency_license", "macos", "distributed_smoke"})
+        if selected.intersection({"server", "commons", "struct", "pd", "store", "hstore", "cluster"}):
+            smoke.add("distributed_smoke")
+        return smoke
+    return select(project, paths)
 
 
 def suites(project, selected):
     if project == "toolchain":
         return sorted(selected)
-    result = []
+    result = selected.intersection({"commons", "cluster", "docker", "helm", "dependency_license", "macos",
+                                    "hbase", "riscv64", "security", "distributed_smoke"})
     if "server" in selected:
-        result.extend(["server_memory", "server_rocksdb"])
-    # Third-party inventory/review remains visible without becoming a merge gate.
-    for module in ["commons", "cluster", "docker", "helm"]:
-        if module in selected:
-            result.append(module)
+        result.update({"server_memory", "server_rocksdb"})
     if selected.intersection({"pd", "store", "hstore", "struct"}):
-        result.append("pd_store")
+        result.add("pd_store")
     return sorted(result)
 
 
@@ -182,18 +293,19 @@ def require_current_pr(plan, fetch):
         raise StaleInputError("PR inputs changed; refresh the branch and start a new PR run")
 
 
-def create_plan(project, event, repository, fetch=api):
+def create_plan(project, event, repository, fetch=api, event_name=None):
+    event_name = event_name or os.environ.get("GITHUB_EVENT_NAME") or (
+        "pull_request" if "pull_request" in event else "push")
     paths = []
     plan = {"schema": 1, "project": project, "repository": repository, "pr": 0,
             "source": repository, "branch": "", "base": "", "head": git("rev-parse", "HEAD"),
-            "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD")}
+            "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD"), "event": event_name}
     try:
         pr = event.get("pull_request")
         if "pull_request" in event:
             if not isinstance(pr, dict) or type(pr.get("number")) is not int or pr["number"] <= 0:
                 raise StaleInputError("PR event lacks a valid number")
             plan["pr"] = pr["number"]
-            # An incomplete PR event must never fall back to a push plan with pr=0.
             try:
                 plan.update(source=pr["head"]["repo"]["full_name"], base=pr["base"]["sha"],
                             head=pr["head"]["sha"], branch=pr["head"]["ref"])
@@ -205,51 +317,48 @@ def create_plan(project, event, repository, fetch=api):
             if (plan["testedMergeSHA"] != os.environ.get("GITHUB_SHA")
                     or len(parents) != 2 or parents[1] != plan["head"]):
                 raise StaleInputError("checkout is not the event PR merge; start a new PR run")
-            # The event base may lag the synthetic merge after the target branch advances.
             plan["base"] = parents[0]
             require_current_pr(plan, fetch)
-            # head/base objects must exist locally; workflow fetches both before planning.
             ancestor = git("merge-base", plan["base"], plan["head"])
             paths = git("diff", "--no-renames", "--name-only", ancestor, plan["head"]).splitlines()
-        else:
+        elif event_name == "push":
             plan["base"] = event.get("before", "")
+            plan["branch"] = event.get("ref", "").removeprefix("refs/heads/")
             paths = git("diff", "--no-renames", "--name-only", plan["base"], plan["head"]).splitlines()
-        selected = select(project, paths)
-        if unsafe_documentation(plan["base"], paths) or unsafe_documentation(plan["testedMergeSHA"], paths):
-            selected = set(MODULES[project])
-            plan["reason"] = "non-regular documentation input: conservative full coverage"
-        plan["expected"] = suites(project, selected)
+        selected = event_selection(project, paths, event, event_name)
+        if paths and (unsafe_documentation(plan["base"], paths)
+                      or unsafe_documentation(plan["testedMergeSHA"], paths)):
+            selected = event_selection(project, ["unknown"], event, event_name)
+            plan["reason"] = "non-regular documentation input: conservative mainline coverage"
+        if event_name in {"schedule", "workflow_dispatch"}:
+            plan["reason"] = "weekly full coverage" if event_name == "schedule" else "manual " + event.get(
+                "inputs", {}).get("test-set", "mainline")
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
-        selected = set(MODULES[project])
-        plan["reason"] = "verification unavailable: conservative full coverage"
-        plan["expected"] = suites(project, selected)
+        selected = event_selection(project, ["unknown"], {"ref": event.get("ref")},
+                                   "push" if event_name == "push" else "pull_request")
+        plan["reason"] = "verification unavailable: conservative mainline coverage"
     if not selected:
-        plan["reason"] = "cumulative PR diff contains only plain prose documentation; modules unaffected"
+        plan["reason"] = "plain prose documentation or maintenance inputs; tests unaffected"
     plan["selected"] = sorted(selected)
+    plan["expected"] = suites(project, selected)
     for module in MODULES[project]:
         plan[module] = module in selected
     plan["pd_store"] = any(plan.get(m, False) for m in ["pd", "store", "hstore", "struct"])
-    plan["needsFixture"] = project == "toolchain" and any(plan.get(m, False) for m in MODULES[project])
+    plan["needsFixture"] = project == "toolchain" and bool(selected)
     plan["fixture"] = plan["needsFixture"]
-    plan["compatibility"] = project == "server" and bool(selected.intersection({"server", "commons", "struct", "pd", "store", "hstore", "cluster"}))
-    plan["smoke"] = project == "server" and bool(selected.intersection({"server", "docker"}))
-    plan["security"] = bool(selected - {"docker", "helm"}) or any(
-        p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
-    plan["required"] = ["server_memory"] if project == "server" and "server" in selected else []
+    if project == "toolchain":
+        plan["security"] = bool(selected) or any(p.startswith(".github/workflows/codeql") for p in paths)
+    plan["required"] = []
     plan["security_languages"] = json.dumps(["java"])
     plan["changedPaths"] = paths
     plan["selectionReasons"] = {
-        suite: [path for path in paths if suite in suites(project, select(project, [path]))]
+        suite: [path for path in paths if suite in suites(project, event_selection(project, [path], event, event_name))]
         for suite in plan["expected"]
     }
-    if "dependency_license" in selected:
-        plan["selectionReasons"]["dependency_license"] = [
-            path for path in paths if "dependency_license" in select(project, [path])]
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
             out.write("## Selected CI checks\n" + selection_table(plan) + "\n")
     return plan
-
 
 def selection_reason(plan, suite):
     paths = plan.get("selectionReasons", {}).get(suite, [])
@@ -266,11 +375,9 @@ def selection_reason(plan, suite):
 def selection_table(plan):
     summary = "| Check | Selected | Merge requirement | Changed inputs |\n| --- | --- | --- | --- |\n"
     checks = suites(plan["project"], set(MODULES[plan["project"]]))
-    if "dependency_license" in plan["selected"]:
-        checks.append("dependency_license")
     for suite in checks:
-        chosen = suite in plan["expected"] or suite == "dependency_license"
-        role = "required" if suite == "server_memory" else "advisory"
+        chosen = suite in plan["expected"]
+        role = "advisory"
         summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {selection_reason(plan, suite)} |\n"
     return summary
 
@@ -281,39 +388,15 @@ class GateFailure(ValueError):
         self.report = report
 
 
-def gate(plan, results, fetch=None, mode="all"):
-    """Report actual outcomes; Memory and advisory checks have independent dependencies."""
+def gate(plan, results, fetch=None):
+    """Keep the Toolchain result summary and current-PR gate contract."""
     expected = list(plan["expected"])
-    if mode == "memory":
-        expected = [suite for suite in expected if suite == "server_memory"]
-    elif mode == "advisory":
-        expected = [suite for suite in expected if suite != "server_memory"]
     report = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
                                         "head", "testedMergeSHA", "selected"]}
     report["selectionReasons"] = plan.get("selectionReasons", {})
     report.update(runID=int(os.environ.get("GITHUB_RUN_ID", "0")),
                   runAttempt=int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")), executed=expected,
                   results={suite: results.get(suite, {}).get("result", "missing") for suite in expected})
-    if mode != "memory" and "dependency_license" in plan["selected"]:
-        report["results"]["dependency_license"] = results.get("dependency_license", {}).get("result", "missing")
-    summary = "Selection: " + plan.get("reason", "affected inputs") + "\n"
-    summary += "Tested base: `" + plan["base"] + "`; merge: `" + plan["testedMergeSHA"] + "`\n\n"
-    summary += "| Check | Selected | Merge requirement | Changed inputs | Result |\n| --- | --- | --- | --- | --- |\n"
-    for suite in suites(plan["project"], set(MODULES[plan["project"]])):
-        if mode == "memory" and suite != "server_memory":
-            continue
-        if mode == "advisory" and suite == "server_memory":
-            continue
-        chosen = suite in expected
-        role = "required" if suite == "server_memory" else "advisory"
-        status = report["results"].get(suite, "not selected")
-        summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {selection_reason(plan, suite)} | {status} |\n"
-    if "dependency_license" in report["results"]:
-        summary += "| dependency_license | yes | advisory | " + selection_reason(plan, "dependency_license") + " | " + str(report["results"]["dependency_license"]) + " |\n"
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-            out.write("## " + ("Memory result" if mode == "memory" else "Affected module results") + "\n" + summary + "\n")
-    print(summary)
     errors = []
     if results.get("plan", {}).get("result") != "success":
         errors.append("planner did not succeed")
@@ -325,15 +408,21 @@ def gate(plan, results, fetch=None, mode="all"):
                 errors.append("selected tests lack successful fixture")
         if "hubble" in expected and results.get("hubble-fixture", {}).get("result") != "success":
             errors.append("selected Hubble tests lack successful baseline fixture")
+    summary = "Selection: " + plan.get("reason", "affected inputs") + "\n"
+    summary += "Tested base: `" + plan["base"] + "`; merge: `" + plan["testedMergeSHA"] + "`\n\n"
+    summary += "| Check | Selected | Merge requirement | Changed inputs | Result |\n| --- | --- | --- | --- | --- |\n"
+    for suite in suites(plan["project"], set(MODULES[plan["project"]])):
+        chosen = suite in expected
+        status = report["results"].get(suite, "not selected")
+        summary += f"| {suite} | {'yes' if chosen else 'no'} | advisory | {selection_reason(plan, suite)} | {status} |\n"
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+            out.write("## Affected module results\n" + summary + "\n")
+    print(summary)
     if errors:
         raise GateFailure("; ".join(errors), report)
-    # Checks are attached to their actual commit; target-branch advancement alone is not stale.
-    # A transient API outage cannot invalidate a genuine completed Memory result.
-    try:
+    if plan["project"] == "toolchain":
         require_current_pr(plan, fetch or api)
-    except (subprocess.SubprocessError, OSError):
-        if mode != "memory":
-            raise
     return report
 
 
@@ -345,14 +434,16 @@ def main():
     p.add_argument("--event-path", required=True)
     p.add_argument("--repository", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--event-name")
     p = sub.add_parser("gate")
     p.add_argument("--plan", required=True)
     p.add_argument("--results", required=True)
-    p.add_argument("--mode", choices=["all", "memory", "advisory"], default="all")
+    p.add_argument("--mode", choices=["all"], default="all")
     p.add_argument("--output", required=True)
     args = parser.parse_args()
     if args.command == "plan":
-        value = create_plan(args.project, json.loads(Path(args.event_path).read_text()), args.repository)
+        value = create_plan(args.project, json.loads(Path(args.event_path).read_text()), args.repository,
+                            event_name=args.event_name)
         if os.environ.get("GITHUB_OUTPUT"):
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                 for key, item in value.items():
@@ -361,7 +452,7 @@ def main():
                 output.write(f"security_languages={value['security_languages']}\nplan_file={args.output}\n")
     else:
         try:
-            value = gate(json.loads(Path(args.plan).read_text()), json.loads(Path(args.results).read_text()), mode=args.mode)
+            value = gate(json.loads(Path(args.plan).read_text()), json.loads(Path(args.results).read_text()))
         except GateFailure as error:
             Path(args.output).write_text(json.dumps(error.report, indent=2) + "\n")
             raise

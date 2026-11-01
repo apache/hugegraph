@@ -193,8 +193,8 @@ public class EphemeralJobQueue {
             for (EphemeralJob<?> job : jobs) {
                 this.initJob(job);
                 Object obj = job.call();
-                if (job instanceof Reduce) {
-                    result = ((Reduce) job).reduce(result, obj);
+                if (job instanceof Reduce matchedReduce) {
+                    result = matchedReduce.reduce(result, obj);
                 }
             }
 

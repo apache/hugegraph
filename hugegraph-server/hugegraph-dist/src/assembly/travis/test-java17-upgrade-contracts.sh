@@ -165,17 +165,21 @@ assert_surefire_execution_scope \
 MODULE_OPTIONS="${SERVER_ROOT}/bin/jvm-module.options"
 SERVER_SCRIPT="${SERVER_ROOT}/bin/hugegraph-server.sh"
 INIT_STORE_SCRIPT="${SERVER_ROOT}/bin/init-store.sh"
+CONSOLE_SCRIPT="${SERVER_ROOT}/bin/gremlin-console.sh"
+DUMP_STORE_SCRIPT="${SERVER_ROOT}/bin/dump-store.sh"
 UTIL_SCRIPT="${SERVER_ROOT}/bin/util.sh"
 PRELOAD_SCRIPT="${SERVER_ROOT}/bin/preload-topling.sh"
 CONF_SOURCE="${SERVER_ROOT}/conf"
 
 for source_file in "$MODULE_OPTIONS" "$SERVER_SCRIPT" \
-                   "$INIT_STORE_SCRIPT" "$UTIL_SCRIPT" "$PRELOAD_SCRIPT"; do
+                   "$INIT_STORE_SCRIPT" "$CONSOLE_SCRIPT" "$DUMP_STORE_SCRIPT" \
+                   "$UTIL_SCRIPT" "$PRELOAD_SCRIPT"; do
     [[ -f "$source_file" ]] || fail "runtime asset is missing: $source_file"
 done
 [[ -d "$CONF_SOURCE" ]] || fail "server conf is missing: $CONF_SOURCE"
 
 TEMP_DIR=$(mktemp -d)
+TEMP_DIR=$(cd "$TEMP_DIR" && pwd -P)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
 DIST_ROOT="${TEMP_DIR}/server"
@@ -183,10 +187,10 @@ MOCK_JAVA_HOME="${TEMP_DIR}/mock-java-home"
 mkdir -p "${DIST_ROOT}"/{bin,conf,ext,lib,logs,plugins} \
          "${MOCK_JAVA_HOME}/bin"
 cp "$MODULE_OPTIONS" "$SERVER_SCRIPT" "$INIT_STORE_SCRIPT" "$UTIL_SCRIPT" \
-   "$PRELOAD_SCRIPT" "${DIST_ROOT}/bin/"
+   "$CONSOLE_SCRIPT" "$DUMP_STORE_SCRIPT" "$PRELOAD_SCRIPT" "${DIST_ROOT}/bin/"
 cp -R "${CONF_SOURCE}/." "${DIST_ROOT}/conf/"
 
-# Model a full pre-Phase-2 conf/ directory: it has no module argfile. Both
+# Model a full pre-Phase-2 conf/ directory: it has no module argfile. All
 # launchers must get the immutable runtime copy from bin/ instead.
 if [[ -e "${DIST_ROOT}/conf/jvm-module.options" ]]; then
     fail "legacy conf unexpectedly contains jvm-module.options"
@@ -203,7 +207,8 @@ done
 printf '%s\n' "$@" > "${CAPTURE_FILE:?}"
 MOCK
 chmod +x "${MOCK_JAVA_HOME}/bin/java" "${DIST_ROOT}/bin/hugegraph-server.sh" \
-         "${DIST_ROOT}/bin/init-store.sh"
+         "${DIST_ROOT}/bin/init-store.sh" "${DIST_ROOT}/bin/gremlin-console.sh" \
+         "${DIST_ROOT}/bin/dump-store.sh"
 
 SERVER_CAPTURE="${TEMP_DIR}/server.args"
 CAPTURE_FILE="$SERVER_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
@@ -217,5 +222,41 @@ INIT_STORE_CAPTURE="${TEMP_DIR}/init-store.args"
 CAPTURE_FILE="$INIT_STORE_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     "${DIST_ROOT}/bin/init-store.sh" >/dev/null
 assert_argument "@${DIST_ROOT}/bin/jvm-module.options" "$INIT_STORE_CAPTURE"
+
+for launcher in gremlin-console dump-store; do
+    for options in "" "-Doperator.marker=preserved"; do
+        capture="${TEMP_DIR}/${launcher}-${options:+custom}.args"
+        CAPTURE_FILE="$capture" JAVA_HOME="$MOCK_JAVA_HOME" \
+            JAVA_OPTIONS="$options" "${DIST_ROOT}/bin/${launcher}.sh" >/dev/null
+        assert_argument "@${DIST_ROOT}/bin/jvm-module.options" "$capture"
+        if [[ "$launcher" == gremlin-console && -n "$options" ]]; then
+            assert_argument "$options" "$capture"
+        fi
+    done
+done
+
+# Required options survive the Server launcher's -j argument as well.
+SERVER_J_CAPTURE="${TEMP_DIR}/server-j.args"
+CAPTURE_FILE="$SERVER_J_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_OPTIONS="" STDOUT_MODE=true "${DIST_ROOT}/bin/hugegraph-server.sh" \
+    "${DIST_ROOT}/conf/gremlin-server.yaml" \
+    "${DIST_ROOT}/conf/rest-server.properties" false \
+    "-Xms512m -Xmx512m -Doperator.marker=preserved" >/dev/null
+assert_argument "@${DIST_ROOT}/bin/jvm-module.options" "$SERVER_J_CAPTURE"
+assert_argument "-Doperator.marker=preserved" "$SERVER_J_CAPTURE"
+
+mv "${DIST_ROOT}/bin/jvm-module.options" "${TEMP_DIR}/jvm-module.options"
+for launcher in gremlin-console dump-store; do
+    capture="${TEMP_DIR}/${launcher}-missing.args"
+    output="${TEMP_DIR}/${launcher}-missing.log"
+    if CAPTURE_FILE="$capture" JAVA_HOME="$MOCK_JAVA_HOME" \
+       JAVA_OPTIONS="-Doperator.marker=preserved" \
+       "${DIST_ROOT}/bin/${launcher}.sh" >"$output" 2>&1; then
+        fail "$launcher accepted a missing JVM module options file"
+    fi
+    [[ ! -e "$capture" ]] || fail "$launcher invoked Java without required options"
+    grep -q "Missing or unreadable JVM module options file" "$output" || \
+        fail "$launcher did not explain the missing module options file"
+done
 
 echo "PASS: Java 17 upgrade contracts"

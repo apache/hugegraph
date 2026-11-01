@@ -20,6 +20,7 @@ package org.apache.hugegraph.pd.store;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.pd.common.PDException;
@@ -176,7 +177,48 @@ public class RaftKVStore implements HgKVStore, RaftTaskHandler {
 
     @Override
     public void close() {
+        // A store reopened after a failed start registers a new handler; this one must not
+        // keep receiving entries for a closed database
+        this.engine.removeTaskHandler(this);
         store.close();
+    }
+
+    /**
+     * Reads above are served from the local state, which on a new leader can trail the
+     * entries its predecessor committed; this waits for them to be applied
+     */
+    @Override
+    public void waitReadIndex() throws PDException {
+        this.engine.waitReadIndex();
+    }
+
+    @Override
+    public long waitReadIndexInTerm() throws PDException {
+        return this.engine.waitReadIndexInTerm();
+    }
+
+    @Override
+    public void put(byte[] key, byte[] value, long term) throws PDException {
+        applyInTerm(KVOperation.createPut(key, value), term);
+    }
+
+    @Override
+    public long remove(byte[] key, long term) throws PDException {
+        applyInTerm(KVOperation.createRemove(key), term);
+        return 0;
+    }
+
+    private void applyInTerm(KVOperation op, long term) throws PDException {
+        try {
+            applyOperation(op, term).get();
+        } catch (ExecutionException e) {
+            // Keeps NOT_LEADER, which is how jraft's EPERM for another term arrives here
+            throw e.getCause() instanceof PDException failure ? failure :
+                  new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e);
+        }
     }
 
     /**
@@ -221,9 +263,16 @@ public class RaftKVStore implements HgKVStore, RaftTaskHandler {
     }
 
     private <T> CompletableFuture<T> applyOperation(final KVOperation op) throws PDException {
+        // -1 is jraft's default: the entry is accepted in any term
+        return applyOperation(op, -1L);
+    }
+
+    private <T> CompletableFuture<T> applyOperation(final KVOperation op, long expectedTerm)
+            throws PDException {
         CompletableFuture<T> future = new CompletableFuture<>();
         try {
             final Task task = new Task();
+            task.setExpectedTerm(expectedTerm);
             task.setData(ByteBuffer.wrap(op.toByteArray()));
             task.setDone(new RaftStateMachine.RaftClosureAdapter(op, new KVStoreClosure() {
                 Object data;

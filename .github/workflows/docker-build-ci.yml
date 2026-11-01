@@ -19,19 +19,37 @@ name: "Docker Build CI"
 
 on:
   workflow_call:
-  workflow_dispatch:
-
+    inputs:
+      smoke-only:
+        type: boolean
+        default: false
 permissions:
   contents: read
 
 jobs:
-  docker-bake-check:
-    runs-on: ubuntu-latest
+  docker-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SOURCE_REVISION: ${{ github.sha }}
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v7
 
+      - name: Install project JDK for deployment contracts
+        id: java
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
+
       - name: Verify shared Maven stages stay identical
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -66,6 +84,7 @@ jobs:
           done
 
       - name: Validate shared image build graph
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
         run: |
           set -euo pipefail
 
@@ -88,45 +107,60 @@ jobs:
               all(. == "docker"))
           ' /tmp/hugegraph-bake.json
 
-  deployment-contracts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      - name: Verify deployment shell contracts
+      - name: Verify deployment shell and Compose contracts
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java.outcome == 'success' }}
+        timeout-minutes: 25
         run: |
-          bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
-          bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh
-          bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-port.sh \
-            hugegraph-server/hugegraph-dist/src/assembly/static \
-            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
-      - name: Verify Compose contracts
-        run: bash docker/test-compose.sh render
+          set -euo pipefail
+          status=0
+          if mvn -B -ntp -pl hugegraph-commons/hugegraph-common -am clean compile dependency:build-classpath \
+              -Dmdep.outputFile=target/config-readback-classpath.txt -Dmaven.javadoc.skip=true -DskipTests; then
+            HG_CONFIG_TEST_CLASSPATH="$PWD/hugegraph-commons/hugegraph-common/target/classes"
+            HG_CONFIG_TEST_CLASSPATH+=":$(cat hugegraph-commons/hugegraph-common/target/config-readback-classpath.txt)"
+            export HG_CONFIG_TEST_CLASSPATH
+            if ! bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh; then
+              status=1
+            fi
+          else
+            status=1
+          fi
+          if ! bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh; then
+            status=1
+          fi
+          if ! bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-port.sh \
+              hugegraph-server/hugegraph-dist/src/assembly/static \
+              hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh; then
+            status=1
+          fi
+          if ! bash docker/test-compose.sh render; then
+            status=1
+          fi
+          exit "$status"
 
-  docker-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
-      SOURCE_REVISION: ${{ github.sha }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Build and load all four PR images with a shared Maven stage
+      - name: Build current images and verify authentication, readiness and graph read/write
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 45
+        env:
+          SMOKE_ONLY: ${{ inputs.smoke-only }}
         run: |
+          set -euo pipefail
           docker buildx create --driver docker-container --use
           docker buildx bake --file docker/bake.hcl --progress=plain \
             --set '*.platform=linux/amd64' \
             pd store server-standalone server-hstore
 
-      - name: Verify image runtime contracts
-        run: |
-          bash .github/scripts/check-docker-images.sh
-          bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
-
-      - name: Verify deployment checker contracts
-        run: python3 -m unittest discover -s .github/scripts -p 'test_docker_deployment.py'
-
-      - name: Verify exact PR images, authentication and graph read/write
-        run: python3 .github/scripts/docker-deployment.py "$IMAGE_TAG"
+          # Each runtime check uses successfully built images. Preserve a failed
+          # check while allowing the independent deployment check to collect results.
+          status=0
+          if ! bash .github/scripts/check-docker-images.sh; then
+            status=1
+          fi
+          if [[ "$SMOKE_ONLY" != true ]]; then
+            if ! python3 -m unittest discover -s .github/scripts -p 'test_docker_deployment.py'; then
+              status=1
+            fi
+          fi
+          if ! python3 .github/scripts/docker-deployment.py "$IMAGE_TAG"; then
+            status=1
+          fi
+          exit "$status"

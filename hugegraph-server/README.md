@@ -16,6 +16,11 @@ HugeGraph Server consists of two layers of functionality: the graph engine layer
 
 See [launcher GC options](../docs/server-runtime.md#launcher-gc-options) for explicit collector selection
 and caller JVM tuning.
+See [cache RPC graph lifecycle](../docs/server-runtime.md#cache-rpc-graph-lifecycle) for dynamic
+graph registration, resource cleanup and notification delivery limits.
+See [local loading ownership](../docs/server-runtime.md#local-loading-ownership) for
+concurrent import mode protection and its compatibility limits.
+See [pairwise same neighbors](../docs/same-neighbors-batch.md) for the batch traverser request and response.
 
 ## Backend Evolution and Compatibility
 

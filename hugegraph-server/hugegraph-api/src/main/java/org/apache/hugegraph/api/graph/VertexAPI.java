@@ -85,7 +85,8 @@ public class VertexAPI extends BatchAPI {
     @Status(Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_write"})
     public String create(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -108,7 +109,8 @@ public class VertexAPI extends BatchAPI {
     @Status(Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_write"})
     public String create(@Context HugeConfig config,
                          @Context GraphManager manager,
                          @Parameter(description = "The graph space name")
@@ -143,7 +145,8 @@ public class VertexAPI extends BatchAPI {
     @Path("batch")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_write"})
     public String update(@Context HugeConfig config,
                          @Context GraphManager manager,
                          @Parameter(description = "The graph space name")
@@ -195,7 +198,8 @@ public class VertexAPI extends BatchAPI {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_write"})
     public String update(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -280,9 +284,9 @@ public class VertexAPI extends BatchAPI {
         // Convert relational operator like P.gt()/P.lt()
         for (Map.Entry<String, Object> prop : props.entrySet()) {
             Object value = prop.getValue();
-            if (!keepStartP && value instanceof String &&
-                ((String) value).startsWith(TraversalUtil.P_CALL)) {
-                prop.setValue(TraversalUtil.parsePredicate((String) value));
+            if (!keepStartP && value instanceof String text &&
+                text.startsWith(TraversalUtil.P_CALL)) {
+                prop.setValue(TraversalUtil.parsePredicate(text));
             }
         }
 
@@ -309,7 +313,8 @@ public class VertexAPI extends BatchAPI {
     @Timed
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_read"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_read"})
     public String get(@Context GraphManager manager,
                       @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
@@ -335,7 +340,8 @@ public class VertexAPI extends BatchAPI {
     @Timed
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
-    @RolesAllowed({"space_member", "$owner=$graph $action=vertex_delete"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=vertex_delete"})
     public void delete(@Context GraphManager manager,
                        @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,

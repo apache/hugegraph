@@ -2,84 +2,30 @@ name: "HugeGraph-PD & Store & Hstore CI"
 
 on:
   workflow_call:
-  workflow_dispatch:
-
+    inputs:
+      run-struct:
+        type: boolean
+        default: true
+      run-pd:
+        type: boolean
+        default: true
+      run-store:
+        type: boolean
+        default: true
+      run-hstore:
+        type: boolean
+        default: true
 permissions:
   contents: read
 
 jobs:
-  store-stop-shell-test:
-    permissions:
-      contents: read
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Verify Store stop failure propagation and PID retention
-        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-stop-hugegraph-store.sh
-
-  rocksdb-compatibility:
-    permissions:
-      contents: read
-    runs-on: ubuntu-24.04
-    env:
-      BEFORE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
-      AFTER_SHA: ${{ github.event.pull_request.head.sha || github.event.after || github.sha }}
-    steps:
-      - name: Require exact comparison revisions
-        run: |
-          for revision in "$BEFORE_SHA" "$AFTER_SHA"; do
-            if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "$revision" =~ ^0+$ ]]; then
-              echo "Error: cannot determine the before/after revision for RocksDB compatibility" >&2
-              exit 1
-            fi
-          done
-
-      - name: Checkout before
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ env.BEFORE_SHA }}
-          path: before
-          persist-credentials: false
-
-      - name: Checkout after
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ env.AFTER_SHA }}
-          path: after
-          persist-credentials: false
-
-      - name: Install project JDK
-        uses: actions/setup-java@v6
-        with:
-          java-version-file: after/.github/workflows/.java-version
-          distribution: 'zulu'
-
-      - name: Test only changed RocksDB version pairs
-        run: |
-          bash after/hugegraph-server/hugegraph-test/src/test/rocksdb-compatibility/run.sh \
-            "$GITHUB_WORKSPACE/before" "$GITHUB_WORKSPACE/after" \
-            "$RUNNER_TEMP/rocksdb-compatibility"
-
-      - name: Preserve comparison and synthetic-data failure evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: rocksdb-compatibility-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/rocksdb-compatibility/run.log
-            ${{ runner.temp }}/rocksdb-compatibility/models/
-            ${{ runner.temp }}/rocksdb-compatibility/pairs.tsv
-            ${{ runner.temp }}/rocksdb-compatibility/cases/
-
+  # Store already builds Struct; only allocate a separate runner without Store.
   struct:
-    runs-on: ubuntu-latest
+    if: inputs.run-struct && !inputs.run-store
+    runs-on: ubuntu-24.04
     env:
       USE_STAGE: 'false'
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -93,6 +39,12 @@ jobs:
           distribution: 'zulu'
           cache: maven
           cache-jdk: false
+
+      - name: Verify Store stop failure propagation and PID retention
+        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-stop-hugegraph-store.sh
+
+      - name: Run Java runtime log checker tests
+        run: bash "$TRAVIS_DIR/test-check-java-runtime-logs.sh"
 
       - name: Run JaCoCo report validator tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-jacoco-report.sh
@@ -126,12 +78,16 @@ jobs:
       - name: Run hugegraph-struct test
         if: ${{ hashFiles('hugegraph-struct/pom.xml') != '' }}
         run: |
-          mvn -U -ntp -pl hugegraph-struct test
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          mvn -U -ntp -pl hugegraph-struct test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
   pd:
-    timeout-minutes: 30
-    needs: struct
-    runs-on: ubuntu-latest
+    if: inputs.run-pd
+    # Reserve time for the shared RocksDB compatibility check after PD tests.
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
     env:
       # TODO: avoid duplicated env setup in pd & store
       USE_STAGE: 'false' # Whether to include the stage repository.
@@ -173,21 +129,30 @@ jobs:
       # clean package so their JaCoCo data survives until the final report.
       - name: Run common test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-pd/hg-pd-test -am \
-            -P pd-common-test -Djacoco.sessionId=pd-common-test
+            -P pd-common-test -Djacoco.sessionId=pd-common-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Run core test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-pd/hg-pd-test -am \
-            -P pd-core-test -Djacoco.sessionId=pd-core-test
+            -P pd-core-test -Djacoco.sessionId=pd-core-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Verify Surefire single-class routing
         run: |
           SUREFIRE_DIR=hugegraph-pd/hg-pd-test/target/surefire-reports
           REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.pd.core.PDConfigTest.xml"
           rm -f "$REPORT"
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-pd/hg-pd-test -am \
-            -P pd-core-test -Dtest=PDConfigTest -ntp
+            -P pd-core-test -Dtest=PDConfigTest -ntp 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
           test -s "$REPORT" || {
             echo "::error::PD single-class test produced no report"
             exit 1
@@ -248,16 +213,24 @@ jobs:
       - name: Prepare env and service
         run: |
           $TRAVIS_DIR/start-pd.sh
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
 
       - name: Run client test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-pd/hg-pd-test -am \
-            -P pd-client-test -Djacoco.sessionId=pd-client-test
+            -P pd-client-test -Djacoco.sessionId=pd-client-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs"
 
       - name: Run rest test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-pd/hg-pd-test -am \
-            -P pd-rest-test -Djacoco.sessionId=pd-rest-test
+            -P pd-rest-test -Djacoco.sessionId=pd-rest-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs"
 
       - name: Generate aggregate coverage report
         run: |
@@ -307,13 +280,20 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
+          flags: pd
           disable_search: true
           fail_ci_if_error: false
 
+      # The first selected distributed job owns the shared compatibility check.
+      - name: Check RocksDB version compatibility
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/rocksdb-compatibility
+
   store:
-    timeout-minutes: 45
-    needs: struct
-    runs-on: ubuntu-latest
+    if: inputs.run-store
+    # Preserve test time while also hosting Struct and compatibility checks.
+    timeout-minutes: 70
+    runs-on: ubuntu-24.04
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
       # TODO: remove outdated env
@@ -346,13 +326,22 @@ jobs:
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
 
+      - name: Verify Store Arthas local CLI attachment
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION
+          bash "$TRAVIS_DIR/test-arthas-cli.sh" "$STORE_DIR"
+
       - name: Verify Surefire single-class routing
         run: |
           SUREFIRE_DIR=hugegraph-store/hg-store-test/target/surefire-reports
           REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.store.raftcore.ZeroByteStringHelperTest.xml"
           rm -f "$REPORT"
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-raftcore-test -Dtest=ZeroByteStringHelperTest -ntp
+            -P store-raftcore-test -Dtest=ZeroByteStringHelperTest -ntp 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
           test -s "$REPORT" || {
             echo "::error::Store single-class test produced no report"
             exit 1
@@ -374,6 +363,10 @@ jobs:
       - name: Check source formatting
         run: |
           mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp
+
+      - name: Run Store docker entrypoint rocksdb memory tests
+        run: |
+          $TRAVIS_DIR/test-store-docker-entrypoint.sh
 
       - name: Check startup test prerequisites (Store)
         id: store-preflight
@@ -411,43 +404,68 @@ jobs:
         run: |
           $TRAVIS_DIR/start-pd.sh
           $TRAVIS_DIR/start-store.sh
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
+          echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
-      - name: Run historical Store ingress tests
+      - name: Run Store ingress, Arthas security and metrics tests
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-node -am \
-            -Dtest=StoredRowIngressTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtest=StoredRowIngressTest,ArthasSecurityTest,HgStoreMetricsControllerTest \
+            -Dsurefire.failIfNoSpecifiedTests=false \
             -Djacoco.sessionId=store-node-test \
-            -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec"
+            -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec" 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run common test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-common-test -Djacoco.sessionId=store-common-test
+            -P store-common-test -Djacoco.sessionId=store-common-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run client test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-client-test -Djacoco.sessionId=store-client-test
+            -P store-client-test -Djacoco.sessionId=store-client-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run rocksdb test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test
+            -P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run raft-core test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-raftcore-test -Djacoco.sessionId=store-raftcore-test
+            -P store-raftcore-test -Djacoco.sessionId=store-raftcore-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run core test
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-core-test -Djacoco.sessionId=store-core-test
+            -P store-core-test -Djacoco.sessionId=store-core-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run server lifecycle and shutdown tests
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-server-test -Djacoco.sessionId=store-server-test
+            -P store-server-test -Djacoco.sessionId=store-server-test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Generate aggregate coverage report
         run: |
@@ -455,6 +473,7 @@ jobs:
             -DskipTests -Deditorconfig.skip=true -ntp
 
       - name: Validate aggregate coverage report
+        id: store-coverage
         run: |
           $TRAVIS_DIR/check-jacoco-report.sh \
             --require-test-report \
@@ -471,6 +490,8 @@ jobs:
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml" \
             --require-test-report \
             "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml" \
+            --require-test-report \
+            "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.controller.ArthasSecurityTest.xml" \
             --require-covered-group hg-store-common \
             --require-covered-group hg-store-client \
             --require-covered-group hg-store-rocksdb \
@@ -504,17 +525,54 @@ jobs:
             tail -n 120 "$report" || true
           done
 
+      - name: Verify Store stop failure propagation and PID retention
+        if: ${{ !cancelled() }}
+        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-stop-hugegraph-store.sh
+
+      - name: Run Java runtime log checker tests
+        if: ${{ !cancelled() }}
+        run: bash "$TRAVIS_DIR/test-check-java-runtime-logs.sh"
+
+      - name: Run JaCoCo report validator tests
+        if: ${{ !cancelled() }}
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-jacoco-report.sh
+
+      - name: Run Codecov upload configuration tests
+        if: ${{ !cancelled() }}
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-codecov-upload-config.sh
+
+      - name: Check TinkerPop branch and report gates
+        if: ${{ !cancelled() }}
+        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-tinkerpop-reports.sh
+
+      # Reuse the reactor build; -am also lets Struct run after a Store build failure.
+      - name: Run hugegraph-struct test
+        if: ${{ !cancelled() && hashFiles('hugegraph-struct/pom.xml') != '' }}
+        run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          mvn -U -ntp -pl hugegraph-struct -am test 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
+
+      # The first selected distributed job owns the shared compatibility check.
+      - name: Check RocksDB version compatibility
+        if: ${{ !cancelled() && !inputs.run-pd }}
+        uses: ./.github/actions/rocksdb-compatibility
+
+      # Upload last: Codecov downloads unlicensed checksum files into the workspace.
       - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.store-coverage.outcome == 'success' }}
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
+          flags: store
           disable_search: true
           fail_ci_if_error: false
 
   hstore:
-    needs: struct
-    runs-on: ubuntu-latest
+    if: inputs.run-hstore
+    runs-on: ubuntu-24.04
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
@@ -595,10 +653,16 @@ jobs:
           echo "[ci] open-file limit for HStore:" \
                "soft=$(ulimit -Sn), hard=$(ulimit -Hn)"
           $TRAVIS_DIR/install-backend.sh $BACKEND
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
+          echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
       - name: Run unit test
         run: |
-          $TRAVIS_DIR/run-unit-test.sh $BACKEND
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-unit-test.sh $BACKEND 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run core test
         # Bound stuck HStore scans so the diagnostic steps below can run
@@ -607,16 +671,25 @@ jobs:
         env:
           HUGEGRAPH_TEST_TASK_LOG_LEVEL: WARN
         run: |
-          $TRAVIS_DIR/run-core-test.sh $BACKEND
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-core-test.sh $BACKEND 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run api test
         run: |
-          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run raft test
         if: ${{ env.BACKEND == 'rocksdb' }}
         run: |
-          $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       # Include HStore in the upgrade compatibility gate. The dedicated HStore
       # service setup above makes its structure/process suites exercise the
@@ -629,9 +702,11 @@ jobs:
         env:
           HUGEGRAPH_TEST_TASK_LOG_LEVEL: WARN
         run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           # Emit lightweight samples during execution: a lost runner cannot
           # upload the failure-only diagnostics below.
-          python3 - "$TRAVIS_DIR/run-tinkerpop-test.sh" "$BACKEND" structure <<'PYTHON'
+          python3 - "$TRAVIS_DIR/run-tinkerpop-test.sh" "$BACKEND" structure 2>&1 <<'PYTHON' | tee "$RUNTIME_LOG"
           import datetime
           import os
           import pathlib
@@ -674,18 +749,25 @@ jobs:
               result = test.returncode
               sys.exit(result if result >= 0 else 128 - result)
           PYTHON
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run TinkerPop process standard test
         if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
         timeout-minutes: 120
         run: |
-          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-standard
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-standard 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Run TinkerPop process feature test
         if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
         timeout-minutes: 120
         run: |
-          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-feature
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-feature 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
 
       - name: Collect HStore diagnostics on failure or timeout
         if: ${{ failure() || cancelled() }}
@@ -795,8 +877,9 @@ jobs:
             log_dir="${service#*:}"
             if [[ -d "$log_dir" ]]; then
               mkdir -p "$DIAGNOSTICS_DIR/services/$service_name"
-              cp -a "$log_dir/." \
-                "$DIAGNOSTICS_DIR/services/$service_name/" || true
+              # Skip heap dumps (logs/heapdump_*/): they can be gigabytes.
+              tar -C "$log_dir" --exclude='*.hprof*' -cf - . | \
+                tar -C "$DIAGNOSTICS_DIR/services/$service_name" -xf - || true
             fi
           done
 
@@ -831,5 +914,11 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_DIR }}/*.xml
+          flags: hstore
           disable_search: true
           fail_ci_if_error: false
+
+      # The first selected distributed job owns the shared compatibility check.
+      - name: Check RocksDB version compatibility
+        if: ${{ !cancelled() && !inputs.run-pd && !inputs.run-store }}
+        uses: ./.github/actions/rocksdb-compatibility

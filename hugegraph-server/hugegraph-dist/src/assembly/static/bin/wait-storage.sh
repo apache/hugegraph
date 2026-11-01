@@ -29,7 +29,12 @@ function abs_path() {
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
 GRAPH_CONF="$TOP/conf/graphs/hugegraph.properties"
-WAIT_STORAGE_TIMEOUT_S=300
+WAIT_STORAGE_TIMEOUT_S=${WAIT_STORAGE_TIMEOUT_S-300}
+if [[ ! "${WAIT_STORAGE_TIMEOUT_S}" =~ ^[1-9][0-9]{0,4}$ ]] || \
+   (( WAIT_STORAGE_TIMEOUT_S > 86400 )); then
+    echo "[wait-storage] ERROR: WAIT_STORAGE_TIMEOUT_S must be an integer from 1 to 86400 seconds" >&2
+    exit 2
+fi
 WAIT_STORAGE_PD_CONNECT_TIMEOUT_S=2
 WAIT_STORAGE_PD_MAX_TIMEOUT_S=3
 

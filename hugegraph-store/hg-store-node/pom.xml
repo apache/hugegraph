@@ -122,17 +122,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.taobao.arthas</groupId>
-            <artifactId>arthas-agent-attach</artifactId>
-            <version>3.6.4</version>
-        </dependency>
-        <dependency>
-            <groupId>com.taobao.arthas</groupId>
-            <artifactId>arthas-packaging</artifactId>
-            <version>3.6.4</version>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
             <version>2.17.2</version>

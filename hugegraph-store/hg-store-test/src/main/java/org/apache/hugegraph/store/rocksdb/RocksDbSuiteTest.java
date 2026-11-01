@@ -24,7 +24,10 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
-        RocksDBFactoryTest.class
+        RocksDBFactoryTest.class,
+        CRC64Test.class,
+        ZipUtilsPathSafetyTest.class,
+        SessionOperatorTest.class
 })
 
 @Slf4j

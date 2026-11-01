@@ -103,7 +103,9 @@ function forward_signal_and_wait() {
     local signal="$1"
     local exit_code="$2"
 
-    trap - SIGHUP SIGINT SIGQUIT SIGTERM
+    # A process-group signal and the entrypoint's forwarding can arrive twice.
+    # Keep the wrapper alive until it has reaped its child in either case.
+    trap '' SIGHUP SIGINT SIGQUIT SIGTERM
     if kill -0 "$PID" 2>/dev/null; then
         kill "-$signal" "$PID" 2>/dev/null || true
         # The foreground wait is interrupted before the trap runs, so retry
@@ -128,7 +130,7 @@ if [[ $DAEMON == "true" ]]; then
 
     wait_for_startup ${PID} 'HugeGraphServer' "$REST_SERVER_URL/graphs" "${SERVER_STARTUP_TIMEOUT_S}" || {
         if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-            echo "See 'docker logs' for HugeGraphServer log output." >&2
+            echo "See the container logs ('docker logs' or 'kubectl logs') for HugeGraphServer log output." >&2
         else
             echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
         fi

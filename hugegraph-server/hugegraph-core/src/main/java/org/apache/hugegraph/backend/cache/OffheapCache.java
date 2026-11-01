@@ -100,17 +100,23 @@ public class OffheapCache extends AbstractCache<Id, Object> {
 
     @Override
     public boolean containsKey(Id id) {
-        return this.cache.containsKey(id);
+        return cacheableKey(id) && this.cache.containsKey(id);
     }
 
     @Override
     protected Object access(Id id) {
+        if (!cacheableKey(id)) {
+            return null;
+        }
         Value value = this.cache.get(id);
         return value == null ? null : value.value();
     }
 
     @Override
     protected boolean write(Id id, Object value, long timeOffset) {
+        if (!cacheableKey(id)) {
+            return false;
+        }
         Value serializedValue = new Value(value);
         int serializedSize;
         try {
@@ -144,7 +150,28 @@ public class OffheapCache extends AbstractCache<Id, Object> {
 
     @Override
     protected void remove(Id id) {
-        this.cache.remove(id);
+        if (cacheableKey(id)) {
+            this.cache.remove(id);
+        }
+    }
+
+    private static boolean cacheableKey(Id id) {
+        // Query text is a cache key, not a persistent graph ID. A large
+        // request must still reach the backend when its optional cache key
+        // exceeds the binary ID codec's byte limit.
+        if (!(id instanceof CachedBackendStore.QueryId)) {
+            return true;
+        }
+        int length = id.asString().length();
+        // UTF-8 needs at most three bytes per UTF-16 code unit;
+        // a surrogate pair uses four bytes for two units.
+        if (length <= BytesBuffer.ID_LEN_MAX / 3) {
+            return true;
+        }
+        if (length > BytesBuffer.ID_LEN_MAX) {
+            return false;
+        }
+        return id.asBytes().length <= BytesBuffer.ID_LEN_MAX;
     }
 
     @Override
@@ -265,17 +292,12 @@ public class OffheapCache extends AbstractCache<Id, Object> {
 
         private Object deserialize(BytesBuffer buffer) {
             ValueType type = ValueType.valueOf(buffer.read());
-            switch (type) {
-                case LIST:
-                    return deserializeList(buffer);
-                case VERTEX:
-                case EDGE:
-                    return deserializeElement(type, buffer);
-                case UNKNOWN:
-                    throw unsupported(type);
-                default:
-                    return buffer.readProperty(type.dataType());
-            }
+            return switch (type) {
+                case LIST -> deserializeList(buffer);
+                case VERTEX, EDGE -> deserializeElement(type, buffer);
+                case UNKNOWN -> throw unsupported(type);
+                default -> buffer.readProperty(type.dataType());
+            };
         }
 
         private void serializeList(BytesBuffer buffer, Collection<Object> list) {

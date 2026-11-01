@@ -37,8 +37,8 @@ public class StatusFilter implements ContainerResponseFilter {
             throws IOException {
         if (responseContext.getStatus() == 200) {
             for (Annotation i : responseContext.getEntityAnnotations()) {
-                if (i instanceof Status) {
-                    responseContext.setStatus(((Status) i).value());
+                if (i instanceof Status status) {
+                    responseContext.setStatus(status.value());
                     break;
                 }
             }

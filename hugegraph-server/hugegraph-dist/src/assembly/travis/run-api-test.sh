@@ -64,6 +64,25 @@ CONF=$SERVER_DIR/conf/graphs/hugegraph.properties
 REST_SERVER_CONF=$SERVER_DIR/conf/rest-server.properties
 GREMLIN_SERVER_CONF=$SERVER_DIR/conf/gremlin-server.yaml
 JACOCO_PORT=36320
+SERVER_STARTED=false
+
+function stop_server() {
+    "$TRAVIS_DIR/stop-server.sh" "$SERVER_DIR" || return $?
+    SERVER_STARTED=false
+}
+
+function cleanup() {
+    local status=$?
+    trap - EXIT
+    if [ "$SERVER_STARTED" == "true" ]; then
+        if ! stop_server; then
+            status=1
+        fi
+    fi
+    exit "$status"
+}
+
+trap cleanup EXIT
 
 mvn package -pl hugegraph-server/hugegraph-dist -am -Dmaven.test.skip=true -ntp
 
@@ -71,6 +90,24 @@ if [[ ! -e "$SERVER_DIR/lib/ikanalyzer-2012_u6.jar" ]]; then
   download_to_dir "$SERVER_DIR/lib/" \
                   "https://raw.githubusercontent.com/apache/hugegraph-doc/ik_binary/dist/server/ikanalyzer-2012_u6.jar"
 fi
+
+# Exercise the anonymous HTTP-to-Gremlin path before enabling authentication.
+if grep -Eq '^[[:space:]]*auth\.authenticator=.' "$REST_SERVER_CONF" || \
+   grep -Eq '^[[:space:]]*authentication[[:space:]]*:' "$GREMLIN_SERVER_CONF" || \
+   grep -q '^gremlin.graph=.*HugeFactoryAuthProxy' "$CONF"; then
+    echo "Anonymous API tests require the packaged unauthenticated configuration" >&2
+    exit 1
+fi
+SERVER_STARTED=true
+"$TRAVIS_DIR/start-server.sh" "$SERVER_DIR" "$BACKEND" "$JACOCO_PORT" || \
+    (cat "$SERVER_DIR/logs/hugegraph-server.log" && exit 1)
+mvn test -pl hugegraph-server/hugegraph-test -am -P api-test,"$BACKEND" \
+    -Dtest=CypherAnonymousApiTest || \
+    (cat "$SERVER_DIR/logs/hugegraph-server.log" && exit 1)
+# Preserve this process's probes before the authenticated Server replaces it.
+mvn -f hugegraph-server/hugegraph-test/pom.xml jacoco:dump@pull-test-data \
+    -Dapp.host=localhost -Dapp.port="$JACOCO_PORT" -Dskip.dump=false -Djacoco.append=true
+stop_server
 
 # config rest-server
 sed_in_place '/^#*auth\.authenticator=/d' "$REST_SERVER_CONF"
@@ -90,6 +127,7 @@ authentication: {
 }" >> $GREMLIN_SERVER_CONF
 
 # start server
+SERVER_STARTED=true
 $TRAVIS_DIR/start-server.sh $SERVER_DIR $BACKEND $JACOCO_PORT || (cat $SERVER_DIR/logs/hugegraph-server.log && exit 1)
 
 # run api-test
@@ -103,4 +141,7 @@ fi
 $TRAVIS_DIR/build-report.sh $BACKEND $JACOCO_PORT $REPORT_FILE
 
 # stop server
-$TRAVIS_DIR/stop-server.sh $SERVER_DIR
+stop_server
+
+# Inspect service output after shutdown so background failures cannot pass the suite.
+bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$SERVER_DIR/logs"

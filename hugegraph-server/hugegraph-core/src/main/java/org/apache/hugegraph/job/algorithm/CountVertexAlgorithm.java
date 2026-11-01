@@ -17,14 +17,9 @@
 
 package org.apache.hugegraph.job.algorithm;
 
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 
-import org.apache.commons.lang3.mutable.MutableLong;
 import org.apache.hugegraph.job.UserJob;
-import org.apache.hugegraph.util.JsonUtil;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 public class CountVertexAlgorithm extends AbstractAlgorithm {
 
@@ -52,26 +47,7 @@ public class CountVertexAlgorithm extends AbstractAlgorithm {
         }
 
         public Object count() {
-            Iterator<Vertex> vertices = this.vertices();
-
-            Map<String, MutableLong> counts = new HashMap<>();
-            long total = 0L;
-
-            while (vertices.hasNext()) {
-                Vertex vertex = vertices.next();
-                String label = vertex.label();
-                MutableLong count = counts.get(label);
-                if (count != null) {
-                    count.increment();
-                } else {
-                    counts.put(label, new MutableLong(1L));
-                }
-                total++;
-                this.updateProgress(total);
-            }
-            counts.put("*", new MutableLong(total));
-
-            return JsonUtil.asJson(counts);
+            return this.countElements(this.vertices());
         }
     }
 }

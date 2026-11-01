@@ -1,0 +1,193 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hugegraph-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-pd-0
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: pd-data-hugegraph-pd-0
+  local:
+    path: /var/lib/hugegraph/pd-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-1]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-pd-1
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: pd-data-hugegraph-pd-1
+  local:
+    path: /var/lib/hugegraph/pd-1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-2]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-pd-2
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: pd-data-hugegraph-pd-2
+  local:
+    path: /var/lib/hugegraph/pd-2
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-3]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-store-0
+spec:
+  capacity:
+    storage: 50Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: store-data-hugegraph-store-0
+  local:
+    path: /var/lib/hugegraph/store-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-1]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-store-1
+spec:
+  capacity:
+    storage: 50Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: store-data-hugegraph-store-1
+  local:
+    path: /var/lib/hugegraph/store-1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-2]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-store-2
+spec:
+  capacity:
+    storage: 50Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: store-data-hugegraph-store-2
+  local:
+    path: /var/lib/hugegraph/store-2
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-3]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hugegraph-hubble
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: hugegraph-local
+  claimRef:
+    namespace: hugegraph
+    name: hugegraph-hubble-data
+  local:
+    path: /var/lib/hugegraph/hubble
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [worker-1]

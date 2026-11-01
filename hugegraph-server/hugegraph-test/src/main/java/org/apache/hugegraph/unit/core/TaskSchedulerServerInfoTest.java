@@ -45,6 +45,7 @@ import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.ExecutorUtil;
+import org.apache.tinkerpop.gremlin.structure.Transaction;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -89,6 +90,7 @@ public class TaskSchedulerServerInfoTest {
     public void testDistributedCancelTreatsMissingRetryTaskAsGone() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.tx()).thenReturn(Mockito.mock(Transaction.class));
 
         HugeGraphParams params = Mockito.mock(HugeGraphParams.class);
         Mockito.when(params.graph()).thenReturn(graph);

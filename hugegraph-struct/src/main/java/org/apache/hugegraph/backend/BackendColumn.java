@@ -54,10 +54,9 @@ public class BackendColumn implements Comparable<BackendColumn> {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof BackendColumn)) {
+        if (!(obj instanceof BackendColumn other)) {
             return false;
         }
-        BackendColumn other = (BackendColumn) obj;
         return Bytes.equals(this.name, other.name) &&
                Bytes.equals(this.value, other.value);
     }

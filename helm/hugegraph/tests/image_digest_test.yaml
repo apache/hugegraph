@@ -133,3 +133,125 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].image
           pattern: "^hugegraph/server@sha256:30f99c6b"
+
+  - it: applies the global private registry to pd
+    template: pd-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal:5000/mirror/
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.internal:5000/mirror/hugegraph/pd:latest
+
+  - it: lets a fully qualified pd repository override the global registry
+    template: pd-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      pd.image.repository: another.internal/team/pd
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: another.internal/team/pd:latest
+
+  - it: applies the global private registry to store
+    template: store-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal:5000/mirror/
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.internal:5000/mirror/hugegraph/store:latest
+
+  - it: lets a fully qualified store repository override the global registry
+    template: store-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      store.image.repository: another.internal/team/store
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: another.internal/team/store:latest
+
+  - it: applies the global private registry to server
+    template: server-deployment.yaml
+    set:
+      global.imageRegistry: registry.internal:5000/mirror/
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.internal:5000/mirror/hugegraph/server:latest
+
+  - it: lets a fully qualified server repository override the global registry
+    template: server-deployment.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      server.image.repository: another.internal/team/server
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: another.internal/team/server:latest
+
+  - it: applies the global private registry to hubble
+    template: hubble-deployment.yaml
+    set:
+      global.imageRegistry: registry.internal:5000/mirror/
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.internal:5000/mirror/hugegraph/hubble:latest
+
+  - it: lets a fully qualified hubble repository override the global registry
+    template: hubble-deployment.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      hubble.image.repository: another.internal/team/hubble
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: another.internal/team/hubble:latest
+
+  - it: reuses the Store image for PD readiness waiting by default
+    template: store-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: hugegraph/store:latest
+
+  - it: reuses the private Store image including its digest for readiness waiting
+    template: store-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      store.image.digest: sha256:458d77a18542e8a2f7980b075f2fda32026d582200a8983921354398467ff860
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.internal/mirror/hugegraph/store@sha256:458d77a18542e8a2f7980b075f2fda32026d582200a8983921354398467ff860
+
+  - it: reuses the private Server image for the test hook without a curl image
+    template: tests/test-connection.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+    asserts:
+      - equal:
+          path: spec.containers[0].image
+          value: registry.internal/mirror/hugegraph/server:latest
+
+  - it: honors an explicit qualified wait image over the component and global registry
+    template: store-statefulset.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      store.waitImage: tools.internal/readiness:v2
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: tools.internal/readiness:v2
+
+  - it: applies the global registry to an explicitly chosen unqualified test image
+    template: tests/test-connection.yaml
+    set:
+      global.imageRegistry: registry.internal/mirror
+      server.waitImage: tools/check:v2
+    asserts:
+      - equal:
+          path: spec.containers[0].image
+          value: registry.internal/mirror/tools/check:v2

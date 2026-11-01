@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -30,9 +31,11 @@ spec:
   updateStrategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if .Values.pd.storage.enabled }}
   {{- with .Values.pd.persistentVolumeClaimRetentionPolicy }}
   persistentVolumeClaimRetentionPolicy:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- end }}
   selector:
     matchLabels:
@@ -74,10 +77,8 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.pd.podSecurityContext }}
       securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- include "hugegraph.dataPodSecurityContext" .Values.pd.podSecurityContext | nindent 8 }}
       {{- if .Values.pd.affinity }}
       affinity:
         {{- toYaml .Values.pd.affinity | nindent 8 }}
@@ -159,14 +160,23 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if not .Values.pd.storage.enabled }}
+      volumes:
+        - name: pd-data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.pd.storage.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: pd-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- if .Values.pd.storage.storageClassName }}
+        {{- if eq .Values.pd.storage.storageClassName "-" }}
+        storageClassName: ""
+        {{- else if .Values.pd.storage.storageClassName }}
         storageClassName: {{ .Values.pd.storage.storageClassName | quote }}
         {{- end }}
         resources:
           requests:
             storage: {{ .Values.pd.storage.size }}
+  {{- end }}

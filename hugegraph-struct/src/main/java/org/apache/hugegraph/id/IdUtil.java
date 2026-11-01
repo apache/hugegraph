@@ -26,35 +26,22 @@ import org.apache.hugegraph.serializer.BytesBuffer;
 public final class IdUtil {
 
     public static String writeStoredString(Id id) {
-        String idString;
-        switch (id.type()) {
-            case LONG:
-            case STRING:
-            case UUID:
-                idString = IdGenerator.asStoredString(id);
-                break;
-            case EDGE:
-                idString = EdgeId.asStoredString(id);
-                break;
-            default:
-                throw new AssertionError("Invalid id type " + id.type());
-        }
+        String idString = switch (id.type()) {
+            case LONG, STRING, UUID -> IdGenerator.asStoredString(id);
+            case EDGE -> EdgeId.asStoredString(id);
+            default -> throw new AssertionError("Invalid id type " + id.type());
+        };
         return id.type().prefix() + idString;
     }
 
     public static Id readStoredString(String id) {
         IdType type = IdType.valueOfPrefix(id);
         String idContent = id.substring(1);
-        switch (type) {
-            case LONG:
-            case STRING:
-            case UUID:
-                return IdGenerator.ofStoredString(idContent, type);
-            case EDGE:
-                return EdgeId.parseStoredString(idContent);
-            default:
-                throw new IllegalArgumentException("Invalid id: " + id);
-        }
+        return switch (type) {
+            case LONG, STRING, UUID -> IdGenerator.ofStoredString(idContent, type);
+            case EDGE -> EdgeId.parseStoredString(idContent);
+            default -> throw new IllegalArgumentException("Invalid id: " + id);
+        };
     }
 
     public static Object writeBinString(Id id) {
@@ -88,17 +75,12 @@ public final class IdUtil {
     public static Id readString(String id) {
         IdType type = IdType.valueOfPrefix(id);
         String idContent = id.substring(1);
-        switch (type) {
-            case LONG:
-                return IdGenerator.of(Long.parseLong(idContent));
-            case STRING:
-            case UUID:
-                return IdGenerator.of(idContent, type == IdType.UUID);
-            case EDGE:
-                return EdgeId.parse(idContent);
-            default:
-                throw new IllegalArgumentException("Invalid id: " + id);
-        }
+        return switch (type) {
+            case LONG -> IdGenerator.of(Long.parseLong(idContent));
+            case STRING, UUID -> IdGenerator.of(idContent, type == IdType.UUID);
+            case EDGE -> EdgeId.parse(idContent);
+            default -> throw new IllegalArgumentException("Invalid id: " + id);
+        };
     }
 
     public static String writeLong(Id id) {

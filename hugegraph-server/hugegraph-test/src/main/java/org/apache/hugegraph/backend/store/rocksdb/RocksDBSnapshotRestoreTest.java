@@ -1035,7 +1035,7 @@ public class RocksDBSnapshotRestoreTest {
             @Override
             void forceDirectory(Path directory) throws IOException {
                 int call = syncs.incrementAndGet();
-                assertEquals(marker.getParent(), directory);
+                assertEquals(marker.getParent().toRealPath(), directory.toRealPath());
                 assertEquals(call < 3, Files.exists(marker));
                 // The retry source survives both sides of the marker removal boundary.
                 assertTrue(snapshot.isDirectory());

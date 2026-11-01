@@ -26,11 +26,13 @@ import java.util.UUID;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.cache.Cache;
+import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.cache.LevelCache;
 import org.apache.hugegraph.backend.cache.OffheapCache;
 import org.apache.hugegraph.backend.cache.RamCache;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -185,6 +187,126 @@ public abstract class CacheTest extends BaseUnitTest {
         }
 
         @Test
+        public void testQueryKeyGuardSkipsEncodingOutsideMiddleRange() {
+            int safeLength = BytesBuffer.ID_LEN_MAX / 3;
+            String[] shortKeys = {"normal", "图查询", "\uD83D\uDE00",
+                                  "a".repeat(safeLength),
+                                  "图".repeat(safeLength),
+                                  "\uD83D\uDE00".repeat(safeLength / 2)};
+            for (String text : shortKeys) {
+                assertQueryKeyGuard(text, true, 0);
+            }
+            assertQueryKeyGuard("a".repeat(BytesBuffer.ID_LEN_MAX + 1), false, 0);
+
+            Id normal = Mockito.mock(Id.class);
+            Assert.assertTrue(Whitebox.<Boolean>invokeStatic(
+                    OffheapCache.class, new Class<?>[]{Id.class}, "cacheableKey", normal));
+            Mockito.verifyNoInteractions(normal);
+        }
+
+        @Test
+        public void testQueryKeyGuardEncodesMiddleRangeOnce() {
+            int limit = BytesBuffer.ID_LEN_MAX;
+            assertQueryKeyGuard("a".repeat(limit / 3 + 1), true, 1);
+            assertQueryKeyGuard("a".repeat(limit), true, 1);
+
+            String chinese = "图".repeat(limit / 3) + "a".repeat(limit % 3);
+            assertQueryKeyGuard(chinese, true, 1);
+            assertQueryKeyGuard(chinese + "a", false, 1);
+
+            String pairs = "\uD83D\uDE00".repeat(limit / 4) + "a".repeat(limit % 4);
+            assertQueryKeyGuard(pairs, true, 1);
+            assertQueryKeyGuard(pairs + "a", false, 1);
+        }
+
+        private static void assertQueryKeyGuard(String text, boolean cacheable,
+                                                int encodings) {
+            CountingQueryId id = new CountingQueryId(text);
+            Assert.assertEquals(cacheable, Whitebox.<Boolean>invokeStatic(
+                    OffheapCache.class, new Class<?>[]{Id.class}, "cacheableKey", id));
+            Assert.assertEquals(encodings, id.encodings);
+        }
+
+        private static class CountingQueryId extends QueryId {
+
+            private int encodings;
+
+            private CountingQueryId(String query) {
+                super(query, query.hashCode());
+            }
+
+            @Override
+            public byte[] asBytes() {
+                this.encodings++;
+                return super.asBytes();
+            }
+        }
+
+        @Test
+        public void testOversizedQueryKeyBypassesOffheapCache() {
+            // Construct L2 directly: LevelCacheTest inherits this method but
+            // may legitimately retain the same large key in its RAM tier.
+            Cache<Id, Object> cache = new OffheapCache(this.graph(), 10000L,
+                                                      ENTRY_SIZE, SEGMENTS);
+            String text = "a".repeat(BytesBuffer.ID_LEN_MAX + 1);
+            Id oversized = new QueryId(text, text.hashCode());
+            Id normal = new QueryId("normal", "normal".hashCode());
+
+            Assert.assertTrue(cache.update(normal, "retained"));
+            Assert.assertNull(cache.get(oversized));
+            Assert.assertFalse(cache.containsKey(oversized));
+            Assert.assertFalse(cache.update(oversized, "ignored"));
+            cache.invalidate(oversized);
+            Assert.assertNull(cache.get(oversized));
+            Assert.assertFalse(cache.containsKey(oversized));
+            Assert.assertEquals("retained", cache.get(normal));
+            Assert.assertEquals(1L, cache.size());
+            cache.clear();
+        }
+
+        @Test
+        public void testQueryKeyAtBinaryIdLimit() {
+            Cache<Id, Object> cache = new OffheapCache(this.graph(), 10000L,
+                                                      ENTRY_SIZE, SEGMENTS);
+            String text = "a".repeat(BytesBuffer.ID_LEN_MAX);
+            Id boundary = new QueryId(text, text.hashCode());
+
+            Assert.assertTrue(cache.update(boundary, "boundary"));
+            Assert.assertTrue(cache.containsKey(boundary));
+            Assert.assertEquals("boundary", cache.get(boundary));
+            cache.invalidate(boundary);
+            Assert.assertNull(cache.get(boundary));
+            Assert.assertFalse(cache.containsKey(boundary));
+            cache.clear();
+        }
+
+        @Test
+        public void testQueryKeyLimitCountsUtf8Bytes() {
+            Cache<Id, Object> cache = new OffheapCache(this.graph(), 10000L,
+                                                      ENTRY_SIZE, SEGMENTS);
+            String text = "图".repeat(BytesBuffer.ID_LEN_MAX / 3 + 1);
+            Id oversized = new QueryId(text, text.hashCode());
+            Assert.assertLt(BytesBuffer.ID_LEN_MAX, text.length());
+            Assert.assertGt(BytesBuffer.ID_LEN_MAX, oversized.asBytes().length);
+
+            Assert.assertNull(cache.get(oversized));
+            Assert.assertFalse(cache.update(oversized, "ignored"));
+            Assert.assertFalse(cache.containsKey(oversized));
+            cache.invalidate(oversized);
+            Assert.assertEquals(0L, cache.size());
+
+            text = "图".repeat(BytesBuffer.ID_LEN_MAX / 3) +
+                   "a".repeat(BytesBuffer.ID_LEN_MAX % 3);
+            Id boundary = new QueryId(text, text.hashCode());
+            Assert.assertEquals(BytesBuffer.ID_LEN_MAX, boundary.asBytes().length);
+            Assert.assertTrue(cache.update(boundary, "utf8-boundary"));
+            Assert.assertEquals("utf8-boundary", cache.get(boundary));
+            cache.invalidate(boundary);
+            Assert.assertNull(cache.get(boundary));
+            cache.clear();
+        }
+
+        @Test
         public void testUpdateAndGetWithInvalidDataType() {
             Cache<Id, Object> cache = newCache();
             Id id = IdGenerator.of("1");
@@ -215,6 +337,45 @@ public abstract class CacheTest extends BaseUnitTest {
             RamCache l1cache = new RamCache(capacity);
             OffheapCache l2cache = (OffheapCache) super.newCache(capacity);
             return new LevelCache(l1cache, l2cache);
+        }
+
+        @Test
+        public void testQueryKeyRoundTripAcrossCacheLevels() {
+            Cache<Id, Object> cache = newCache();
+            Cache<Id, Object>[] tiers = Whitebox.getInternalState(cache, "caches");
+            int limit = BytesBuffer.ID_LEN_MAX;
+            String chinese = "图".repeat(limit / 3) + "a".repeat(limit % 3);
+            String pairs = "\uD83D\uDE00".repeat(limit / 4) + "a".repeat(limit % 4);
+            String[] texts = {"normal", "图查询", "\uD83D\uDE00", "a".repeat(limit),
+                              chinese, pairs, "a".repeat(limit + 1), chinese + "a", pairs + "a"};
+            try {
+                for (String text : texts) {
+                    Id id = new QueryId(text, text.hashCode());
+                    boolean fitsOffheap = id.asBytes().length <= limit;
+                    Assert.assertTrue(cache.update(id, "cached"));
+                    Assert.assertEquals("cached", cache.get(id));
+                    Assert.assertEquals("cached", tiers[0].get(id));
+                    Assert.assertEquals(fitsOffheap, tiers[1].containsKey(id));
+                    if (fitsOffheap) {
+                        tiers[0].invalidate(id);
+                        Assert.assertEquals("cached", cache.get(id));
+                        Assert.assertTrue(cache.update(id, "cached"));
+                    }
+
+                    cache.invalidate(id);
+                    Assert.assertNull(cache.get(id));
+                    for (Cache<Id, Object> tier : tiers) {
+                        Assert.assertNull(tier.get(id));
+                        Assert.assertFalse(tier.containsKey(id));
+                    }
+                    Assert.assertEquals("backend", cache.getOrFetch(id, key -> "backend"));
+                    Assert.assertEquals("backend", cache.get(id));
+                    Assert.assertEquals(fitsOffheap, tiers[1].containsKey(id));
+                    cache.invalidate(id);
+                }
+            } finally {
+                cache.clear();
+            }
         }
 
         @Test

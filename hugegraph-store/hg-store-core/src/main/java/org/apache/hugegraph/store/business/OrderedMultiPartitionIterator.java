@@ -166,8 +166,8 @@ public final class OrderedMultiPartitionIterator implements ScanIterator {
 
     private void rethrowCleanupFailure() {
         Throwable failure = this.cleanupFailure;
-        if (failure instanceof RuntimeException) {
-            throw (RuntimeException) failure;
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
         }
         if (failure != null) {
             throw (Error) failure;

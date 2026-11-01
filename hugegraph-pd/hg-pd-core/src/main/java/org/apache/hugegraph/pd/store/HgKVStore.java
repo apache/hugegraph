@@ -56,4 +56,35 @@ public interface HgKVStore {
     List<KV> scanRange(byte[] start, byte[] end);
 
     void close();
+
+    /**
+     * Wait until a local read sees every write committed before the call. A store that
+     * is not replicated has nothing to wait for.
+     */
+    default void waitReadIndex() throws PDException {
+    }
+
+    /**
+     * {@link #waitReadIndex()} for reads that a write depends on. Returns the leader term
+     * of the reads for the two methods below; -1 from a store that is not replicated.
+     */
+    default long waitReadIndexInTerm() throws PDException {
+        waitReadIndex();
+        return -1L;
+    }
+
+    /**
+     * A put that is applied only while this node is still the leader of {@code term}, and
+     * fails with NOT_LEADER otherwise: what was read in that term may be stale by then.
+     */
+    default void put(byte[] key, byte[] value, long term) throws PDException {
+        put(key, value);
+    }
+
+    /**
+     * A remove under the same condition
+     */
+    default long remove(byte[] key, long term) throws PDException {
+        return remove(key);
+    }
 }

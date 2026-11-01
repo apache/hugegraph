@@ -19,29 +19,17 @@ package org.apache.hugegraph.api.metrics;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.apache.hugegraph.metrics.MetricsUtil.COUNT_ATTR;
 import static org.apache.hugegraph.metrics.MetricsUtil.END_LSTR;
-import static org.apache.hugegraph.metrics.MetricsUtil.FIFT_MIN_RATE_ATRR;
-import static org.apache.hugegraph.metrics.MetricsUtil.FIVE_MIN_RATE_ATRR;
-import static org.apache.hugegraph.metrics.MetricsUtil.GAUGE_TYPE;
-import static org.apache.hugegraph.metrics.MetricsUtil.HISTOGRAM_TYPE;
-import static org.apache.hugegraph.metrics.MetricsUtil.LEFT_NAME_STR;
-import static org.apache.hugegraph.metrics.MetricsUtil.MEAN_RATE_ATRR;
 import static org.apache.hugegraph.metrics.MetricsUtil.METRICS_PATH_FAILED_COUNTER;
 import static org.apache.hugegraph.metrics.MetricsUtil.METRICS_PATH_RESPONSE_TIME_HISTOGRAM;
 import static org.apache.hugegraph.metrics.MetricsUtil.METRICS_PATH_SUCCESS_COUNTER;
 import static org.apache.hugegraph.metrics.MetricsUtil.METRICS_PATH_TOTAL_COUNTER;
-import static org.apache.hugegraph.metrics.MetricsUtil.ONE_MIN_RATE_ATRR;
 import static org.apache.hugegraph.metrics.MetricsUtil.PROM_HELP_NAME;
-import static org.apache.hugegraph.metrics.MetricsUtil.RIGHT_NAME_STR;
 import static org.apache.hugegraph.metrics.MetricsUtil.SPACE_STR;
 import static org.apache.hugegraph.metrics.MetricsUtil.STR_HELP;
 import static org.apache.hugegraph.metrics.MetricsUtil.STR_TYPE;
 import static org.apache.hugegraph.metrics.MetricsUtil.UNTYPED;
 import static org.apache.hugegraph.metrics.MetricsUtil.VERSION_STR;
-import static org.apache.hugegraph.metrics.MetricsUtil.exportSnapshot;
-import static org.apache.hugegraph.metrics.MetricsUtil.replaceDotDashInKey;
-import static org.apache.hugegraph.metrics.MetricsUtil.replaceSlashInKey;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -64,9 +52,7 @@ import org.apache.tinkerpop.gremlin.server.util.MetricManager;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.Counter;
-import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
-import com.codahale.metrics.Meter;
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.annotation.Timed;
 
@@ -234,7 +220,6 @@ public class MetricsAPI extends API {
 
     private String baseMetricPrometheusAll() {
         StringBuilder promMetric = new StringBuilder();
-        ServerReporter reporter = ServerReporter.instance();
         String helpName = PROM_HELP_NAME;
         // build version info
         promMetric.append(STR_HELP)
@@ -246,98 +231,6 @@ public class MetricsAPI extends API {
                   .append(VERSION_STR)
                   .append(ApiVersion.VERSION.toString()).append("\",}")
                   .append(SPACE_STR + "1.0" + END_LSTR);
-
-        // build gauges metric info
-        for (String key : reporter.gauges().keySet()) {
-            final Gauge<?> gauge
-                    = reporter.gauges().get(key);
-            if (gauge != null) {
-                helpName = replaceDotDashInKey(key);
-                promMetric.append(STR_HELP)
-                          .append(helpName).append(END_LSTR);
-                promMetric.append(STR_TYPE)
-                          .append(helpName).append(SPACE_STR + GAUGE_TYPE + END_LSTR);
-                promMetric.append(helpName)
-                          .append(SPACE_STR + gauge.getValue() + END_LSTR);
-            }
-        }
-
-        // build histograms metric info
-        for (String histogramkey : reporter.histograms().keySet()) {
-            final Histogram histogram = reporter.histograms().get(histogramkey);
-            if (histogram != null) {
-                helpName = replaceDotDashInKey(histogramkey);
-                promMetric.append(STR_HELP)
-                          .append(helpName).append(END_LSTR);
-                promMetric.append(STR_TYPE)
-                          .append(helpName)
-                          .append(SPACE_STR + HISTOGRAM_TYPE + END_LSTR);
-
-                promMetric.append(helpName)
-                          .append(COUNT_ATTR)
-                          .append(histogram.getCount() + END_LSTR);
-                promMetric.append(
-                        exportSnapshot(helpName, histogram.getSnapshot()));
-            }
-        }
-
-        // build meters metric info
-        for (String meterkey : reporter.meters().keySet()) {
-            final Meter metric = reporter.meters().get(meterkey);
-            if (metric != null) {
-                helpName = replaceDotDashInKey(meterkey);
-                promMetric.append(STR_HELP)
-                          .append(helpName).append(END_LSTR);
-                promMetric.append(STR_TYPE)
-                          .append(helpName)
-                          .append(SPACE_STR + HISTOGRAM_TYPE + END_LSTR);
-
-                promMetric.append(helpName)
-                          .append(COUNT_ATTR)
-                          .append(metric.getCount() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(MEAN_RATE_ATRR)
-                          .append(metric.getMeanRate() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(ONE_MIN_RATE_ATRR)
-                          .append(metric.getOneMinuteRate() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(FIVE_MIN_RATE_ATRR)
-                          .append(metric.getFiveMinuteRate() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(FIFT_MIN_RATE_ATRR)
-                          .append(metric.getFifteenMinuteRate() + END_LSTR);
-            }
-        }
-
-        // build timer metric info
-        for (String timerkey : reporter.timers().keySet()) {
-            final com.codahale.metrics.Timer timer = reporter.timers()
-                                                             .get(timerkey);
-            if (timer != null) {
-                helpName = replaceDotDashInKey(timerkey);
-                promMetric.append(STR_HELP)
-                          .append(helpName).append(END_LSTR);
-                promMetric.append(STR_TYPE)
-                          .append(helpName)
-                          .append(SPACE_STR + HISTOGRAM_TYPE + END_LSTR);
-
-                promMetric.append(helpName)
-                          .append(COUNT_ATTR)
-                          .append(timer.getCount() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(ONE_MIN_RATE_ATRR)
-                          .append(timer.getOneMinuteRate() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(FIVE_MIN_RATE_ATRR)
-                          .append(timer.getFiveMinuteRate() + END_LSTR);
-                promMetric.append(helpName)
-                          .append(FIFT_MIN_RATE_ATRR)
-                          .append(timer.getFifteenMinuteRate() + END_LSTR);
-                promMetric.append(
-                        exportSnapshot(helpName, timer.getSnapshot()));
-            }
-        }
 
         MetricsUtil.writePrometheusFormat(promMetric, MetricManager.INSTANCE.getRegistry());
 
@@ -411,19 +304,7 @@ public class MetricsAPI extends API {
                   .append(ApiVersion.VERSION.toString()).append("\",}")
                   .append(SPACE_STR + "1.0" + END_LSTR);
 
-        for (String methodKey : metricMap.keySet()) {
-            String metricName = replaceSlashInKey(methodKey);
-            promMetric.append(STR_HELP)
-                      .append(metricName).append(END_LSTR);
-            promMetric.append(STR_TYPE)
-                      .append(metricName).append(SPACE_STR + GAUGE_TYPE + END_LSTR);
-            Map<String, Object> itemMetricMap = metricMap.get(methodKey);
-            for (String labelName : itemMetricMap.keySet()) {
-                promMetric.append(metricName).append(LEFT_NAME_STR).append(labelName)
-                          .append(RIGHT_NAME_STR).append(itemMetricMap.get(labelName))
-                          .append(END_LSTR);
-            }
-        }
+        MetricsUtil.writeStatisticsPrometheusFormat(promMetric, metricMap);
         return promMetric.toString();
     }
 

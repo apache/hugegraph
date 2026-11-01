@@ -495,8 +495,8 @@ public class HbaseSessions extends BackendSessionPool {
             assert rows.size() == results.length;
             for (int i = 0; i < results.length; i++) {
                 Object result = results[i];
-                if (result instanceof Throwable) {
-                    throw (Throwable) result;
+                if (result instanceof Throwable throwable) {
+                    throw throwable;
                 }
                 if (result == null || !((Result) result).isEmpty()) {
                     throw new BackendException("Failed batch for row: %s",

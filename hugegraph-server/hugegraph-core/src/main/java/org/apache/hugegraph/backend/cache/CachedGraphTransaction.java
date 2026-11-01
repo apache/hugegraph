@@ -189,8 +189,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 if (type.isVertex()) {
                     // Invalidate vertex cache
                     Object arg2 = args[2];
-                    if (arg2 instanceof Id) {
-                        Id id = (Id) arg2;
+                    if (arg2 instanceof Id id) {
                         this.verticesCache.invalidate(id);
                     } else if (arg2 != null && arg2.getClass().isArray()) {
                         int size = Array.getLength(arg2);

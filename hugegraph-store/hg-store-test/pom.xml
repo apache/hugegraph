@@ -200,6 +200,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        @{argLine}
+                        "@${project.basedir}/../hg-store-dist/src/assembly/static/bin/jvm-module.options"
+                    </argLine>
+                </configuration>
                 <dependencies>
                     <dependency>
                         <groupId>org.apache.maven.surefire</groupId>
@@ -237,8 +243,13 @@
                             <reuseForks>false</reuseForks>
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
+                                <include>**/IpUtilTest.java</include>
                                 <include>**/PartitionStateMachineTest.java</include>
                                 <include>**/PartitionEngineErrorTest.java</include>
+                                <include>**/PartitionLogStorageTest.java</include>
+                                <include>**/PartitionEngineMembershipTest.java</include>
+                                <include>**/PartitionRecoveryMembershipTest.java</include>
+                                <include>**/RecoveryPdLookupTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
                                 <include>**/GraphIDManagerTest.java</include>
                                 <include>**/SchemaDriverTest.java</include>

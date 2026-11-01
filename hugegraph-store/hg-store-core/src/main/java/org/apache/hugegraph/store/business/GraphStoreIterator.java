@@ -228,8 +228,7 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
                            .setValueInt32((Integer) v);
                     break;
                 case BLOB:
-                    byte[] bytes = v instanceof byte[] ?
-                                   (byte[]) v : ((Blob) v).bytes();
+                    byte[] bytes = v instanceof byte[] value ? value : ((Blob) v).bytes();
                     variant.setType(VariantType.VT_BYTES)
                            .setValueBytes(ByteString.copyFrom(bytes));
                     break;

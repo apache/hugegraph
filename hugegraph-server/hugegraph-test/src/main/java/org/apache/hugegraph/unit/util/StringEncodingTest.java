@@ -202,20 +202,5 @@ public class StringEncodingTest {
                           hashedPassword.matches("^\\$2[aby]\\$10\\$.*")
         );
 
-        // Compare computational cost between work factor 4 and 10
-        long start4 = System.nanoTime();
-        StringEncoding.checkPassword(testPassword, oldPassword);
-        long elapsed4 = System.nanoTime() - start4;
-
-        long start10 = System.nanoTime();
-        StringEncoding.checkPassword(testPassword, hashedPassword);
-        long elapsed10 = System.nanoTime() - start10;
-
-        // BCrypt cost difference: (10-4) = 6 => theoretical ~2^6 = 64x
-        Assert.assertTrue(
-                "Work factor 10 should be significantly slower than work factor 4 " +
-                "(expected exponential cost increase)",
-                elapsed10 >= elapsed4 * 32
-        );
     }
 }

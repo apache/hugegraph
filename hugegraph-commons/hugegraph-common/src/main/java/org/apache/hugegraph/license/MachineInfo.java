@@ -57,20 +57,19 @@ public class MachineInfo {
         if (this.macAddressList != null) {
             return this.macAddressList;
         }
-        this.macAddressList = new ArrayList<>();
+        List<String> list = new ArrayList<>();
         List<InetAddress> inetAddresses = this.getLocalAllInetAddress();
         if (inetAddresses != null && !inetAddresses.isEmpty()) {
             // Get the Mac address of all network interfaces
-            List<String> list = new ArrayList<>();
             Set<String> uniqueValues = new HashSet<>();
             for (InetAddress inetAddress : inetAddresses) {
-                String macByInetAddress = this.getMacByInetAddress(inetAddress);
-                if (uniqueValues.add(macByInetAddress)) {
+                String macByInetAddress = this.getMacByInetAddress(inetAddress, false);
+                if (macByInetAddress != null && uniqueValues.add(macByInetAddress)) {
                     list.add(macByInetAddress);
                 }
             }
-            this.macAddressList = list;
         }
+        this.macAddressList = list;
         return this.macAddressList;
     }
 
@@ -99,6 +98,10 @@ public class MachineInfo {
     }
 
     public String getMacByInetAddress(InetAddress inetAddr) {
+        return this.getMacByInetAddress(inetAddr, true);
+    }
+
+    private String getMacByInetAddress(InetAddress inetAddr, boolean required) {
         byte[] mac;
         try {
             mac = NetworkInterface.getByInetAddress(inetAddr)
@@ -107,6 +110,12 @@ public class MachineInfo {
             throw new RuntimeException(String.format(
                       "Failed to get mac address for inet address '%s'",
                       inetAddr));
+        }
+        if (mac == null) {
+            if (required) {
+                throw new IllegalStateException("Network interface has no hardware address");
+            }
+            return null;
         }
 
         StringBuilder sb = new StringBuilder();

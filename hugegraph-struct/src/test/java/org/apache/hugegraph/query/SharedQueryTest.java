@@ -21,11 +21,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.hugegraph.query.Aggregate.AggregateFunc;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Aggregate.AggregateFunc;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.type.HugeType;
@@ -65,6 +66,41 @@ public class SharedQueryTest {
         emptyFirst.query(Condition.in(HugeKeys.LABEL, Collections.emptyList()));
         emptyFirst.query(Condition.in(HugeKeys.LABEL, Arrays.asList(2, 3)));
         Assert.assertNull(emptyFirst.condition(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testExplicitConditionResolutionPreservesLegacyInList() {
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        Assert.assertFalse(query.containsConditionValues(HugeKeys.LABEL));
+        Assert.assertTrue(query.conditionValues(HugeKeys.LABEL).isEmpty());
+        Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
+
+        List<Integer> labels = Arrays.asList(1, 2, 2);
+        query.query(Condition.in(HugeKeys.LABEL, labels));
+        Assert.assertSame(labels, query.condition(HugeKeys.LABEL));
+        Assert.assertEquals(new LinkedHashSet<>(labels), query.conditionValues(HugeKeys.LABEL));
+        Assert.assertNull(query.singleConditionValueOrNull(HugeKeys.LABEL));
+        Assert.assertThrows(IllegalStateException.class, () -> query.conditionValue(HugeKeys.LABEL));
+
+        query.eq(HugeKeys.LABEL, 2);
+        Assert.assertEquals(Integer.valueOf(2), query.conditionValue(HugeKeys.LABEL));
+        Assert.assertEquals(Integer.valueOf(2), query.singleConditionValueOrNull(HugeKeys.LABEL));
+        query.eq(HugeKeys.LABEL, 3);
+        Assert.assertTrue(query.containsConditionValues(HugeKeys.LABEL));
+        Assert.assertTrue(query.conditionValues(HugeKeys.LABEL).isEmpty());
+        Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testEmptyInAndNegativeConditionAreDistinct() {
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.neq(HugeKeys.LABEL, 1);
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertFalse(query.containsConditionValues(HugeKeys.LABEL));
+        query.query(Condition.in(HugeKeys.LABEL, Collections.emptyList()));
+        Assert.assertTrue(query.containsConditionValues(HugeKeys.LABEL));
+        Assert.assertEquals(Collections.emptyList(), query.condition(HugeKeys.LABEL));
+        Assert.assertNull(query.singleConditionValueOrNull(HugeKeys.LABEL));
     }
 
     @Test

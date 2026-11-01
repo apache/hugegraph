@@ -60,6 +60,50 @@ tests:
           path: spec.containers[0].command[2]
           pattern: "FLOOR=\"3\""
 
+  - it: checks the explicitly selected graph in a non-default graph space
+    template: tests/test-connection.yaml
+    set:
+      server.graphSpace: team_a
+      server.testGraphAlias: team_a-demo
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: '"graph":"team_a-demo"'
+      - notMatchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "DEFAULT-hugegraph"
+
+  - it: preserves the default binding when graphSpace changes without a selected graph
+    template: tests/test-connection.yaml
+    set:
+      server.graphSpace: team_a
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: '"graph":"DEFAULT-hugegraph"'
+
+  - it: preserves a static graph binding with an uppercase local file name
+    template: tests/test-connection.yaml
+    set:
+      server.testGraphAlias: DEFAULT-Demo
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: '"graph":"DEFAULT-Demo"'
+
+  - it: defaults a null alias for both index and business checks
+    template: tests/test-connection.yaml
+    set:
+      server.testGraphAlias: null
+      server.testGremlin: "assert graph.traversal().V().count().next() == 40"
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: '(?m)^\s*BODY=.*"graph":"DEFAULT-hugegraph"'
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: '(?m)^\s*BUSINESS_BODY=.*"graph":"DEFAULT-hugegraph"'
+
   - it: floors the per-Pod count at the HPA minimum when HPA is enabled
     template: tests/test-connection.yaml
     set:
@@ -71,9 +115,44 @@ tests:
           path: spec.containers[0].command[2]
           pattern: "FLOOR=\"5\""
 
+  - it: checks linked indexes by ID without refreshing the full index cache
+    template: tests/test-connection.yaml
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "getVertexLabels.*getEdgeLabels"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "graph.indexLabel"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "index.status.*ok"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "CREATED expected"
+      - notMatchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "getIndexLabels"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "business assertions skipped"
+
+  - it: sends optional business assertions on each Pod
+    template: tests/test-connection.yaml
+    set:
+      server.testGremlin: "assert graph.traversal().V().count().next() == 40"
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "assert graph.traversal"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: "business assertion"
+
   - it: sends no credentials when authentication is disabled
     template: tests/test-connection.yaml
     set:
+      hubble.enabled: false
       server.auth.enabled: false
     asserts:
       - notMatchRegex:

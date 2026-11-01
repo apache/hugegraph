@@ -28,6 +28,7 @@ import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.CompressInterceptor;
+import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.shaded.jackson.core.JsonProcessingException;
@@ -67,7 +68,7 @@ public class CypherAPI extends API {
     private static final ObjectReader REQUEST_READER = new ObjectMapper()
             .readerFor(Object.class)
             .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private final Base64.Decoder decoder = Base64.getUrlDecoder();
+    private final Base64.Decoder decoder = Base64.getDecoder();
     private final String basic = "Basic ";
     private final String bearer = "Bearer ";
 
@@ -84,7 +85,8 @@ public class CypherAPI extends API {
     @Timed
     @CompressInterceptor.Compress(buffer = (1024 * 40))
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    public CypherModel query(@Context HttpHeaders headers,
+    public CypherModel query(@Context GraphManager manager,
+                             @Context HttpHeaders headers,
                              @Parameter(description = "The graph space name")
                              @PathParam("graphspace") String graphspace,
                              @Parameter(description = "The graph name")
@@ -92,7 +94,7 @@ public class CypherAPI extends API {
                              @Parameter(description = "The cypher query string")
                              @QueryParam("cypher") String cypher) {
 
-        return this.queryByCypher(headers, graphspace, graph, cypher,
+        return this.queryByCypher(manager, headers, graphspace, graph, cypher,
                                   Collections.emptyMap());
     }
 
@@ -117,7 +119,8 @@ public class CypherAPI extends API {
                                                                 "n.name = $name RETURN n.name\"," +
                                                                 "\"parameters\":{\"name\":\"marko\"}}"))
                  })
-    public CypherModel post(@Context HttpHeaders headers,
+    public CypherModel post(@Context GraphManager manager,
+                            @Context HttpHeaders headers,
                             @Parameter(description = "The graph space name")
                             @PathParam("graphspace") String graphspace,
                             @Parameter(description = "The graph name")
@@ -147,7 +150,7 @@ public class CypherAPI extends API {
                 parameters = supplied;
             }
         }
-        return this.queryByCypher(headers, graphspace, graph, cypher, parameters);
+        return this.queryByCypher(manager, headers, graphspace, graph, cypher, parameters);
     }
 
     private static boolean looksLikeJson(String body) {
@@ -161,7 +164,7 @@ public class CypherAPI extends API {
                value.equals("true") || value.equals("false");
     }
 
-    private CypherModel queryByCypher(HttpHeaders headers, String graphspace,
+    private CypherModel queryByCypher(GraphManager manager, HttpHeaders headers, String graphspace,
                                       String graph, String cypher,
                                       Map<String, Object> parameters) {
         E.checkArgument(graphspace != null && !graphspace.isEmpty(),
@@ -176,10 +179,14 @@ public class CypherAPI extends API {
         aliases.put("graph", graphInfo);
         aliases.put("g", "__g_" + graphInfo);
 
-        return this.client(headers).submitQuery(cypher, aliases, parameters);
+        return this.client(manager, headers).submitQuery(cypher, aliases, parameters);
     }
 
-    private CypherClient client(HttpHeaders headers) {
+    private CypherClient client(GraphManager manager, HttpHeaders headers) {
+        if (!manager.requireAuthentication()) {
+            return this.cypherManager().getAnonymousClient();
+        }
+
         String auth = headers.getHeaderString(HttpHeaders.AUTHORIZATION);
 
         if (auth != null && !auth.isEmpty()) {
@@ -221,7 +228,7 @@ public class CypherAPI extends API {
             String encoded = auth.substring(basic.length());
             byte[] userPass = this.decoder.decode(encoded);
             String authorization = new String(userPass, UTF8);
-            split = authorization.split(":");
+            split = authorization.split(":", 2);
         } catch (Exception e) {
             LOG.error("Failed convert auth to credential.", e);
             return null;

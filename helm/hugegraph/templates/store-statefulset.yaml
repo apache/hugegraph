@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -22,6 +23,8 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: store
+  annotations:
+    hugegraph.apache.org/metadata-cluster: {{ .Values.metadataCluster | quote }}
 spec:
   serviceName: {{ include "hugegraph.store.name" . }}
   replicas: {{ .Values.store.replicas }}
@@ -30,9 +33,11 @@ spec:
   updateStrategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if .Values.store.storage.enabled }}
   {{- with .Values.store.persistentVolumeClaimRetentionPolicy }}
   persistentVolumeClaimRetentionPolicy:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- end }}
   selector:
     matchLabels:
@@ -73,10 +78,8 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.store.podSecurityContext }}
       securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- include "hugegraph.dataPodSecurityContext" .Values.store.podSecurityContext | nindent 8 }}
       {{- if .Values.store.affinity }}
       affinity:
         {{- toYaml .Values.store.affinity | nindent 8 }}
@@ -86,6 +89,9 @@ spec:
       initContainers:
         - name: wait-for-pd
           image: {{ .Values.store.waitImage | quote }}
+          {{- if .Values.store.__waitImageInherited }}
+          imagePullPolicy: {{ .Values.store.image.pullPolicy }}
+          {{- end }}
           {{- with .Values.store.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -139,6 +145,8 @@ spec:
             - name: rest
               containerPort: {{ .Values.store.ports.rest }}
           env:
+            - name: PD_CLUSTER
+              value: {{ .Values.metadataCluster | quote }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -189,14 +197,23 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if not .Values.store.storage.enabled }}
+      volumes:
+        - name: store-data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.store.storage.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: store-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- if .Values.store.storage.storageClassName }}
+        {{- if eq .Values.store.storage.storageClassName "-" }}
+        storageClassName: ""
+        {{- else if .Values.store.storage.storageClassName }}
         storageClassName: {{ .Values.store.storage.storageClassName | quote }}
         {{- end }}
         resources:
           requests:
             storage: {{ .Values.store.storage.size }}
+  {{- end }}

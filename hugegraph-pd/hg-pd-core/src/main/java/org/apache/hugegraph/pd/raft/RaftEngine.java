@@ -46,6 +46,7 @@ import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
 import com.alipay.sofa.jraft.Status;
+import com.alipay.sofa.jraft.closure.ReadIndexClosure;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
 import com.alipay.sofa.jraft.core.State;
@@ -54,10 +55,18 @@ import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftError;
 import com.alipay.sofa.jraft.option.NodeOptions;
 import com.alipay.sofa.jraft.option.RpcOptions;
-import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
+import com.alipay.sofa.jraft.rpc.ProtobufMsgFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
+import com.alipay.sofa.jraft.rpc.impl.PingRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.AppendEntriesRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.GetFileRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.InstallSnapshotRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.ReadIndexRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.RequestVoteRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.TimeoutNowRequestProcessor;
 import com.alipay.sofa.jraft.util.Endpoint;
+import com.alipay.sofa.jraft.util.RpcFactoryHelper;
 
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -73,6 +82,16 @@ public class RaftEngine {
      */
     private static final long ALIVE_PEERS_REFRESH_MS = 1000L;
 
+    private static final long READ_INDEX_RETRY_DELAY_MS = 20L;
+    // An EBUSY retry waits 20 ms doubled per EBUSY answer in a row, up to 20 << 5 = 640 ms
+    private static final int READ_INDEX_BUSY_MAX_SHIFT = 5;
+    private static final ScheduledExecutorService READ_INDEX_RETRY =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "pd-raft-read-index-retry");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     private volatile static RaftEngine instance = new RaftEngine();
     private RaftStateMachine stateMachine;
     private String groupId = "pd_raft";
@@ -84,7 +103,7 @@ public class RaftEngine {
     private volatile int alivePeerCount = -1;
     private ScheduledExecutorService alivePeersRefresher;
 
-    public RaftEngine() {
+    private RaftEngine() {
         this.stateMachine = new RaftStateMachine();
     }
 
@@ -132,9 +151,7 @@ public class RaftEngine {
         // Snapshot interval
         nodeOptions.setSnapshotIntervalSecs(config.getSnapshotInterval());
 
-        nodeOptions.setRpcConnectTimeoutMs(config.getRpcTimeout());
-        nodeOptions.setRpcDefaultTimeout(config.getRpcTimeout());
-        nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcTimeout());
+        setRpcTimeouts(nodeOptions, config);
         // TODO: tune RaftOptions for PD (see hugegraph-store PartitionEngine for reference)
 
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
@@ -144,6 +161,7 @@ public class RaftEngine {
         // construct raft group and start raft
         this.raftGroupService =
                 new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
+        this.stateMachine.resetForNewNode();
         this.raftNode = raftGroupService.start(false);
         startAlivePeersRefresher();
         log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
@@ -152,12 +170,42 @@ public class RaftEngine {
     }
 
     /**
+     * Wire the three raft rpc timeouts from their own options. jraft pings a peer to open a
+     * connection, and a candidate does so for every peer while it holds the node lock, so a
+     * peer that accepts the connection but never answers (a stopped process, a lost host)
+     * stalls the election, and the answers to the other peers' votes, for the whole connect
+     * timeout. Installing a snapshot sends the whole store and needs far longer than a
+     * normal request.
+     */
+    static void setRpcTimeouts(NodeOptions nodeOptions, PDConfig.Raft config) {
+        nodeOptions.setRpcConnectTimeoutMs(config.getRpcConnectTimeout());
+        nodeOptions.setRpcDefaultTimeout(config.getRpcTimeout());
+        nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcInstallSnapshotTimeout());
+    }
+
+    /**
      * Create a Raft RPC Server for communication between PDs
      */
     private RpcServer createRaftRpcServer(String raftAddr, List<PeerId> peers,
                                           boolean ipWhitelistEnabled) {
         Endpoint endpoint = JRaftUtils.getEndPoint(raftAddr);
-        RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(endpoint);
+        RpcServer rpcServer = RpcFactoryHelper.rpcFactory().createRpcServer(endpoint);
+        // Register the protobuf codecs for raft messages, which
+        // RaftRpcServerFactory's static block did as a side effect
+        ProtobufMsgFactory.load();
+        // Register raft replication processors only: jraft's CLI processors would
+        // change peers or the leader bypassing the checks of RaftEngine#changePeerList
+        // and PDService#updatePdRaft
+        AppendEntriesRequestProcessor appendEntriesProcessor =
+                new AppendEntriesRequestProcessor(null);
+        rpcServer.registerConnectionClosedEventListener(appendEntriesProcessor);
+        rpcServer.registerProcessor(appendEntriesProcessor);
+        rpcServer.registerProcessor(new GetFileRequestProcessor(null));
+        rpcServer.registerProcessor(new InstallSnapshotRequestProcessor(null));
+        rpcServer.registerProcessor(new RequestVoteRequestProcessor(null));
+        rpcServer.registerProcessor(new PingRequestProcessor(null));
+        rpcServer.registerProcessor(new TimeoutNowRequestProcessor(null));
+        rpcServer.registerProcessor(new ReadIndexRequestProcessor(null));
         configureRaftServerIpWhitelist(peers, rpcServer, ipWhitelistEnabled);
         RaftRpcProcessor.registerProcessor(rpcServer, this);
         rpcServer.init(null);
@@ -170,8 +218,8 @@ public class RaftEngine {
             log.info("PD Raft IP whitelist is disabled");
             return;
         }
-        if (rpcServer instanceof BoltRpcServer) {
-            ((BoltRpcServer) rpcServer).getServer().option(
+        if (rpcServer instanceof BoltRpcServer boltServer) {
+            boltServer.getServer().option(
                     BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER,
                     new ExtendedNettyChannelHandler() {
                         @Override
@@ -415,6 +463,10 @@ public class RaftEngine {
         this.stateMachine.addTaskHandler(handler);
     }
 
+    public void removeTaskHandler(RaftTaskHandler handler) {
+        this.stateMachine.removeTaskHandler(handler);
+    }
+
     public PDConfig.Raft getConfig() {
         return this.config;
     }
@@ -521,13 +573,15 @@ public class RaftEngine {
             builder.setRole(role);
 
             try {
-                if (future.isCompletedExceptionally()) {
-                    log.error("failed to getGrpcAddress of {}", peerId.getEndpoint().toString());
+                RaftRpcProcessor.GetMemberResponse response =
+                        future.get(config.getRpcTimeout(), TimeUnit.MILLISECONDS);
+                if (response == null) {
+                    log.error("failed to getGrpcAddress of {}, null response",
+                              peerId.getEndpoint().toString());
                     builder.setState(Metapb.StoreState.Offline);
                     builder.setRaftUrl(peerId.getEndpoint().toString());
                     members.add(builder.build());
                 } else {
-                    RaftRpcProcessor.GetMemberResponse response = future.get();
                     builder.setState(Metapb.StoreState.Up);
                     builder.setRaftUrl(response.getRaftAddress());
                     builder.setDataPath(response.getDatePath());
@@ -624,6 +678,134 @@ public class RaftEngine {
 
     public Node getRaftNode() {
         return raftNode;
+    }
+
+    /**
+     * Wait until this node has applied every entry committed before the call, so a local
+     * read that follows sees every write acknowledged before it. jraft's ReadIndex confirms
+     * the commit index with a quorum in the current term and runs the closure once the
+     * applied index reaches it; a leader elected a moment ago first waits for an entry of
+     * its own term to commit, so EAGAIN and EBUSY are retried until the deadline. Bounded by
+     * the raft rpc timeout.
+     * <p>
+     * Never call it on the state machine thread: the closure waits for that thread to apply.
+     */
+    public void waitReadIndex() throws PDException {
+        waitReadIndex(this.config.getRpcTimeout());
+    }
+
+    /**
+     * {@link #waitReadIndex()} for a read that a write depends on, such as an id counter.
+     * Returns the leader term, taken before the wait, for {@link Task#setExpectedTerm(long)}:
+     * jraft then rejects the write unless this node is still the leader of that term. A
+     * request that read in term 1 and paused could otherwise write its stale result after
+     * this node lost the leadership and won it back in term 3, over the writes of term 2.
+     */
+    public long waitReadIndexInTerm() throws PDException {
+        long term = this.stateMachine.getLeaderTerm();
+        waitReadIndex();
+        if (term > 0L) {
+            return term;
+        }
+        // A leader elected a moment ago is announced when the first entry of its term is
+        // applied, which the wait above waited for; wait again inside the announced term
+        term = this.stateMachine.getLeaderTerm();
+        if (term <= 0L) {
+            throw new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE, "Not the raft leader");
+        }
+        waitReadIndex();
+        return term;
+    }
+
+    void waitReadIndex(long timeoutMs) throws PDException {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        readIndex(future, deadline, 0);
+        try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            // Stops a pending retry
+            future.cancel(false);
+            Thread.currentThread().interrupt();
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE,
+                                  "Interrupted while waiting for the raft read index", e);
+        } catch (TimeoutException e) {
+            future.cancel(false);
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE,
+                                  String.format("Raft read index timed out after %d ms",
+                                                timeoutMs));
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof PDException failure) {
+                throw failure;
+            }
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
+        }
+    }
+
+    private void readIndex(CompletableFuture<Void> future, long deadline, int busyRetries) {
+        if (future.isDone()) {
+            return;
+        }
+        Node node = this.raftNode;
+        if (node == null) {
+            future.completeExceptionally(new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE,
+                                                         "Raft node is not started"));
+            return;
+        }
+        long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remaining <= 0L) {
+            // The waiter times out at the same deadline and reports how long it waited
+            return;
+        }
+        // Without a timeout the closure fails with ETIMEDOUT after jraft's own default
+        // (jraft.read-index.timeout, 2 s), before the caller's deadline
+        ReadIndexClosure closure = new ReadIndexClosure(remaining) {
+            @Override
+            public void run(Status status, long index, byte[] reqCtx) {
+                if (status.isOk()) {
+                    future.complete(null);
+                    return;
+                }
+                RaftError error = status.getRaftError();
+                if (error == RaftError.ETIMEDOUT) {
+                    // The closure's own timer, set to the time left: the waiter reports it
+                    return;
+                }
+                // EAGAIN: no entry of the current term committed yet. It clears once the new
+                // leader commits, which can take longer than any fixed number of short
+                // retries, so retry every 20 ms until the caller's deadline.
+                // EBUSY: leadership is being transferred, or jraft's read index queue is
+                // full. Retries at a fixed 20 ms would keep a full queue full, so each one
+                // waits twice as long as the one before it.
+                boolean busy = error == RaftError.EBUSY;
+                long delayMs = busy ? READ_INDEX_RETRY_DELAY_MS <<
+                                      Math.min(busyRetries, READ_INDEX_BUSY_MAX_SHIFT) :
+                               READ_INDEX_RETRY_DELAY_MS;
+                long next = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(delayMs);
+                if ((error == RaftError.EAGAIN || busy) && next - deadline < 0) {
+                    int retries = busy ? busyRetries + 1 : 0;
+                    READ_INDEX_RETRY.schedule(() -> readIndex(future, deadline, retries),
+                                              delayMs, TimeUnit.MILLISECONDS);
+                    return;
+                }
+                // ENODESHUTDOWN and EHOSTDOWN come with the IllegalStateException caught
+                // below and may complete the future first, so they map the same way
+                int type = error == RaftError.EPERM || error == RaftError.ENODESHUTDOWN ||
+                           error == RaftError.EHOSTDOWN ? Pdpb.ErrorType.NOT_LEADER_VALUE :
+                           Pdpb.ErrorType.UNKNOWN_VALUE;
+                future.completeExceptionally(
+                        new PDException(type, "Raft read index failed: " + status));
+            }
+        };
+        try {
+            node.readIndex(new byte[0], closure);
+        } catch (IllegalStateException e) {
+            // jraft throws once the node or its read service is shutting down, after
+            // queueing the closure with ENODESHUTDOWN or EHOSTDOWN; turn it into a
+            // PDException for getId's callers
+            future.completeExceptionally(new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE,
+                                                         "Raft node is shutting down", e));
+        }
     }
 
     private boolean peerEquals(PeerId p1, PeerId p2) {

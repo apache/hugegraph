@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- if get (get .Values "hubble" | default dict) "enabled" | default false }}
 {{- include "hugegraph.validateValues" . }}
 {{- $customPort := ne (int .Values.hubble.port) 8088 }}
@@ -23,6 +24,7 @@
 {{- fail "hubble.mode must be one of: pd, direct" }}
 {{- end }}
 {{- $pdMode := eq $mode "pd" }}
+{{- $vermeerEnabled := (.Values.vermeer | default dict).enabled | default false }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,6 +53,9 @@ spec:
         {{- if $pdMode }}
         # Rolls Hubble when the PD REST Secret written into its properties changes.
         checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
+        {{- end }}
+        {{- if $vermeerEnabled }}
+        checksum/vermeer-auth: {{ include "hugegraph.vermeer.authChecksum" . | quote }}
         {{- end }}
         {{- with .Values.hubble.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
@@ -86,11 +91,19 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $vermeerEnabled }}
+      initContainers:
+        {{- include "hugegraph.vermeer.tokenInit" (dict "root" . "uid" (include "hugegraph.hubble.vermeerUid" .) "gid" (include "hugegraph.hubble.vermeerGid" .) "resources" .Values.hubble.resources) | nindent 8 }}
+      {{- end }}
       containers:
         - name: hubble
           image: {{ include "hugegraph.image" (dict "image" .Values.hubble.image "appVersion" $.Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.hubble.image.pullPolicy }}
-          {{- with .Values.hubble.securityContext }}
+          {{- $securityContext := deepCopy (.Values.hubble.securityContext | default dict) }}
+          {{- if $vermeerEnabled }}
+          {{- $_ := set $securityContext "runAsUser" (int (include "hugegraph.hubble.vermeerUid" .)) }}
+          {{- end }}
+          {{- with $securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -155,6 +168,12 @@ spec:
               {{- end }}
               while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
                 case "${LINE}" in
+                  vermeer.url=*|vermeer.token_file=*|\
+                  operations.vermeer.enabled=*|operations.vermeer.address=*|operations.vermeer.token_file=*)
+                    # Native analysis and operations share the same internal
+                    # service identity. Write every key once below, clearing
+                    # stale image defaults when the component is disabled.
+                    ;;
                   pd.enabled=*)
                     printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
                     FOUND_PD_ENABLED=true
@@ -206,6 +225,15 @@ spec:
                     ;;
                 esac
               done <"${CONF}"
+              {{- if $vermeerEnabled }}
+              printf 'vermeer.url=%s\nvermeer.token_file=%s\n' \
+                "${HG_HUBBLE_VERMEER_URL}" "${HG_HUBBLE_VERMEER_TOKEN_FILE}" >>"${TMP}"
+              printf 'operations.vermeer.enabled=true\noperations.vermeer.address=%s\noperations.vermeer.token_file=%s\n' \
+                "${HG_HUBBLE_VERMEER_URL}" "${HG_HUBBLE_VERMEER_TOKEN_FILE}" >>"${TMP}"
+              {{- else }}
+              printf 'vermeer.url=\nvermeer.token_file=\n' >>"${TMP}"
+              printf 'operations.vermeer.enabled=false\noperations.vermeer.address=\noperations.vermeer.token_file=\n' >>"${TMP}"
+              {{- end }}
               if [[ "${FOUND_PD_ENABLED}" == false ]]; then
                 printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
               fi
@@ -254,6 +282,10 @@ spec:
             - name: http
               containerPort: {{ .Values.hubble.port }}
           env:
+            - name: HG_HUBBLE_VERMEER_URL
+              value: {{ if $vermeerEnabled }}{{ printf "http://%s:%v" (include "hugegraph.vermeer.masterName" .) .Values.vermeer.master.httpPort | quote }}{{ else }}""{{ end }}
+            - name: HG_HUBBLE_VERMEER_TOKEN_FILE
+              value: {{ if $vermeerEnabled }}"/var/run/hugegraph/vermeer/token"{{ else }}""{{ end }}
             {{- if $pdMode }}
             - name: HG_HUBBLE_PD_PEERS
               value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
@@ -270,19 +302,20 @@ spec:
             - name: HG_HUBBLE_SERVER_URL
               value: {{ include "hugegraph.server.clientUrl" . | quote }}
             {{- end }}
-            {{- if .Values.hubble.persistence.enabled }}
             # Hubble's H2 location is fixed to ./db inside the image classpath
             # config; Spring Boot's environment binding is the supported way to
             # point it into the mounted volume.
             - name: SPRING_DATASOURCE_URL
               value: "jdbc:h2:file:/hubble-data/db;DB_CLOSE_ON_EXIT=FALSE"
-            {{- end }}
             {{- with .Values.hubble.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
-          {{- if .Values.hubble.persistence.enabled }}
           volumeMounts:
             - name: data
               mountPath: /hubble-data
-          {{- end }}
+            {{- if $vermeerEnabled }}
+            - name: vermeer-token
+              mountPath: /var/run/hugegraph/vermeer
+              readOnly: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: /actuator/health
@@ -310,10 +343,15 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.hubble.persistence.enabled }}
       volumes:
+        {{- if $vermeerEnabled }}
+        {{- include "hugegraph.vermeer.tokenVolumes" . | nindent 8 }}
+        {{- end }}
         - name: data
+          {{- if .Values.hubble.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "hugegraph.hubble.dataName" . }}
-      {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
 {{- end }}

@@ -21,7 +21,9 @@ import org.apache.hugegraph.testutil.AssertTest;
 import org.apache.hugegraph.testutil.WhiteboxTest;
 import org.apache.hugegraph.unit.auth.TokenGeneratorTest;
 import org.apache.hugegraph.unit.config.HugeConfigTest;
+import org.apache.hugegraph.unit.config.HugeConfigValidationTest;
 import org.apache.hugegraph.unit.config.OptionSpaceTest;
+import org.apache.hugegraph.unit.config.TypedOptionTest;
 import org.apache.hugegraph.unit.event.EventHubTest;
 import org.apache.hugegraph.unit.rest.AbstractRestClientTest;
 import org.apache.hugegraph.unit.version.VersionTest;
@@ -52,6 +54,7 @@ import org.apache.hugegraph.unit.license.LicenseParamsTest;
 import org.apache.hugegraph.unit.license.MachineInfoTest;
 import org.apache.hugegraph.unit.perf.PerfUtilTest;
 import org.apache.hugegraph.unit.perf.StopwatchTest;
+import org.apache.hugegraph.unit.rest.HostNameVerifierTest;
 import org.apache.hugegraph.unit.rest.RestClientTest;
 import org.apache.hugegraph.unit.rest.RestResultTest;
 import org.apache.hugegraph.unit.util.BytesTest;
@@ -83,7 +86,9 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
 
     TokenGeneratorTest.class,
     HugeConfigTest.class,
+    HugeConfigValidationTest.class,
     OptionSpaceTest.class,
+    TypedOptionTest.class,
     SafeDateFormatTest.class,
     BarrierEventTest.class,
     EventHubTest.class,
@@ -91,6 +96,7 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
     StopwatchTest.class,
     AbstractRestClientTest.class,
     RestClientTest.class,
+    HostNameVerifierTest.class,
     RestResultTest.class,
     VersionTest.class,
 

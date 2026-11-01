@@ -15,59 +15,58 @@
 # limitations under the License.
 #
 
-# A non-ClusterIP Server Service publishes the plain-HTTP Server API, and
-# with it Basic-auth credentials and JWTs in cleartext, the same class of
-# exposure the PD and Hubble Services and the TLS-less Ingresses already gate
-# behind an explicit acknowledgement.
-suite: Server Service exposure gate
+suite: Server Service exposure and mode defaults
 templates:
-  - server-deployment.yaml
   - server-service.yaml
 tests:
-  # validateValues is included from the Server Deployment, so the
-  # rejections render that template.
-  - it: rejects a NodePort Server Service without the acknowledgement
-    template: server-deployment.yaml
-    set:
-      server.service.type: NodePort
+  - it: defaults to an automatic NodePort in easy mode
     asserts:
-      - failedTemplate:
-          errorPattern: "set server.service.allowInsecureExposure=true"
+      - equal:
+          path: spec.type
+          value: NodePort
+      - notExists:
+          path: spec.ports[0].nodePort
 
-  - it: rejects a LoadBalancer Server Service without the acknowledgement
-    template: server-deployment.yaml
+  - it: defaults to ClusterIP in strict mode
     set:
-      server.service.type: LoadBalancer
+      mode: strict
     asserts:
-      - failedTemplate:
-          errorPattern: "set server.service.allowInsecureExposure=true"
+      - equal:
+          path: spec.type
+          value: ClusterIP
 
-  - it: rejects it with authentication off too
-    template: server-deployment.yaml
+  - it: honors an explicit NodePort in strict mode without acknowledgement
     set:
-      server.auth.enabled: false
+      mode: strict
       server.service.type: NodePort
-    asserts:
-      - failedTemplate:
-          errorPattern: "set server.service.allowInsecureExposure=true"
-
-  - it: renders a NodePort Server Service once acknowledged
-    template: server-service.yaml
-    set:
-      server.service.type: NodePort
-      server.service.allowInsecureExposure: true
-      server.service.nodePort: 30080
+      server.service.nodePort: 8802
     asserts:
       - equal:
           path: spec.type
           value: NodePort
       - equal:
           path: spec.ports[0].nodePort
-          value: 30080
+          value: 8802
 
-  - it: keeps the default ClusterIP Service without the acknowledgement
-    template: server-service.yaml
+  - it: renders LoadBalancer without acknowledgement
+    set:
+      server.service.type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  - it: honors an explicit ClusterIP in easy mode
+    set:
+      server.service.type: ClusterIP
     asserts:
       - equal:
           path: spec.type
           value: ClusterIP
+
+  - it: treats zero NodePort as automatic allocation
+    set:
+      server.service.nodePort: 0
+    asserts:
+      - notExists:
+          path: spec.ports[0].nodePort

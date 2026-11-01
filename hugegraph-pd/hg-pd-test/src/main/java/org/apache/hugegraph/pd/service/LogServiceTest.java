@@ -44,11 +44,11 @@ public class LogServiceTest {
         logServiceUnderTest.insertLog("action", "message",
                                       Any.newBuilder().build());
 
-        // Run the test
+        // The query end is exclusive, so include logs inserted in the current millisecond.
         final List<Metapb.LogRecord> result = logServiceUnderTest.getLog(
-                "action", 0L, System.currentTimeMillis());
+                "action", 0L, System.currentTimeMillis() + 1L);
 
         // Verify the results
-        Assert.assertEquals(result.size(), 1);
+        Assert.assertEquals(1, result.size());
     }
 }

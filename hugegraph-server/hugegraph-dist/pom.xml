@@ -184,6 +184,33 @@
                     <version>1.8</version>
                     <executions>
                         <execution>
+                            <id>prepare-arthas</id>
+                            <phase>prepare-package</phase>
+                            <goals>
+                                <goal>run</goal>
+                            </goals>
+                            <configuration>
+                                <target>
+                                    <unzip src="${com.taobao.arthas:arthas-packaging:jar}"
+                                           dest="${project.build.directory}/arthas-packaging">
+                                        <patternset>
+                                            <include name="arthas-bin.zip"/>
+                                        </patternset>
+                                    </unzip>
+                                    <delete dir="${project.build.directory}/arthas"/>
+                                    <unzip src="${project.build.directory}/arthas-packaging/arthas-bin.zip"
+                                           dest="${project.build.directory}/arthas">
+                                        <patternset>
+                                            <include name="arthas-*.jar"/>
+                                            <include name="logback.xml"/>
+                                            <include name="async-profiler/**"/>
+                                            <include name="lib/**"/>
+                                        </patternset>
+                                    </unzip>
+                                </target>
+                            </configuration>
+                        </execution>
+                        <execution>
                             <id>download-swagger-ui</id>
                             <phase>prepare-package</phase>
                             <goals>

@@ -1,0 +1,90 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Upgrade entry default notice
+templates:
+  - NOTES.txt
+tests:
+  - it: reports both inherited NodePort entries during an easy upgrade
+    release:
+      upgrade: true
+    asserts:
+      - matchRegexRaw:
+          pattern: "Upgrade notice: chart 0.2.0 changed entry defaults"
+      - matchRegexRaw:
+          pattern: "inherits NodePort for Server, Hubble"
+      - matchRegexRaw:
+          pattern: "docs/operations.md#storage-and-upgrades"
+
+  - it: keeps fresh-install notes free of an upgrade notice
+    release:
+      upgrade: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Upgrade notice:"
+
+  - it: omits the disabled Hubble entry from the upgrade notice
+    release:
+      upgrade: true
+    set:
+      hubble.enabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: "inherits NodePort for Server\\."
+      - notMatchRegexRaw:
+          pattern: "inherits NodePort for Server, Hubble"
+
+  - it: only names the inherited Hubble entry with an explicit internal Server
+    release:
+      upgrade: true
+    set:
+      server.service.type: ClusterIP
+    asserts:
+      - matchRegexRaw:
+          pattern: "inherits NodePort for Hubble"
+      - notMatchRegexRaw:
+          pattern: "inherits NodePort for Server"
+
+  - it: accepts explicit NodePort entries without the inherited-default notice
+    release:
+      upgrade: true
+    set:
+      server.service.type: NodePort
+      hubble.service.type: NodePort
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Upgrade notice:"
+
+  - it: preserves explicit easy-mode internal entries without the notice
+    release:
+      upgrade: true
+    set:
+      server.service.type: ClusterIP
+      hubble.service.type: ClusterIP
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Upgrade notice:"
+
+  - it: does not report an easy-default change for a strict-mode upgrade
+    release:
+      upgrade: true
+    set:
+      mode: strict
+      server.service.type: NodePort
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Upgrade notice:"

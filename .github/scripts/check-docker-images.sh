@@ -30,6 +30,45 @@ for pair in \
         HC=$(docker image inspect --format '{{json .Config.Healthcheck}}' "$IMAGE_ID")
         [[ "$HC" != null ]] || { echo "Missing HEALTHCHECK: $dockerfile"; exit 1; }
 
+        # The images must run as the fixed non-root user and own the directories
+        # the start scripts and default volumes write to.
+        case "$dockerfile" in
+            hugegraph-pd/*) OWNED_DIRS=". logs pd_data" ;;
+            hugegraph-store/*) OWNED_DIRS=". logs storage" ;;
+            hugegraph-server/Dockerfile) OWNED_DIRS=". logs rocksdb-data" ;;
+            *) OWNED_DIRS=". logs" ;;
+        esac
+        IMAGE_USER=$(docker image inspect --format '{{.Config.User}}' "$IMAGE_ID")
+        RUNTIME_IDS=$(docker run --rm --pull never --entrypoint sh "$IMAGE_ID" -c \
+            'echo "$(id -u):$(id -g)" $(stat -c %u:%g "$@")' owners $OWNED_DIRS)
+        EXPECTED_IDS="10001:10001$(printf ' 10001:10001%.0s' $OWNED_DIRS)"
+        [[ "$IMAGE_USER" == 10001:10001 && "$RUNTIME_IDS" == "$EXPECTED_IDS" ]] || {
+            echo "ERROR: $dockerfile runs as '$IMAGE_USER' ($RUNTIME_IDS); expected 10001:10001 owning $OWNED_DIRS"
+            exit 1
+        }
+
+        # Helm reuses these images for tool containers instead of pulling curlimages/curl.
+        # Check the same non-root/read-only tool environment as the Server test hook.
+        if [[ "$dockerfile" == hugegraph-store/* || "$dockerfile" == hugegraph-server/* ]]; then
+            HELM_TOOLS=(curl tr date sleep)
+            if [[ "$dockerfile" == hugegraph-server/* ]]; then
+                HELM_TOOLS+=(getent base64 awk grep sort tail)
+            fi
+            docker run --rm --pull never --read-only --user 100:101 --entrypoint sh "$IMAGE_ID" -c '
+                for tool in "$@"; do
+                    command -v "$tool" >/dev/null || {
+                        echo "Missing Helm tool: $tool" >&2
+                        exit 1
+                    }
+                    case "$tool" in
+                        getent) getent ahosts localhost >/dev/null ;;
+                        base64) test "$(printf Helm | base64 | tr -d "\n")" = SGVsbQ== ;;
+                    esac
+                done
+                curl --version >/dev/null
+            ' helm-tools "${HELM_TOOLS[@]}"
+        fi
+
         JAVA_VERSION=$(docker run --rm --pull never --entrypoint java "$IMAGE_ID" -version 2>&1)
         echo "$JAVA_VERSION"
         grep -Eq 'version "17\.' <<< "$JAVA_VERSION" || {
@@ -51,7 +90,9 @@ for pair in \
         if [[ "$dockerfile" == hugegraph-server/* ]]; then
             CHECK_DIR=$(mktemp -d)
             trap 'rm -rf "$CHECK_DIR"' EXIT
-            docker run --rm --pull never --entrypoint bash \
+            # The image user cannot write the runner-owned temp dir, so copy
+            # the jars out as the runner's own uid.
+            docker run --rm --pull never --user "$(id -u):$(id -g)" --entrypoint bash \
                 -v "$CHECK_DIR:/check" "$IMAGE_ID" -c \
                 'cp /hugegraph-server/lib/hugegraph-api-*.jar \
                     /hugegraph-server/lib/hugegraph-common-*.jar /check/'

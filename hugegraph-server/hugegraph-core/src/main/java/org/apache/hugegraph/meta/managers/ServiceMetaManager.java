@@ -50,12 +50,11 @@ public class ServiceMetaManager extends AbstractMetaManager {
 
     public Map<String, Service> serviceConfigs(String graphSpace) {
         Map<String, Service> serviceMap = new HashMap<>();
-        Map<String, String> keyValues = this.metaDriver.scanWithPrefix(
-                this.serviceConfPrefix(graphSpace));
+        String prefix = this.serviceConfPrefix(graphSpace);
+        Map<String, String> keyValues = this.metaDriver.scanWithPrefix(prefix);
         for (Map.Entry<String, String> entry : keyValues.entrySet()) {
             String key = entry.getKey();
-            String[] parts = key.split(META_PATH_DELIMITER);
-            serviceMap.put(parts[parts.length - 1],
+            serviceMap.put(key.substring(prefix.length()),
                            JsonUtil.fromJson(entry.getValue(), Service.class));
         }
         return serviceMap;

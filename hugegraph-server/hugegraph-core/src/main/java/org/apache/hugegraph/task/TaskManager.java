@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.task;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.Callable;
@@ -127,38 +128,28 @@ public final class TaskManager {
         Throwable failure = null;
         boolean drained = scheduler == null;
         if (scheduler != null) {
-            /*
-             * Keep close+remove exclusive with scheduler iteration: in their gap
-             * a scheduler DB worker could otherwise reopen the graph transaction.
-             */
-            synchronized (scheduler) {
-                boolean stopped = false;
-                try {
-                    stopped = scheduler.close();
-                } catch (RuntimeException | Error error) {
-                    failure = error;
-                    // Standard closes its server manager in finally; Distributed
-                    // sets its dispatch-stop flag before cancellation/drain begins.
-                    stopped = true;
-                }
-                // A timeout leaves running jobs registered for the next drain attempt.
-                if (stopped && scheduler.pendingTasks() == 0) {
+            try {
+                // Distributed close waits for cron without holding its monitor.
+                if (scheduler.close() && scheduler.pendingTasks() == 0) {
                     this.schedulers.remove(graph, scheduler);
                     drained = true;
                 }
+            } catch (RuntimeException | Error error) {
+                failure = error;
             }
         }
-        if (!drained) {
+        if (!drained && (failure == null || scheduler.pendingTasks() != 0)) {
             // A running cron/job must finish before owner callbacks are queued
             // on its executor. In particular, do not rejoin a timed-out cron.
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error matchedError) {
+                throw matchedError;
             }
             if (failure != null) {
                 throw (RuntimeException) failure;
             }
             return;
         }
+        // An owner-close failure retains the scheduler, but idle workers can still clean up.
         for (Runnable close : new Runnable[]{() -> {
             if (!this.taskExecutor.isTerminated()) {
                 this.closeTaskTx(graph);
@@ -178,8 +169,8 @@ public final class TaskManager {
                 }
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error matchedError) {
+            throw matchedError;
         }
         if (failure != null) {
             throw (RuntimeException) failure;
@@ -226,8 +217,8 @@ public final class TaskManager {
                     failure.addSuppressed(error);
                 }
             }
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error matchedError) {
+                throw matchedError;
             }
             throw new HugeException("Exception when closing task tx", failure);
         }
@@ -261,71 +252,54 @@ public final class TaskManager {
     }
 
     public void shutdown(long timeout) {
-        assert this.schedulers.isEmpty() : this.schedulers.size();
+        if (!this.schedulers.isEmpty()) {
+            LOG.warn("Stopping task executors with {} schedulers still registered", this.schedulers.size());
+        }
 
-        Throwable ex = null;
-        boolean terminated = this.distributedSchedulerExecutor.isTerminated();
-        final TimeUnit unit = TimeUnit.SECONDS;
+        try {
+            shutdownExecutor(this.distributedSchedulerExecutor, timeout);
+            shutdownExecutor(this.taskExecutor, timeout);
+            // Early REST/Gremlin closes can retain graphs while tasks finish.
+            // Their DB owners must close before the owner executor stops.
+            this.closeRetainedGraphs();
+            shutdownExecutor(this.taskDbExecutor, timeout);
+            shutdownExecutor(this.ephemeralTaskExecutor, timeout);
+            shutdownExecutor(this.schemaTaskExecutor, timeout);
+            shutdownExecutor(this.olapTaskExecutor, timeout);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new HugeException("Failed to wait for TaskScheduler", e);
+        } catch (TimeoutException e) {
+            throw new HugeException("Failed to wait for TaskScheduler", e);
+        }
+    }
 
-        if (!this.distributedSchedulerExecutor.isShutdown()) {
-            this.distributedSchedulerExecutor.shutdown();
+    private static void shutdownExecutor(ExecutorService executor, long timeout)
+                                         throws InterruptedException, TimeoutException {
+        if (!executor.isShutdown()) {
+            executor.shutdown();
+        }
+        if (!executor.isTerminated() && !executor.awaitTermination(timeout, TimeUnit.SECONDS)) {
+            throw new TimeoutException(timeout + "s");
+        }
+    }
+
+    private void closeRetainedGraphs() {
+        Throwable failure = null;
+        for (HugeGraphParams graph : new ArrayList<>(this.schedulers.keySet())) {
             try {
-                terminated = this.distributedSchedulerExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
+                graph.graph().close();
+            } catch (Exception | Error error) {
+                if (failure == null) {
+                    failure = error;
+                } else if (failure != error) {
+                    failure.addSuppressed(error);
+                }
             }
         }
-
-        if (terminated && !this.taskExecutor.isShutdown()) {
-            this.taskExecutor.shutdown();
-            try {
-                terminated = this.taskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.taskDbExecutor.isShutdown()) {
-            this.taskDbExecutor.shutdown();
-            try {
-                terminated = this.taskDbExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.ephemeralTaskExecutor.isShutdown()) {
-            this.ephemeralTaskExecutor.shutdown();
-            try {
-                terminated = this.ephemeralTaskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.schemaTaskExecutor.isShutdown()) {
-            this.schemaTaskExecutor.shutdown();
-            try {
-                terminated = this.schemaTaskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.olapTaskExecutor.isShutdown()) {
-            this.olapTaskExecutor.shutdown();
-            try {
-                terminated = this.olapTaskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (!terminated) {
-            ex = new TimeoutException(timeout + "s");
-        }
-        if (ex != null) {
-            throw new HugeException("Failed to wait for TaskScheduler", ex);
+        if (failure != null) {
+            // Keep the registry and DB executor available for an explicit retry.
+            throw new HugeException("Failed to close retained graphs before task DB shutdown", failure);
         }
     }
 

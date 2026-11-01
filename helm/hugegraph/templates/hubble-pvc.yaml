@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- $hubble := get .Values "hubble" | default dict }}
 {{- if and (get $hubble "enabled" | default false) .Values.hubble.persistence.enabled }}
 apiVersion: v1
@@ -35,7 +36,9 @@ spec:
   resources:
     requests:
       storage: {{ .Values.hubble.persistence.size }}
-  {{- if .Values.hubble.persistence.storageClassName }}
+  {{- if eq .Values.hubble.persistence.storageClassName "-" }}
+  storageClassName: ""
+  {{- else if .Values.hubble.persistence.storageClassName }}
   storageClassName: {{ .Values.hubble.persistence.storageClassName | quote }}
   {{- end }}
 {{- end }}

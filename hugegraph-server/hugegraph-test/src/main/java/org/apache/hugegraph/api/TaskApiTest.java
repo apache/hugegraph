@@ -40,6 +40,18 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testRebuildMissingLabelsReturnsNotFound() {
+        for (String type : new String[]{"vertexlabels", "edgelabels", "indexlabels"}) {
+            String path = "/graphspaces/DEFAULT/graphs/hugegraph/jobs/rebuild/" + type;
+            Response response = client().put(path, "issue103_missing_label", "", ImmutableMap.of());
+            String body = assertResponseStatus(404, response);
+            Assert.assertTrue(body.contains("issue103_missing_label"));
+            Assert.assertFalse(body.contains("NullPointerException"));
+            Assert.assertFalse(body.contains("task_id=null"));
+        }
+    }
+
+    @Test
     public void testList() {
         // create a task
         int taskId = this.rebuild();

@@ -230,8 +230,8 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
             };
             this.lifecycle.execute(this.executor, scanning);
         } catch (Exception e) {
-            StatusRuntimeException ex = e instanceof StatusRuntimeException ?
-                                        (StatusRuntimeException) e : HgGrpc.toErr(Status.INTERNAL, null, e);
+            StatusRuntimeException ex = e instanceof StatusRuntimeException failure ?
+                                        failure : HgGrpc.toErr(Status.INTERNAL, null, e);
             this.failServer(ex);
         }
 

@@ -15,54 +15,58 @@
 # limitations under the License.
 #
 
-# A non-ClusterIP Hubble Service publishes the plain-HTTP UI directly, the
-# same class of exposure the PD Service and the TLS-less Ingresses already
-# gate behind an explicit acknowledgement.
-suite: Hubble Service exposure gate
+suite: Hubble Service exposure and mode defaults
 templates:
-  - server-deployment.yaml
   - hubble-service.yaml
 tests:
-  # validateValues is included from the Server Deployment, so the
-  # rejections render that template.
-  - it: rejects a NodePort Hubble Service without the acknowledgement
-    template: server-deployment.yaml
-    set:
-      hubble.enabled: true
-      hubble.service.type: NodePort
+  - it: defaults to an automatic NodePort in easy mode
     asserts:
-      - failedTemplate:
-          errorPattern: "set hubble.service.allowInsecureExposure=true"
+      - equal:
+          path: spec.type
+          value: NodePort
+      - notExists:
+          path: spec.ports[0].nodePort
 
-  - it: rejects a LoadBalancer Hubble Service without the acknowledgement
-    template: server-deployment.yaml
+  - it: defaults to ClusterIP in strict mode
     set:
-      hubble.enabled: true
-      hubble.service.type: LoadBalancer
+      mode: strict
     asserts:
-      - failedTemplate:
-          errorPattern: "set hubble.service.allowInsecureExposure=true"
+      - equal:
+          path: spec.type
+          value: ClusterIP
 
-  - it: renders a NodePort Hubble Service once acknowledged
-    template: hubble-service.yaml
+  - it: honors an explicit NodePort in strict mode without acknowledgement
     set:
-      hubble.enabled: true
+      mode: strict
       hubble.service.type: NodePort
-      hubble.service.allowInsecureExposure: true
-      hubble.service.nodePort: 30088
+      hubble.service.nodePort: 8808
     asserts:
       - equal:
           path: spec.type
           value: NodePort
       - equal:
           path: spec.ports[0].nodePort
-          value: 30088
+          value: 8808
 
-  - it: leaves the default ClusterIP Service alone
-    template: hubble-service.yaml
+  - it: renders LoadBalancer without acknowledgement
     set:
-      hubble.enabled: true
+      hubble.service.type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  - it: honors an explicit ClusterIP in easy mode
+    set:
+      hubble.service.type: ClusterIP
     asserts:
       - equal:
           path: spec.type
           value: ClusterIP
+
+  - it: treats zero NodePort as automatic allocation
+    set:
+      hubble.service.nodePort: 0
+    asserts:
+      - notExists:
+          path: spec.ports[0].nodePort

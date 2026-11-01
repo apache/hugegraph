@@ -15,9 +15,11 @@
 # limitations under the License.
 #
 
-# Production starting point: 3 Server + 3 PD + 3 Store.
+# Multi-node starting point: 3 Server + 3 PD + 3 Store.
 # Size this profile again for the real graph, traffic, and failure budget.
 # Usage: helm install hg ./helm/hugegraph -f values-cluster.yaml
+# Entry and network policy inherit mode (easy by default).
+# Add --set mode=strict for ClusterIP and NetworkPolicy, or override either explicitly.
 
 pd:
   replicas: 3
@@ -33,7 +35,7 @@ pd:
     limits:
       cpu: "2"
       memory: 2Gi
-  # Pinned to "required": production must not co-locate PD quorum members.
+  # Keep PD quorum members on separate nodes.
   antiAffinity: required
   pdb:
     enabled: true
@@ -55,20 +57,11 @@ store:
     -XX:MaxMetaspaceSize=256m
     -XX:MaxDirectMemorySize=512m
     -XX:+UseContainerSupport
-  # The Store commits far more than its heap. conf/application-pd.yml, which
-  # the shipped conf/application.yml includes as a Spring profile, sets
-  # rocksdb.total_memory_size to 32000000000, and RaftRocksdbOptions splits
-  # that value into a RocksDB write cache and block cache, so those native
-  # caches are bounded by 32 GB rather than by the container. On top of that
-  # the jraft log storage registers its own 1 GiB LRU block cache once per
-  # process, plus heap, direct memory, metaspace and about a thousand threads.
-  # A 4Gi limit was below the steady state and OOM-killed all three Stores
-  # after roughly 1 GB of data; 8Gi holds, with 4.42 GiB anonymous RSS
-  # measured on k3s (2026-09-19). The limit bounds the damage, it does not
-  # bound RocksDB: the chart cannot set rocksdb.total_memory_size today,
-  # because the Store entrypoint rebuilds SPRING_APPLICATION_JSON from its
-  # own variables and no conf file is mounted. Raise both numbers together
-  # with the data size, or lower the RocksDB budget in a custom image.
+  # Container limits do not configure the JVM heap; javaOpts does. Store images
+  # with auto-sized RocksDB memory (apache/hugegraph#3254) give RocksDB half of
+  # the container limit left after heap, direct memory and a 1.5 GiB reserve;
+  # with this preset that is 2.5 GiB. Set store.extraEnv
+  # HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE (bytes) to use a different value.
   resources:
     requests:
       cpu: "1"
@@ -121,10 +114,8 @@ server:
     token:
       autoGenerate: true
 
-# The optional Hubble UI is not enabled here: authentication is already on
-# by default, so turn Hubble on with --set hubble.enabled=true (or the
-# snippet below) when the browser UI is wanted. Current Hubble images still
-# refuse to render if server.auth is explicitly disabled.
+# Hubble is enabled by default. Disable with --set hubble.enabled=false.
+# The optional resource override below remains available when needed.
 #
 # hubble:
 #   enabled: true
@@ -139,7 +130,9 @@ server:
 #       cpu: "1"
 #       memory: 1536Mi
 
-# Production-shaped installs isolate the release; list outside clients in
-# networkPolicy.<component>.extraIngress (see README, NetworkPolicy).
-networkPolicy:
-  enabled: true
+# Network isolation is selected by mode or an explicit enabled override.
+
+# Optional computation follows this preset only when explicitly enabled.
+vermeer:
+  enabled: false
+  mode: cluster

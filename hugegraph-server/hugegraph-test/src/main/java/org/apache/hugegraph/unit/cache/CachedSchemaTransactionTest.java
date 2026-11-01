@@ -484,8 +484,11 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
     }
 
     private static Object newV2SchemaCaches(int size) {
-        for (Class<?> clazz :
-             CachedSchemaTransactionV2.class.getDeclaredClasses()) {
+        return newSchemaCaches(CachedSchemaTransactionV2.class, size);
+    }
+
+    private static Object newSchemaCaches(Class<?> transactionClass, int size) {
+        for (Class<?> clazz : transactionClass.getDeclaredClasses()) {
             if (!"SchemaCaches".equals(clazz.getSimpleName())) {
                 continue;
             }
@@ -499,6 +502,55 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             }
         }
         throw new AssertionError("SchemaCaches class not found");
+    }
+
+    @Test
+    public void testSchemaCacheIdBoundsBeforeNarrowing() {
+        assertSchemaCacheIdBounds(newSchemaCaches(CachedSchemaTransaction.class, 16),
+                                 SchemaElement.class,
+                                 Mockito.mock(PropertyKey.class));
+        assertSchemaCacheIdBounds(newV2SchemaCaches(16), SchemaElement.class,
+                                 Mockito.mock(PropertyKey.class));
+    }
+
+    private static void assertSchemaCacheIdBounds(Object cache, Class<?> schemaClass,
+                                                   Object value) {
+        Class<?>[] readTypes = {HugeType.class, Id.class};
+        Class<?>[] writeTypes = {HugeType.class, Id.class, schemaClass};
+        for (HugeType type : new HugeType[]{HugeType.PROPERTY_KEY, HugeType.VERTEX_LABEL,
+                                           HugeType.EDGE_LABEL, HugeType.INDEX_LABEL}) {
+            // Grow the array consecutively before checking its last valid slot.
+            for (int key = 1; key < 16; key++) {
+                Whitebox.invoke(cache.getClass(), writeTypes, "set", cache, type,
+                                IdGenerator.of(key), value);
+            }
+            Id last = IdGenerator.of(15L);
+            Assert.assertSame(value, Whitebox.invoke(cache.getClass(), readTypes,
+                                                    "get", cache, type, last));
+            Whitebox.invoke(cache.getClass(), readTypes, "remove", cache, type, last);
+            Assert.assertNull(Whitebox.invoke(cache.getClass(), readTypes,
+                                              "get", cache, type, last));
+            Id valid = IdGenerator.of(1L);
+            Whitebox.invoke(cache.getClass(), writeTypes, "set", cache, type, valid, value);
+            Assert.assertSame(value, Whitebox.invoke(cache.getClass(), readTypes,
+                                                    "get", cache, type, valid));
+            for (long number : new long[]{16L, Integer.MAX_VALUE, 1L << 31,
+                                          (1L << 32) + 1L, Long.MAX_VALUE}) {
+                Id oversized = IdGenerator.of(number);
+                Assert.assertNull(Whitebox.invoke(cache.getClass(), readTypes,
+                                                  "get", cache, type, oversized));
+                Whitebox.invoke(cache.getClass(), writeTypes, "set", cache, type,
+                                oversized, null);
+                Assert.assertSame(value, Whitebox.invoke(cache.getClass(), readTypes,
+                                                        "get", cache, type, valid));
+                Whitebox.invoke(cache.getClass(), readTypes, "remove", cache, type, oversized);
+                Assert.assertSame(value, Whitebox.invoke(cache.getClass(), readTypes,
+                                                        "get", cache, type, valid));
+            }
+            Whitebox.invoke(cache.getClass(), readTypes, "remove", cache, type, valid);
+            Assert.assertNull(Whitebox.invoke(cache.getClass(), readTypes,
+                                              "get", cache, type, valid));
+        }
     }
 
     private static void clearV2SchemaCaches(Object arrayCaches) {

@@ -114,7 +114,7 @@ final class NotifyingExecutor {
         return option;
     }
 
-    private void handleErr(Throwable t) {
+    void handleErr(Throwable t) {
         try {
             notifyErrConsumer(HgNodeStatus.NOT_WORK).accept(t);
         } catch (Throwable tt) {

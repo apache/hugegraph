@@ -23,6 +23,7 @@ import org.apache.hugegraph.store.grpc.state.ScanState;
 import org.apache.hugegraph.store.node.entry.RestResult;
 import org.apache.hugegraph.store.node.grpc.HgStoreNodeState;
 import org.apache.hugegraph.store.node.grpc.HgStoreStreamImpl;
+import org.apache.hugegraph.store.node.listener.StoreProcessLifecycle;
 import org.apache.hugegraph.store.node.model.HgNodeStatus;
 import org.apache.hugegraph.store.node.task.TTLCleaner;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +42,12 @@ import com.google.protobuf.util.JsonFormat;
 @RestController
 public class HgStoreStatusController {
 
+    private final StoreProcessLifecycle processLifecycle;
+
+    public HgStoreStatusController(StoreProcessLifecycle processLifecycle) {
+        this.processLifecycle = processLifecycle;
+    }
+
     @Autowired
     HgStoreStreamImpl streamImpl;
     @Autowired
@@ -55,6 +62,11 @@ public class HgStoreStatusController {
     @GetMapping("/-/state")
     public HgNodeStatus getState() {
         return new HgNodeStatus(0, HgStoreNodeState.getState().name());
+    }
+
+    @GetMapping("/-/lifecycle")
+    public HgNodeStatus getLifecycle() {
+        return new HgNodeStatus(0, this.processLifecycle.getState());
     }
 
     @PutMapping("/-/state")

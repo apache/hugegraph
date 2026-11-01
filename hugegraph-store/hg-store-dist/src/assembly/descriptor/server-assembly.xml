@@ -25,7 +25,10 @@
 
     <!--    <format>tar.gz</format>-->
     <fileSets>
-
+        <fileSet>
+            <directory>${project.build.directory}/arthas</directory>
+            <outputDirectory>lib/arthas</outputDirectory>
+        </fileSet>
         <fileSet>
             <directory>${assembly.static.dir}/bin</directory>
             <outputDirectory>bin</outputDirectory>
@@ -47,6 +50,16 @@
     </fileSets>
 
     <files>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/ArthasAttach.java</source>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>644</fileMode>
+        </file>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/arthas.sh</source>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>755</fileMode>
+        </file>
         <file>
             <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/prepare-topling.sh</source>
             <outputDirectory>bin</outputDirectory>

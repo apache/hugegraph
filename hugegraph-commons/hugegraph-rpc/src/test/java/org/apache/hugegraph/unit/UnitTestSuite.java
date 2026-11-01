@@ -24,7 +24,8 @@ import org.junit.runners.Suite;
 @Suite.SuiteClasses({
     VersionTest.class,
     ExceptionTest.class,
-    ServerClientTest.class
+    ServerClientTest.class,
+    RpcConfigTest.class
 })
 public class UnitTestSuite {
 }

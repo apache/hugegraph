@@ -1,89 +1,257 @@
 # CI policy
 
-CI selects tests from the cumulative pull-request diff and known consumer dependencies.
-Selection controls what runs; branch protection controls what must pass before merging.
+[HugeGraph-Server CI](../.github/workflows/server-ci.yml) is the single entry point for
+PRs, supported branch pushes, weekly coverage and manual validation. Its preflight job
+selects affected tests, reads the project Java version, checks CI policy and verifies
+license headers and RAT. Selected Helm checks run as steps in preflight; other selected suites
+run through reusable workflows in the same run.
 
-| Workflow | Purpose | Merge requirement |
-| --- | --- | --- |
-| License Checker | License headers and RAT | `check-license` |
-| Server Memory CI | Memory unit, core and API tests on the project runtime | `Server memory tests` |
-| HugeGraph-Server CI | Related modules, current images and dependency audits | Advisory |
-| CodeQL | Source analysis, independently selected and scheduled | Advisory |
-| Server Compatibility CI | HBase, macOS, RISC-V and published-image Compose smoke | Advisory |
+The protection policy in [`.asf.yaml`](../.asf.yaml) requests no required CI contexts
+and retains one approving review. Failed jobs retain their failing check results.
+Valid selection and Java outputs allow selected tests to run even when
+the preflight license checks fail.
 
-Each workflow can be cancelled independently. Jobs within a workflow share its cancellation
-scope. Cancelling advisory checks does not cancel Memory or license checks, and does not
-prevent CodeQL from starting. Failed advisory checks retain their real failure result
-(except the existing RISC-V job, which still uses `continue-on-error`);
-maintainers decide whether they need another run or a requested change.
+Preflight uses the `check-license` name. Backend jobs are named `Server memory tests (Java ...)`
+and `Server rocksdb tests (Java ...)`; their native checks report real execution.
 
-## Affected inputs
+## Coverage with selective tests
 
-| Changed inputs | Selected validation |
+Each coverage upload has a stable test-group flag. The [Codecov configuration](../.github/codecov.yml)
+enables [carryforward](https://docs.codecov.com/docs/carryforward-flags). When Codecov can
+find an earlier flagged report in its recorded parent chain, it preserves that historical
+report for unexecuted groups such as Commons, PD/Store and backends.
+The PR comment explicitly marks carried-forward data. It is historical coverage,
+not evidence that a skipped test ran; native job failures remain failures.
+
+New flags need a complete initial baseline. The existing weekly full run supplies every
+flagged group for that commit. Master pushes remain smoke-only and upload no coverage;
+those commits can break Codecov's recorded parent chain. A fresh selective PR based on
+such a commit is not guaranteed to inherit the weekly baseline, and its project report
+may still be incomplete. Carryforward within an existing reported PR chain does not
+prove this works for a fresh PR. Full and selected runs retain explicit report paths and
+uploads; no extra collector runner or repeated master coverage tests are added.
+
+## What runs
+
+| Validation | Ordinary PR | Push to master | Weekly full run |
+| --- | --- | --- | --- |
+| Memory and RocksDB | Full unit, core and API tests when affected | No repeated full tests | Full tests |
+| macOS ARM | Startup, JNI, graph read/write and restart smoke when affected; full core/API for platform inputs | Affected smoke | Full core/API |
+| HBase and RISC-V | Directly related backend/platform or validation inputs only | No repeated tests | Full validation |
+| PD, Store, HStore and Cluster | Affected modules and known consumers | Current-commit distributed smoke | Full group |
+| CodeQL | Authentication, authorization, security, schema cache transactions, POM or CodeQL configuration inputs | No repeated scan | Full scan |
+| Docker, Helm and dependency audit | Corresponding inputs | Corresponding deployment smoke or checks | Full validation |
+
+macOS uses one `macos-15` ARM job for either smoke or full validation. Intel macOS is removed.
+The weekly run uses `cron: '0 6 * * 1'` with `timezone: Asia/Singapore`: Monday at 06:00,
+on the latest default-branch commit. GitHub may delay scheduled runs during high load;
+see [schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+### Affected inputs
+
+The rules live in [ci-policy.py](../.github/scripts/ci-policy.py). Ordinary Server changes
+select both Memory and RocksDB, plus ARM smoke. They do not select the complete PD/Store group.
+PD and Store changes select their own tests and downstream consumers; Commons and Struct
+select their known shared consumers. HStore and Cluster additionally follow distributed
+backend contracts, protocols, metadata, graph lifecycle and scheduling inputs. Distribution,
+startup and RocksDB inputs select ARM full validation and their deployment consumers.
+
+Unclassified paths or an unavailable diff/API conservatively select mainline coverage.
+HBase and RISC-V remain limited to explicit related inputs, weekly coverage or manual selection.
+The classifier uses paths, not PR titles or semantic interpretation of changed text.
+Contract scripts explicitly select their executing suites without adding runtime consumers.
+
+### Documentation
+
+Documentation-only ordinary PRs allocate just the preflight CI runner. On the two trusted
+master repositories, pushes also run the shared dependency producer and isolated writer so
+that the exact event commit has a dependency baseline; other documentation-only pushes use
+only preflight. This count excludes the non-test [Auto PR Commenter](../.github/workflows/auto-pr-review.yml), which runs
+once when a PR opens. Scheduled and manual selections still run their requested suites.
+
+Plain documentation includes regular-file root prose, README/AGENTS files and supported prose
+or static images under `docs/`, including nested module documentation. Runtime resources,
+configuration, source, fixtures, templates and executable or symbolic-link files do not qualify;
+for example, a test fixture ending in `.txt` still selects its module's tests.
+
+## Manual validation and reruns
+
+Use **Actions → HugeGraph-Server CI → Run workflow**, select a branch and choose `test-set`:
+
+| Test set | Validation |
 | --- | --- |
-| Server, including RocksDB and HStore | Memory, RocksDB, PD/Store/HStore and Cluster |
-| Server distribution or shared startup scripts | Server, PD/Store/HStore, Docker and Cluster |
-| Commons or Struct | Their tests and affected Server, PD, Store, HStore and Cluster tests |
-| PD or Store distribution scripts, config, assembly or POM | PD/Store/HStore, Cluster and Docker |
-| Other PD or Store inputs | PD/Store/HStore and Cluster |
-| Server parent/API POM or Commons version resource | Normal module coverage plus Docker artifact checks |
-| Cluster, Docker or Helm | Their suite and known consumers |
-| PR template, Dependabot configuration or retry checker/tests | Planner checks and license checks; no product suites |
-| Docker image/deployment checkers and their tests | Docker |
-| Dependencies, shared build inputs or unknown paths | Conservative full coverage |
+| `dependencies` | Dependency inventory and PR review; on trusted master, generate and submit a baseline |
+| `mainline` (default) | Full mainline modules, deployment/dependency checks and CodeQL; ARM smoke |
+| `distributed` | Struct, PD, Store, HStore and Cluster, plus distributed smoke |
+| `macos-arm` | ARM smoke and full RocksDB core/API tests |
+| `hbase`, `riscv64`, `codeql` | The corresponding complete specialist validation |
+| `full` | All retained suites, identical to weekly coverage |
 
-The Memory required result depends only on its planner, runtime preparation and real Memory
-matrix. A selected test that fails, is cancelled or unexpectedly skipped cannot pass it.
-When Memory is not selected, the result explains that no Memory test was needed.
-The advisory `affected-module-tests` summary lists selection, required status and actual results.
-It does not stand in for Memory or control CodeQL and compatibility checks.
+Fork contributors run additional validation in their fork's Actions. The manual entry point
+does not accept a PR number, apply labels or reuse another workflow's results.
+Automatic retries are disabled. Use GitHub's native rerun controls for failed jobs or a run;
+a rerun retains its original commit and event, subject to the preflight freshness checks.
 
-The Docker suite builds the current four production images through a shared Maven build.
-Checks consume those final images, verify identity, health, version and authentication, and
-exercise graph writes, reads and Gremlin queries on standalone and PD/Store/Server topologies. Published-image Hubble Compose smoke runs once in
-compatibility CI when RocksDB or Docker is selected; it does not verify the new PR images.
+## Java runtime compatibility
 
-HBase compatibility uses the existing HBase version in one standalone container with local
-storage. Its image is pinned by digest; no separate HDFS service or CI image build is needed.
-Pull, startup and readiness preparation have a five-minute total budget. Preparation failure
-ends the advisory check without falling back to a tar download. Existing HBase behavior tests
-remain. This changes CI preparation, not product support or backend deprecation policy.
+A positive suite passes only when its tests succeed and its current-run output has no
+Java runtime compatibility errors. Server, PD/Store, Commons, Struct and Cluster test
+steps capture both stdout and stderr before running `check-java-runtime-logs.sh`.
+Startup and Console smoke tests also inspect their output before cleanup. Cluster nodes
+forward their text runtime logs to the captured suite output before deletion.
+Missing or unreadable required logs fail the check.
 
-TinkerPop suites run only when the source, target or push/manual branch starts with
-`release-`, `test-` or `tinkerpop-`. PRs run no TP suites when neither source nor target
-branch matches these prefixes, including `upgrade/1.8.0` targeting `master`.
-Executed TP suites require non-empty reports with actual executed tests.
+The gate rejects denied module access and unknown or removed JVM options, including
+exceptions caught and printed by dependencies. Ordinary business errors and deliberate
+negative fixtures are not compatibility failures. Native smoke additionally uses `--native`
+for its existing native linkage checks.
 
-PD, Store and Commons have total job budgets of 30, 45 and 20 minutes, respectively.
-Cluster has 120 minutes for its two 45-minute test windows and build/diagnostic time.
-Server and HStore budgets are defined in their workflow job settings.
+Launchers and tests share each component's `jvm-module.options`: PD and Store open
+`java.lang` for Hessian, while Console and dump-store reuse Server's existing options.
+Required module options are independent of custom `JAVA_OPTIONS` or `-j` flags; Surefire
+retains the JaCoCo agent. CI continues to use the project Java runtime and its existing
+suite-selection and required-check policy.
 
-## Documentation and freshness
 
-Only explicitly allowed prose and static documentation assets qualify as plain documentation.
-Packaged resources, configuration, source, tests and CI inputs never qualify. Documentation-only
-PRs skip compilation, backend services, images and PR CodeQL; lightweight selection and license
-checks still report. A source PR with a later documentation commit still tests its cumulative
-source changes. No result is reused from a previous run.
+## Freshness, runner use and budgets
 
-Plans record the event head and the actual merge commit and base tested. Checkout must match
-the event merge SHA, whose second parent must match the current PR head. Its first parent is
-the tested base; the event base may lag when master advances before checkout. A new source
-head invalidates the old run; target-branch advancement alone
-does not, matching non-strict branch protection. A selection/API failure conservatively selects
-all suites. A final metadata outage alone cannot invalidate completed Memory tests.
-Plans and actual results are diagnostics, not execution credentials for later runs.
+PR selection uses the cumulative diff against the checked-out merge commit's base. A source
+PR followed by a documentation-only commit still tests the cumulative source changes.
+Preflight verifies that the event merge commit's second parent matches the current PR head.
+A stale PR head fails preflight. Target-branch advancement alone does not invalidate a run.
+Plans and selection summaries describe this run; previous results are never reused.
 
-## Protection and retries
+A new PR head or master push cancels the previous automatic run for that PR or master ref,
+including its called workflows. Release/test branch pushes, manual runs, weekly runs and
+explicit rerun attempts remain independent. Checks keep their real failed results; there
+are no separate post-test aggregation runners or end-of-run metadata checks.
 
-`.asf.yaml` requests only `check-license` and `Server memory tests`. Keep these required check
-names stable. The Memory workflow runs real unit, core and API tests on the project runtime
-and reports their results through `Server memory tests`. Commons tests remain advisory
-and install only the Commons reactor and its upstream modules.
-`affected-module-tests` and CodeQL remain advisory. Verify live branch protection
-when changing required checks; do not forge a successful result or leave retired contexts required.
+Startup contracts run inside RocksDB validation. Struct tests and their shell contracts run
+inside the selected Store job, reusing its reactor build; a Struct-only selection retains
+its own runner. RocksDB version compatibility runs once inside the first selected PD, Store
+or HStore job, in that order. A push creating a branch has no previous revision; it
+reports this explicitly and skips only the before/after compatibility comparison. These added steps
+still execute after ordinary host-job failures;
+a host timeout or cancellation can stop them. Helm uses preflight, whose total budget is
+20 minutes. PR dependency review runs as the last step of the existing dependency job even
+if its build or inventory check failed. Informational OpenSSF Scorecard display is disabled;
+vulnerability checks and their failure threshold are unchanged. Store uploads Codecov data
+after all Maven checks so downloaded checksum files cannot contaminate a later RAT scan.
+These mergers remove four runner allocations from
+a complete mainline PR run, without dropping checks; heavy module suites remain separate.
+Docker's static checks, deployment contracts and current-image validation share one runner.
+The Docker job has a 90-minute total budget, with 25 minutes for deployment contracts and
+45 minutes for image build/runtime validation. Distributed smoke builds current PD, Store
+and Server images and checks authentication, readiness and graph read/write. It does not
+substitute published images for the current commit.
 
-Only failed push runs of License Checker and Server Memory CI automatically retry, at most
-twice. The trusted checker verifies the workflow path, attempt, repository and unchanged branch
-head before and after the delay. PRs and advisory workflows never automatically retry.
-Use a manual rerun when appropriate; a rerun retains its original commit and event.
+PD and Store reserve 45 and 70 minutes including their merged checks, rather than
+sharing the previous 30/45-minute limits. The dependency job retains the existing inventory
+budget; baseline-only builds keep a 60-minute limit. Commons has 20 minutes. Cluster has 120 minutes
+for its two 45-minute test windows and build/diagnostics. Other budgets are in the workflows.
+TinkerPop suites keep their dedicated branch policy: the source, target or push/manual branch
+must start with `release-`, `test-` or `tinkerpop-`. Executed suites require non-empty reports
+with actual tests.
+
+Each separate job or matrix item requests a runner; steps within a job share one.
+[Standard hosted runners are free for public repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories),
+but [plan-dependent total and macOS concurrency limits](https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners)
+still apply. Reducing job allocations and long executions lowers shared-pool demand;
+it does not guarantee a specific queue delay.
+
+## Dependency baseline
+
+The main CI coordinator selects the [shared dependency job](../.github/workflows/check-dependencies.yml)
+for baseline production on every trusted master push and manual `dependencies` run on master.
+Manual `mainline` and `full` runs keep all requested tests and inventory checks without
+producing a baseline, so master advancement cannot skip or fail those checks. The job installs
+the complete reactor once with Java 17 and `contents: read`, reusing `actions/setup-java`'s Maven cache. When the
+path classifier also selects dependency inventory checks, those checks and baseline
+production share this same installation instead of building the reactor twice. It generates
+each module's resolved graph with Ferstl 4.0.3. The repository's
+[stdlib serializer](../.github/scripts/dependency-snapshot.py) preserves the
+[official Maven parser 6.0.1](https://github.com/actions/maven-dependency-submission-action/tree/1f666f7ac2ab7b72cd5e22eaf7f23c8a581db1db)
+package URLs and relationships. Non-test scopes take precedence when Ferstl merges
+scopes onto one artifact; only test-only artifacts are development dependencies.
+Every tracked POM must have a graph; empty aggregator manifests are allowed, but a
+completely empty inventory fails. Fixture validation shares preflight and the dependency job;
+there is no separate validation runner. The [reusable submission workflow](../.github/workflows/submit-dependencies.yml)
+contains only the isolated writer. Only `apache/hugegraph` (not a fork) and the explicitly allowed
+`hugegraph/hugegraph` test fork on `refs/heads/master` can run the submission job,
+which alone has `contents: write`. PRs, other repositories and other refs cannot
+run the writer. Maven inherits no submission token, and checkout does not persist
+credentials. The same read-only job separately resolves all module dependency
+scopes with Apache Maven Dependency Plugin 3.8.1 `tree` JSON, sharing the installed
+reactor while keeping the two resolvers and JSON reports independent. Its
+[stdlib inventory adapter](../.github/scripts/dependency-inventory.py) records each POM's
+package URLs, scopes and direct/indirect relationships independently of the Ferstl
+parser. The writer requires exact equality with that inventory, including empty
+aggregators; a graph retaining one direct package while omitting another fails.
+The global runtime/shipped jar filename inventory has a different scope and does
+not replace this per-module check.
+
+A pinned `actions/upload-artifact` transfers `snapshot.json` and `inventory.json`
+as separate artifacts. The fresh writer runner uses fixed inline stdlib Python to
+verify the successful `dependency_license / dependency-check` producer in the same
+`server-ci.yml` run and both artifact/run/attempt/SHA identities
+before downloading. It bounds ZIP and JSON sizes, checks each archive digest,
+and reads only its one expected regular JSON member in memory. Duplicate members,
+paths and symlinks fail; no archive members are extracted to disk. A signed storage
+redirect is fetched without forwarding GitHub Authorization, and further redirects
+are refused. The writer does not check out the repository, run Maven, or execute
+downloaded code. The first-party upload action is permitted by the
+[ASF Actions policy](https://infra.apache.org/github-actions-policy.html).
+
+Checkout and snapshot use the event commit SHA. Master is checked before install
+and again after both reports are generated; a stale run fails. A newer master
+push cancels the older master run because only the current master can submit.
+Manual and scheduled runs use separate concurrency groups and cannot cancel automatic
+master pushes. Every trusted master push still selects the producer without path filters,
+so unrelated changes also can receive an exact-SHA baseline. Such a push still requires
+one complete reactor install; merging jobs removes duplicate builds, not that inherent cost.
+The writer
+checks the run attempt, successful producer, artifact ID/name, JSON schema,
+detector/correlator and source SHA/ref. It verifies all manifest paths against the
+event commit's source tree, rejects empty or mismatched inventory, and checks master
+immediately before and after submission. Snapshots retain the checked event SHA
+if master advances during submission; that run fails its final freshness check.
+
+If submission fails, use **Re-run all jobs** or start a fresh `workflow_dispatch`
+of **HugeGraph-Server CI**, choosing `dependencies` on master. **Re-run failed jobs**
+keeps the older generation artifact, which the
+writer rejects because both reports must be produced in the same run attempt.
+
+If a PR `dependency-review` failure reports 0 base snapshots, rerun that job only
+once the same repository's **HugeGraph-Server CI** run has successfully submitted the
+baseline for the event's
+exact `pull_request.base.sha` (not the branch's merge base or a newer master tip).
+If that SHA has no successful baseline, including a skipped or superseded run,
+rerunning the review alone cannot supply it. The producer supports only the current
+master tip; cancelling an older run does not backfill its earlier PR events.
+
+To recover, wait until the current master has a successful baseline in the same
+repository. Normally merge that master into the PR branch (or use Update branch)
+and push the update to create a new PR event. Confirm that the new event's
+`pull_request.base.sha` is the SHA with the successful baseline, then use that
+new dependency-review run. Rerunning the old job retains its old event payload
+and cannot move its base SHA to the submitted baseline.
+
+A fixed master-only correlator keeps successive baseline snapshots in the
+same stream within each repository; ASF and org inventories are independent. The writer's
+identity is separate from automatic PR submissions so they cannot replace its baseline.
+The [snapshot API](https://docs.github.com/en/rest/dependency-graph/dependency-submission#create-a-snapshot-of-dependencies-for-a-repository)
+requires Contents write permission. The writer also has Actions read permission
+to verify run and artifact metadata. Snapshot metadata identifies the repository
+adapter rather than claiming that the combined generation/submission action ran.
+
+This producer supplements the existing dependency review and shipped-inventory
+checks without changing their severity, license rules or inventory. Merging the
+workflow does not prove that either repository has a baseline: verify each repository's
+first master submission, including its SHA/ref, non-empty module manifests and a real
+dependency-review comparison against that baseline. Until then, that repository's baseline
+acceptance remains open. This workflow changes no repository settings.
+
+Dependency snapshot producer and submission-workflow changes select dependency checks.
+Snapshot fixture tests run in the entry job; they do not select runtime suites. Local Helm
+and RocksDB compatibility action changes select their existing owners. Changes to the CI
+classifier still receive conservative mainline validation.

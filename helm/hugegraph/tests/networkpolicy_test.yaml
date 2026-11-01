@@ -19,6 +19,21 @@ suite: NetworkPolicy
 templates:
   - networkpolicy.yaml
 tests:
+  - it: enables NetworkPolicy by strict mode defaults
+    set:
+      mode: strict
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: honors explicit false over the strict NetworkPolicy default
+    set:
+      mode: strict
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
   - it: renders nothing with the base values
     asserts:
       - hasDocuments:
@@ -31,14 +46,12 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: renders pd, store and server policies on the cluster preset
+  - it: renders no policy on the ordinary cluster preset
     values:
       - ../values-cluster.yaml
     asserts:
       - hasDocuments:
-          count: 3
-      - isKind:
-          of: NetworkPolicy
+          count: 0
 
   - it: renders pd, store and server policies on the single preset when enabled
     values:
@@ -47,12 +60,13 @@ tests:
       networkPolicy.enabled: true
     asserts:
       - hasDocuments:
-          count: 3
+          count: 4
 
   - it: adds a Hubble policy when Hubble is enabled
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     asserts:
       - hasDocuments:
@@ -62,6 +76,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     documentSelector:
       path: metadata.name
@@ -138,6 +153,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     documentSelector:
       path: metadata.name
@@ -217,6 +233,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     documentSelector:
       path: metadata.name
@@ -277,6 +294,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     documentSelector:
       path: metadata.name
@@ -328,6 +346,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
       hubble.mode: direct
     asserts:
@@ -365,6 +384,9 @@ tests:
   - it: leaves every Hubble peer out when Hubble is disabled
     values:
       - ../values-cluster.yaml
+    set:
+      hubble.enabled: false
+      networkPolicy.enabled: true
     asserts:
       - hasDocuments:
           count: 3
@@ -411,6 +433,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       pd.ports.raft: 9610
       store.ports.rest: 9520
       server.port: 9080
@@ -448,6 +471,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       pd.service.type: NodePort
       pd.service.allowInsecureExposure: true
       networkPolicy.pd.extraIngress:
@@ -480,6 +504,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       server.service.type: LoadBalancer
       server.service.allowInsecureExposure: true
       networkPolicy.server.extraIngress:
@@ -503,6 +528,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       server.ingress.enabled: true
       server.ingress.allowPlainHttp: true
       networkPolicy.server.extraIngress:
@@ -542,6 +568,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       server.advertiseUrl: http://hg.example.com:8080
       networkPolicy.server.extraIngress:
         - from:
@@ -562,6 +589,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
       hubble.service.type: NodePort
       hubble.service.allowInsecureExposure: true
@@ -588,6 +616,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
       pd.service.type: LoadBalancer
       pd.service.allowInsecureExposure: true
@@ -642,6 +671,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     asserts:
       - hasDocuments:
@@ -655,6 +685,8 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      hubble.enabled: false
+      networkPolicy.enabled: true
       nameOverride: graphdb
       fullnameOverride: x
     asserts:
@@ -686,6 +718,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     asserts:
       - matchRegex:
@@ -702,6 +735,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       networkPolicy.pd.extraIngress:
         - from:
             - namespaceSelector:
@@ -733,6 +767,8 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      hubble.enabled: false
+      networkPolicy.enabled: true
       networkPolicy.hubble.extraIngress:
         - from:
             - namespaceSelector:
@@ -757,6 +793,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       server.advertiseUrl: "   "
     documentSelector:
       path: metadata.name
@@ -770,6 +807,8 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      hubble.enabled: false
+      networkPolicy.enabled: true
       networkPolicy.pd: null
     asserts:
       - hasDocuments:
@@ -779,6 +818,7 @@ tests:
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
     asserts:
       - hasDocuments:
@@ -792,7 +832,7 @@ tests:
         documentIndex: 0
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-0.1.1
+          value: hugegraph-helm-0.4.0
         documentIndex: 0
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -800,7 +840,7 @@ tests:
         documentIndex: 1
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-0.1.1
+          value: hugegraph-helm-0.4.0
         documentIndex: 1
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -808,7 +848,7 @@ tests:
         documentIndex: 2
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-0.1.1
+          value: hugegraph-helm-0.4.0
         documentIndex: 2
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -816,13 +856,14 @@ tests:
         documentIndex: 3
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-0.1.1
+          value: hugegraph-helm-0.4.0
         documentIndex: 3
 
   - it: appends extra rules verbatim
     values:
       - ../values-cluster.yaml
     set:
+      networkPolicy.enabled: true
       hubble.enabled: true
       networkPolicy.store.extraIngress:
         - from:
@@ -915,45 +956,36 @@ tests:
       - failedTemplate:
           errorPattern: "networkPolicy[./]enabled"
 
-  - it: rejects an extraIngress rule without from
+  - it: accepts Kubernetes-valid an extraIngress rule without from
     set:
       networkPolicy.server.extraIngress:
         - ports:
             - port: 8080
     asserts:
-      - failedTemplate:
-          errorPattern: "(missing property 'from'|from is required)"
-
-  - it: rejects an extraIngress rule with an empty from
+      - notFailedTemplate: {}
+  - it: accepts Kubernetes-valid an extraIngress rule with an empty from
     set:
       networkPolicy.server.extraIngress:
         - from: []
     asserts:
-      - failedTemplate:
-          errorPattern: "(minItems|at least 1 items)"
-
-  - it: rejects an empty extraIngress rule
+      - notFailedTemplate: {}
+  - it: accepts Kubernetes-valid an empty extraIngress rule
     set:
       networkPolicy.pd.extraIngress:
         - {}
     asserts:
-      - failedTemplate:
-          errorPattern: "(missing property 'from'|from is required)"
-
-  - it: rejects an empty peer
+      - notFailedTemplate: {}
+  - it: accepts Kubernetes-valid an empty peer
     set:
       networkPolicy.pd.extraIngress:
         - from:
             - {}
     asserts:
-      - failedTemplate:
-          errorPattern: "(minProperties|at least 1 properties)"
-
-  - it: rejects a Hubble egress rule without to
+      - notFailedTemplate: {}
+  - it: accepts Kubernetes-valid a Hubble egress rule without to
     set:
       networkPolicy.hubble.extraEgress:
         - ports:
             - port: 9200
     asserts:
-      - failedTemplate:
-          errorPattern: "(missing property 'to'|to is required)"
+      - notFailedTemplate: {}

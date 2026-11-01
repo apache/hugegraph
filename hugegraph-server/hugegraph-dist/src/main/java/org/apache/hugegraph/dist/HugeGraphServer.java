@@ -23,6 +23,8 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.constant.ServiceConstant;
 import org.apache.hugegraph.core.GraphManager;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
@@ -60,6 +62,7 @@ public class HugeGraphServer {
         GremlinServer gremlinServer = null;
         MemoryMonitor memoryMonitor = null;
         try {
+            initializeQueryClasses();
             ConfigUtil.checkGremlinConfig(gremlinServerConf);
             HugeConfig restServerConfig = new HugeConfig(restServerConf);
             String graphsDir = restServerConfig.get(ServerOptions.GRAPHS);
@@ -132,6 +135,12 @@ public class HugeGraphServer {
         this.restServer = restServer;
         this.gremlinServer = gremlinServer;
         this.memoryMonitor = memoryMonitor;
+    }
+
+    static void initializeQueryClasses() {
+        // Gson reads java.version while ConditionQuery initializes. Complete
+        // this on the trusted startup thread before accepting Gremlin requests.
+        new ConditionQuery(HugeType.VERTEX);
     }
 
     private static void stopPreparedGremlinServer(GremlinServer server) {

@@ -29,20 +29,13 @@ import java.util.function.Supplier;
 public class AggregationFunctions {
 
     public static Supplier getAggregationBufferSupplier(String genericType) {
-        switch (genericType) {
-            case "java.lang.Long":
-                return () -> 0L;
-            case "java.lang.Integer":
-                return () -> 0;
-            case "java.lang.Float":
-                // fall through to case "java.lang.Double"
-            case "java.lang.Double":
-                return () -> 0.0;
-            case "java.lang.String":
-                return () -> "";
-            default:
-                throw new RuntimeException("unsupported generic type of buffer: " + genericType);
-        }
+        return switch (genericType) {
+            case "java.lang.Long" -> () -> 0L;
+            case "java.lang.Integer" -> () -> 0;
+            case "java.lang.Float", "java.lang.Double" -> () -> 0.0;
+            case "java.lang.String" -> () -> "";
+            default -> throw new RuntimeException("unsupported generic type of buffer: " + genericType);
+        };
     }
 
     public static class SumFunction<U, T extends Number> extends UnaryAggregationFunction<U, T> {
@@ -118,20 +111,16 @@ public class AggregationFunctions {
          */
         @Override
         public T reduce() {
-            switch (buffer.getClass().getName()) {
-                case "java.util.concurrent.atomic.AtomicLong":
-                    return (T) Long.valueOf(((AtomicLong) buffer).get());
-                case "java.util.concurrent.atomic.AtomicInteger":
-                    return (T) Integer.valueOf(((AtomicInteger) buffer).get());
-                case "com.google.common.util.concurrent.AtomicDouble":
-                    return (T) Double.valueOf(((AtomicDouble) buffer).get());
-                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat":
-                    return (T) Float.valueOf(((AtomicFloat) buffer).get());
-                default:
-                    // throw new Exception ?
-                    break;
-            }
-            return null;
+            return switch (buffer.getClass().getName()) {
+                case "java.util.concurrent.atomic.AtomicLong" -> (T) Long.valueOf(((AtomicLong) buffer).get());
+                case "java.util.concurrent.atomic.AtomicInteger" -> (T) Integer.valueOf(((AtomicInteger) buffer).get());
+                case "com.google.common.util.concurrent.AtomicDouble" ->
+                        (T) Double.valueOf(((AtomicDouble) buffer).get());
+                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat" ->
+                        (T) Float.valueOf(((AtomicFloat) buffer).get());
+                // throw new Exception ?
+                default -> null;
+            };
         }
 
         /**
@@ -264,22 +253,18 @@ public class AggregationFunctions {
 
         @Override
         public T reduce() {
-            switch (buffer.getClass().getName()) {
-                case "java.util.concurrent.atomic.AtomicLong":
-                    return (T) Long.valueOf(((AtomicLong) this.buffer).get());
-                case "java.util.concurrent.atomic.AtomicInteger":
-                    return (T) Integer.valueOf(((AtomicInteger) this.buffer).get());
-                case "com.google.common.util.concurrent.AtomicDouble":
-                    return (T) Double.valueOf(((AtomicDouble) this.buffer).get());
-                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat":
-                    return (T) Float.valueOf(((AtomicFloat) this.buffer).get());
-                case "java.lang.String":
-                    return (T) this.buffer;
-                default:
-                    // throw new Exception ?
-                    break;
-            }
-            return null;
+            return switch (buffer.getClass().getName()) {
+                case "java.util.concurrent.atomic.AtomicLong" -> (T) Long.valueOf(((AtomicLong) this.buffer).get());
+                case "java.util.concurrent.atomic.AtomicInteger" ->
+                        (T) Integer.valueOf(((AtomicInteger) this.buffer).get());
+                case "com.google.common.util.concurrent.AtomicDouble" ->
+                        (T) Double.valueOf(((AtomicDouble) this.buffer).get());
+                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat" ->
+                        (T) Float.valueOf(((AtomicFloat) this.buffer).get());
+                case "java.lang.String" -> (T) this.buffer;
+                // throw new Exception ?
+                default -> null;
+            };
         }
     }
 
@@ -397,22 +382,18 @@ public class AggregationFunctions {
 
         @Override
         public T reduce() {
-            switch (buffer.getClass().getName()) {
-                case "java.util.concurrent.atomic.AtomicLong":
-                    return (T) Long.valueOf(((AtomicLong) this.buffer).get());
-                case "java.util.concurrent.atomic.AtomicInteger":
-                    return (T) Integer.valueOf(((AtomicInteger) this.buffer).get());
-                case "com.google.common.util.concurrent.AtomicDouble":
-                    return (T) Double.valueOf(((AtomicDouble) this.buffer).get());
-                case "java.lang.Float":
-                    return (T) this.buffer;
-                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat":
-                    return (T) Float.valueOf(((AtomicFloat) this.buffer).get());
-                default:
-                    // throw new Exception ?
-                    break;
-            }
-            return null;
+            return switch (buffer.getClass().getName()) {
+                case "java.util.concurrent.atomic.AtomicLong" -> (T) Long.valueOf(((AtomicLong) this.buffer).get());
+                case "java.util.concurrent.atomic.AtomicInteger" ->
+                        (T) Integer.valueOf(((AtomicInteger) this.buffer).get());
+                case "com.google.common.util.concurrent.AtomicDouble" ->
+                        (T) Double.valueOf(((AtomicDouble) this.buffer).get());
+                case "java.lang.Float" -> (T) this.buffer;
+                case "org.apache.hugegraph.store.query.concurrent.AtomicFloat" ->
+                        (T) Float.valueOf(((AtomicFloat) this.buffer).get());
+                // throw new Exception ?
+                default -> null;
+            };
         }
 
     }

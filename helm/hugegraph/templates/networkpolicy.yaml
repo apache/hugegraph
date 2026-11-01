@@ -15,15 +15,15 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- /*
 One NetworkPolicy per component. Each object isolates its own Pods in both
 directions and carries all of their allows, so no object ever denies a Pod
 before that Pod's allows exist, whatever order the objects are applied in.
 Peers match the release and component labels; ports are the values the
 containers bind. The helm test Pod is selected by no policy, so its egress
-stays open and the Server policy admits it. Nothing outside the release is
-admitted unless <component>.extraIngress names it; exposing a component
-without such rules fails in validateValues instead of opening its ports.
+stays open and the Server policy admits it. Outside clients require native extraIngress rules. An exposed Service or
+Ingress does not automatically change these rules.
 */}}
 {{- $np := get .Values "networkPolicy" | default dict }}
 {{- if get $np "enabled" }}
@@ -32,6 +32,7 @@ without such rules fails in validateValues instead of opening its ports.
 {{- $serverPort := .Values.server.port }}
 {{- $hubbleEnabled := .Values.hubble.enabled }}
 {{- $hubblePd := and $hubbleEnabled (eq .Values.hubble.mode "pd") }}
+{{- $vermeerEnabled := (.Values.vermeer | default dict).enabled | default false }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -55,6 +56,10 @@ spec:
     - from:
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
+        {{- if $vermeerEnabled }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-master") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-worker") | nindent 8 }}
+        {{- end }}
         {{- if $hubblePd }}
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "hubble") | nindent 8 }}
         {{- end }}
@@ -92,6 +97,10 @@ spec:
         {{- include "hugegraph.netpol.ports" (list $store.raft) | nindent 8 }}
     - from:
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
+        {{- if $vermeerEnabled }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-master") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-worker") | nindent 8 }}
+        {{- end }}
       ports:
         {{- include "hugegraph.netpol.ports" (list $store.grpc $store.rest) | nindent 8 }}
     {{- if $hubblePd }}
@@ -134,6 +143,13 @@ spec:
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "test") | nindent 8 }}
         {{- if $hubbleEnabled }}
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "hubble") | nindent 8 }}
+        {{- end }}
+        {{- if (.Values.seatunnel | default dict).enabled }}
+        {{- include "hugegraph.netpol.seatunnelPeer" . | nindent 8 }}
+        {{- end }}
+        {{- if $vermeerEnabled }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-master") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-worker") | nindent 8 }}
         {{- end }}
       ports:
         {{- include "hugegraph.netpol.ports" (list $serverPort) | nindent 8 }}
@@ -181,6 +197,12 @@ spec:
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
       ports:
         {{- include "hugegraph.netpol.ports" (list $serverPort) | nindent 8 }}
+    {{- if $vermeerEnabled }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "vermeer-master") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list .Values.vermeer.master.httpPort) | nindent 8 }}
+    {{- end }}
     {{- if $hubblePd }}
     - to:
         {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}

@@ -18,6 +18,17 @@
 # Default values for HugeGraph HStore Helm chart.
 # See values-single.yaml and values-cluster.yaml for presets.
 
+# easy: browser/API NodePorts; strict: internal Services and NetworkPolicy.
+# Explicit component parameters always override these mode defaults.
+mode: easy
+# Shared PD metadata namespace used by Server and Store Schema reads.
+# Preserve the existing Server value on upgrades; this is not a migration switch.
+metadataCluster: hg-test
+global:
+  imageRegistry: ""
+persistence:
+  enabled: true
+
 fullnameOverride: ""
 nameOverride: ""
 
@@ -51,9 +62,8 @@ pd:
     # Shard replicas per partition, seeding PD at first bootstrap only.
     # Empty derives 3 when store.replicas is at least 3, else 1, so a fresh
     # multi-store install gets store-level HA instead of the image default
-    # of 1. The derivation skips 2 because PD clamps a shard count of 2 to
-    # 1 (two shards cannot elect a leader). An explicit value must be odd
-    # and must not exceed store.replicas.
+    # of 1. The derivation skips 2 because PD rejects even shard counts.
+    # An explicit value must be odd and must not exceed store.replicas.
     defaultShardCount: ""
     # Maximum shards per store, seeding PD at first bootstrap only. Also
     # fixes the initial partition count: store.replicas x this value /
@@ -85,12 +95,20 @@ pd:
     # When existingSecret and value are empty, create a kept release-pd-auth Secret.
     autoGenerate: true
   storage:
+    # Unset inherits persistence.enabled; false uses temporary emptyDir.
+    enabled:
     size: 10Gi
     storageClassName: ""
   resources: {}
-  # Pod-level and container-level securityContext. Empty by default because the
-  # published images run as root; set these to satisfy a restricted namespace.
-  podSecurityContext: {}
+  # Pod-level and container-level securityContext. The images run as the
+  # non-root UID/GID 10001; fsGroup lets that user write the data volume,
+  # including one created by an older image that ran as root. The templates
+  # apply this fsGroup whenever podSecurityContext sets none. A restricted
+  # namespace also needs securityContext.runAsNonRoot: true, which is safe
+  # with images from this version only.
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -125,10 +143,7 @@ pd:
   service:
     type: ClusterIP
     annotations: {}
-    # A non-ClusterIP type exposes PD's gRPC port, which has no
-    # authentication (raft membership RPCs included). The render refuses it
-    # unless this acknowledgement is set and reachability is restricted by
-    # other means (NetworkPolicy, load balancer allowlist, firewall).
+    # Legacy acknowledgement, accepted for compatibility; no render gate.
     allowInsecureExposure: false
     # Optional fixed NodePorts; require service.type NodePort or LoadBalancer.
     restNodePort:
@@ -142,11 +157,18 @@ pd:
   # raft.ip-whitelist.enabled); k8s network policy/auth owns that layer.
   # Set true to restore the image default.
   raftIpWhitelistEnabled: false
-  # Raft RPC timeout in milliseconds, rendered as -Draft.rpc-timeout. A
-  # vanished (not crashed) leader is waited on for this long per attempt, so
-  # the image default of 10000 leaves the cluster leaderless for about a
-  # minute where 3000 elects a new leader in seconds. Empty preserves the
-  # image default.
+  # Raft RPC timeout in milliseconds, rendered as -Draft.rpc-timeout. It
+  # bounds raft requests between PDs. On images that wait for a raft
+  # ReadIndex before they read an id counter it is also the deadline of that
+  # wait: id allocation fails after this long while the leader cannot
+  # confirm a read, for example while a new leader commits its first entry.
+  # Images that have raft.rpc-connect-timeout (default 1000) use that option
+  # for the Ping that opens a connection to a peer; set it through
+  # pd.javaOpts, for example -Draft.rpc-connect-timeout=1000. It does not
+  # bound requests on a connection that is already open. On older images
+  # this timeout is also the timeout of that Ping: their default of 10000
+  # leaves the cluster leaderless for about a minute where 3000 elects a new
+  # leader in seconds. Empty preserves the image default.
   raftRpcTimeoutMs: 3000
   # Explicit rollout strategy instead of the implicit StatefulSet default.
   updateStrategy:
@@ -167,9 +189,11 @@ pd:
   # HTTP path the PD startup and liveness probes hit. Empty derives it from
   # the replica count: /v1/health with more than one PD, so a normal election
   # never restarts a follower, and /v1/ready with a single PD, which has no
-  # election to lose and would otherwise pass /v1/health forever after losing
-  # leadership for good (apache/hugegraph#3222). Startup follows liveness so
+  # election to lose. Older images otherwise pass /v1/health forever after
+  # losing leadership for good (apache/hugegraph#3222). Startup follows liveness so
   # the boot-to-ready window sits inside the startup budget.
+  # TODO: drop the single-PD readiness derivation once the minimum supported image
+  # includes the /v1/health fatal Raft error fix for apache/hugegraph#3222.
   livenessPath: ""
   probes:
     startup:
@@ -205,10 +229,15 @@ store:
     rest: 8520
   dataPath: /hugegraph-store/storage
   storage:
+    # Unset inherits persistence.enabled; false uses temporary emptyDir.
+    enabled:
     size: 50Gi
     storageClassName: ""
   resources: {}
-  podSecurityContext: {}
+  # Same as pd.podSecurityContext: lets UID 10001 write the data volume.
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -240,7 +269,8 @@ store:
   pdb:
     enabled: true
     minAvailable: 2
-  waitImage: curlimages/curl:8.5.0
+  # Optional tool image override; empty reuses the Store image.
+  waitImage: ""
   # HTTP path the init container polls on every PD peer; a majority must
   # answer 2xx before the Store starts. /v1/ready makes that majority a
   # raft quorum instead of a set of live listeners.
@@ -274,6 +304,11 @@ store:
 
 server:
   replicas: 3
+  # DEFAULT preserves the image config; non-default values select PD service metadata.
+  # serviceId accepts printable ASCII, including spaces and backslashes.
+  # Create a non-default graph space before starting a Server assigned to it.
+  serviceId: DEFAULT
+  graphSpace: DEFAULT
   image:
     repository: hugegraph/server
     # TODO: leave tag empty to inherit Chart.appVersion after the 1.8.0
@@ -329,8 +364,15 @@ server:
   pdb:
     enabled: false
     minAvailable: 2
-  # Image used by the Helm test hook.
-  waitImage: curlimages/curl:8.5.0
+  # Optional Helm test image override; empty reuses the Server image.
+  waitImage: ""
+  # Existing Gremlin graph binding checked on every Server Pod. Select the
+  # target graph explicitly; graphSpace does not create or infer this binding.
+  testGraphAlias: DEFAULT-hugegraph
+  # Optional Gremlin assertions, run with the hook's Server credential on every Pod.
+  # Supply trusted read-only scripts; read-only execution is not enforced.
+  # Use --set-file server.testGremlin=/path/to/assertions.groovy; assert expected results.
+  testGremlin: ""
   # Resources for the Helm test hook container. Bounded by default so the hook
   # cannot run unlimited on a restricted or quota-managed namespace.
   testResources:
@@ -344,6 +386,8 @@ server:
   # concurrent Server replicas never initialize the same backend. No
   # HG_SERVER_SKIP_INIT and no init Job.
   initStoreEnabled: false
+  # Maximum storage wait; startup probe defaults adapt to this value.
+  storageWaitTimeoutSeconds: 300
   auth:
     # On by default: a chart-managed release-admin Secret supplies the password
     # unless admin.existingSecret or admin.password is set. Set enabled=false
@@ -375,13 +419,10 @@ server:
   # Set this to a URL reachable from outside the cluster (NodePort, LoadBalancer, or Ingress) when an external Hubble uses PD mode; all replicas then announce that shared logical endpoint.
   advertiseUrl: ""
   service:
-    type: ClusterIP
+    # Unset inherits mode (easy: NodePort, strict: ClusterIP).
+    type:
     annotations: {}
-    # A non-ClusterIP type publishes the plain-HTTP Server API, and with it
-    # Basic-auth credentials and JWTs in cleartext, outside the cluster. The
-    # render refuses it unless this acknowledgement is set and reachability
-    # is restricted by other means (NetworkPolicy, load balancer allowlist,
-    # firewall). Prefer an HTTPS-terminating Ingress.
+    # Legacy acknowledgement, accepted for compatibility; no render gate.
     allowInsecureExposure: false
   ingress:
     enabled: false
@@ -400,14 +441,10 @@ server:
     targetCPUUtilizationPercentage: 70
   probes:
     startup:
-      # The guaranteed probe budget is (failureThreshold - 1) * periodSeconds,
-      # because kubelet may run the first probe immediately; 91 x 5 guarantees
-      # 450s, covering the 300s storage wait and Server process startup. The
-      # chart passes the guaranteed budget minus the storage wait to the image
-      # as HG_SERVER_STARTUP_TIMEOUT_S, so the start command and the probe
-      # give up together instead of the command self-killing at the image
-      # default of 120s.
-      failureThreshold: 91
+      # A first probe can run immediately; (failureThreshold - 1) * periodSeconds
+      # must cover the storage wait plus at least 120 seconds for Server startup.
+      # Unset derives a budget from storageWaitTimeoutSeconds.
+      failureThreshold:
       periodSeconds: 5
       timeoutSeconds: 5
     readiness:
@@ -419,10 +456,9 @@ server:
       failureThreshold: 3
       timeoutSeconds: 5
 
-# Optional Hubble UI. Serves plain HTTP; keep it on a ClusterIP Service or
-# behind an HTTPS-terminating Ingress, never directly on an untrusted network.
+# Hubble UI is enabled by default; disable with hubble.enabled=false.
 hubble:
-  enabled: false
+  enabled: true
   # pd: discover the cluster through PD (enables the cluster operations view).
   # direct: talk to the Server client Service only, without PD discovery.
   # Current Hubble images require server.auth to be enabled: the UI login
@@ -446,7 +482,8 @@ hubble:
   # size and storageClassName apply at install time only; the PVC is kept
   # on helm uninstall.
   persistence:
-    enabled: false
+    # Unset inherits persistence.enabled.
+    enabled:
     size: 1Gi
     storageClassName: ""
   resources: {}
@@ -476,14 +513,10 @@ hubble:
     # This chart makes no Kubernetes API calls, so no token is mounted.
     automountServiceAccountToken: false
   service:
-    type: ClusterIP
+    # Unset inherits mode (easy: NodePort, strict: ClusterIP).
+    type:
     annotations: {}
-    # A non-ClusterIP type publishes Hubble's plain-HTTP UI, which has no
-    # login of its own and carries the graph credentials typed into it,
-    # outside the cluster. The render refuses it unless this
-    # acknowledgement is set and reachability is restricted by other means
-    # (NetworkPolicy, load balancer allowlist, firewall). Prefer an
-    # HTTPS-terminating Ingress.
+    # Legacy acknowledgement, accepted for compatibility; no render gate.
     allowInsecureExposure: false
   ingress:
     enabled: false
@@ -495,9 +528,7 @@ hubble:
           - path: /
             pathType: Prefix
     tls: []
-    # Hubble serves plain HTTP, so an Ingress without tls is rejected at
-    # render time unless this is explicitly set to true for a trusted
-    # network.
+    # Legacy acknowledgement, accepted for compatibility.
     allowPlainHttp: false
   probes:
     startup:
@@ -513,20 +544,159 @@ hubble:
       failureThreshold: 3
       timeoutSeconds: 5
 
-# Kubernetes NetworkPolicy: one policy per component that admits only the
-# traffic the components exchange, plus DNS. Off here because these values
-# cannot know this release's clients; values-cluster.yaml turns it on. Only
-# enforced when the network plugin implements NetworkPolicy (kind v0.25+,
+# Optional engine using Apache SeaTunnel's native hybrid Kubernetes deployment.
+# One hybrid StatefulSet serves both modes; HTTP includes the built-in Web UI.
+seatunnel:
+  enabled: false
+  mode: standalone
+  # Used in cluster mode; standalone always starts one hybrid node.
+  replicas: 2
+  image:
+    repository: apache/seatunnel
+    tag: "3.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    # Unset inherits easy: NodePort / strict: ClusterIP; explicit ClusterIP stays private.
+    type:
+    # Unset or 0 allocates a port; nonzero requires type NodePort.
+    nodePort:
+    annotations: {}
+  auth:
+    # Native HTTP Basic authentication for the Web UI and all REST endpoints.
+    # Independent of the HugeGraph credential used by source/sink connectors.
+    username: admin
+    # Empty generates 6 characters in easy / 16 in strict; upgrades reuse the kept Secret.
+    password: ""
+  # Replaces the image's jvm_options; reserve memory outside the heap under 2Gi.
+  javaOpts: >-
+    -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxMetaspaceSize=256m
+    -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/seatunnel.hprof
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1536Mi
+    limits:
+      memory: 2Gi
+  # Match the other workloads. The upstream image runs as root; configure a
+  # compatible UID and writable paths before enabling runAsNonRoot.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  # Native Kubernetes env entries; matching names override automatic HG_* values.
+  # HG_HOST/PORT/PROTOCOL, HG_USERNAME/PASSWORD and HG_GRAPH_SPACE/NAME default to
+  # this release's Server, existing admin Secret, graph space and graph_a.
+  env: []
+  # Full native configuration files, keyed by filename (e.g. seatunnel.yaml).
+  # Keep member port 5801 and HTTP 8080 when overriding discovery/engine files.
+  config: {}
+
+# Optional native graph-computing engine. Both modes remain disabled until opted in.
+# standalone runs Master + Worker containers together; cluster uses separate Pods.
+vermeer:
+  enabled: false
+  mode: standalone
+  image:
+    repository: hugegraph/vermeer
+    # Tracks development builds. Pin a compatible tag or digest for production.
+    tag: latest
+    # Optional immutable digest; when set it takes priority over tag.
+    digest: ""
+    pullPolicy: Always
+  auth:
+    # Token signing factor. existingSecret > value > a stable generated Secret.
+    # File-backed signing keys require at least 16 characters; prefer 32 random characters.
+    value: ""
+    existingSecret: ""
+    key: token-factor
+    autoGenerate: true
+    # Separate native UI login: 6 characters in easy / 16 in strict for new passwords.
+    # Hubble continues to use the internal service token; upgrades reuse the kept Secret.
+    admin:
+      password: ""
+      existingSecret: ""
+      key: password
+      autoGenerate: true
+  # Optional JSON {"username":"...","password":"..."} for Schema reads.
+  # Empty reuses the deployment's Server administrator Secret as a password file.
+  hugegraphCredentials:
+    existingSecret: ""
+    key: credentials.json
+  service:
+    # Unset inherits easy: NodePort / strict: ClusterIP; explicit ClusterIP stays private.
+    type:
+    # Unset or 0 allocates a port; nonzero requires type NodePort.
+    nodePort:
+    annotations: {}
+  master:
+    httpPort: 6688
+    grpcPort: 6689
+    resources: {}
+    storage:
+      enabled:
+      size: 10Gi
+      storageClassName: ""
+    extraEnv: []
+  worker:
+    # Ignored in standalone mode, which always has one colocated Worker.
+    replicas: 3
+    httpPort: 6788
+    grpcPort: 6789
+    resources: {}
+    storage:
+      enabled:
+      size: 20Gi
+      storageClassName: ""
+    extraEnv: []
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  terminationGracePeriodSeconds: 60
+  probes:
+    startup:
+      failureThreshold: 60
+      periodSeconds: 5
+      timeoutSeconds: 3
+    readiness:
+      failureThreshold: 3
+      periodSeconds: 10
+      timeoutSeconds: 3
+    liveness:
+      failureThreshold: 3
+      periodSeconds: 20
+      timeoutSeconds: 3
+
+# Kubernetes NetworkPolicy: mode default plus explicit per-component rules.
+# easy exposes enabled browser/API entries; strict additionally isolates release egress.
+# Native HTTP follows Service exposure; RPC/member ports remain private.
+# Enforced only when the network plugin implements NetworkPolicy (kind v0.25+,
 # k3s, Calico, Cilium); elsewhere the objects are accepted and do nothing.
-# Nothing outside the release is admitted unless it is listed in
+# For core components, nothing outside the release is admitted unless listed in
 # <component>.extraIngress as standard NetworkPolicy ingress rules: apps in
 # other namespaces, Prometheus, Vermeer, and the Ingress controller. Exposing
-# a component (NodePort/LoadBalancer pd, server or hubble Service, a Server or
-# Hubble Ingress, server.advertiseUrl) with an empty extraIngress fails the
-# render. Every extra rule must name its peers ("from", or "to" for egress);
-# to admit any address, say so with an ipBlock such as 0.0.0.0/0.
+# a core component does not automatically add callers: configure extraIngress
+# and extraEgress using native Kubernetes NetworkPolicy rules.
 networkPolicy:
-  enabled: false
+  # Unset inherits mode (easy: false, strict: true).
+  enabled:
   pd:
     extraIngress: []
   store:
@@ -537,6 +707,18 @@ networkPolicy:
     extraIngress: []
     # For Hubble's optional outside endpoints (es.urls, prometheus.url set
     # through extraEnv). PD, Store and Server reach only the release and DNS.
+    extraEgress: []
+  vermeer:
+    # Extra callers must use Pod/namespace selectors; no ipBlock or open rules.
+    extraIngress: []
+    extraEgress: []
+  seatunnel:
+    # Extra callers must use Pod/namespace selectors; no ipBlock or open rules.
+    # Member port 5801 is restricted even when networkPolicy.enabled is false.
+    # With full isolation, peers, DNS and the Server API are allowed by default.
+    # Add trusted submitters/monitoring using native NetworkPolicy rules.
+    extraIngress: []
+    # External source/sink systems and shared checkpoint storage need egress.
     extraEgress: []
 
 # No init Job; see README.md for the HStore initialization contract.

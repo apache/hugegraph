@@ -234,7 +234,8 @@ public class TaskCoreTest extends BaseCoreTest {
         TaskScheduler scheduler = graph.taskScheduler();
 
         Id id = IdGenerator.of(88891);
-        HugeTask<?> task = new HugeTask<>(id, null, new SleepCallable<>());
+        BlockingCallable.reset();
+        HugeTask<?> task = new HugeTask<>(id, null, new BlockingCallable<>());
         task.type("test");
         task.name("delete-incomplete-task");
         scheduler.schedule(task);
@@ -248,13 +249,14 @@ public class TaskCoreTest extends BaseCoreTest {
                                           e.getMessage());
                 });
             } else {
-                waitUntilTaskRunning(scheduler);
+                Assert.assertTrue(BlockingCallable.awaitStarted());
                 HugeTask<?> deleted = scheduler.delete(id, false);
                 Assert.assertNotNull(deleted);
                 Assert.assertEquals(TaskStatus.DELETING, deleted.status());
                 Assert.assertEquals(TaskStatus.DELETING, scheduler.task(id).status());
             }
         } finally {
+            BlockingCallable.release();
             try {
                 scheduler.waitUntilAllTasksCompleted(10);
             } catch (TimeoutException ignored) {
@@ -603,6 +605,9 @@ public class TaskCoreTest extends BaseCoreTest {
 
         Assert.assertEquals(TaskStatus.SUCCESS, task.status());
         Assert.assertEquals("{\"k1\":13579,\"k2\":\"24680\"}", task.result());
+
+        // Future.get() publishes the result before done() and native owner cleanup finish.
+        scheduler.waitUntilAllTasksCompleted(10);
 
         // Ephemeral tasks are not stored in DB, so these should throw NotFoundException
         Assert.assertThrows(NotFoundException.class, () -> {

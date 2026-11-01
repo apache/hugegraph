@@ -28,6 +28,11 @@
 # Contributor tooling, if present in a working tree. Never ship it.
 scripts/
 testdata/
+/tests/
+
+# Source documentation diagrams are not runtime chart files. Helm stores these
+# files in the release Secret; binary assets can exceed Kubernetes' 1 MiB limit.
+/images/
 
 # Never package a chart archive inside a chart.
 *.tgz

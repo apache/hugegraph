@@ -92,6 +92,76 @@ import io.grpc.stub.StreamObserver;
 
 public class ScanLifecycleTest extends ScanTestSupport {
 
+    @Test(timeout = 10000)
+    public void testBatchHalfCloseDoesNotBlockTransportCancellation() throws Exception {
+        ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+        HgStoreWrapperEx wrapper = mock(HgStoreWrapperEx.class);
+        ScanIterator iterator = mock(ScanIterator.class);
+        StreamObserver<KvPageRes> output = mock(StreamObserver.class);
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(wrapper.scanAll(anyString(), anyString(), any(byte[].class))).thenReturn(iterator);
+        when(iterator.hasNext()).thenAnswer(ignored -> {
+            reading.countDown();
+            try {
+                assertTrue(release.await(5, TimeUnit.SECONDS));
+            } catch (InterruptedException expected) {
+                interrupted.countDown();
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        });
+        HgStoreStreamImpl service = scanService(executor, wrapper);
+        Context.CancellableContext context = Context.current().withCancellation();
+        StreamObserver<ScanStreamBatchReq> input = context.call(() -> service.scanBatch(output));
+        FutureTask<Void> halfClosing = new FutureTask<>(() -> {
+            input.onCompleted();
+            return null;
+        });
+        FutureTask<Void> cancelling = new FutureTask<>(() -> {
+            context.cancel(null);
+            return null;
+        });
+        Thread halfClose = new Thread(halfClosing, "batch-scan-half-close");
+        Thread cancel = new Thread(cancelling, "batch-scan-context-cancel");
+        try {
+            input.onNext(batchRequest());
+            assertTrue(reading.await(1, TimeUnit.SECONDS));
+            halfClose.start();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (halfClose.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertEquals(Thread.State.BLOCKED, halfClose.getState());
+            assertTrue(Arrays.stream(halfClose.getStackTrace()).anyMatch(frame ->
+                    frame.getClassName().endsWith("ScanBatchResponse3$OrderWorker") &&
+                    frame.getMethodName().equals("inputCompleted")));
+
+            cancel.start();
+            assertTrue("transport cancellation must interrupt the blocked scan reader",
+                       interrupted.await(1, TimeUnit.SECONDS));
+            cancelling.get(1, TimeUnit.SECONDS);
+            halfClosing.get(1, TimeUnit.SECONDS);
+            executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
+            verify(iterator).close();
+            assertTrue("the cancelled scan must release its owner", scanRegistry(service).isEmpty());
+            assertCancelled(output);
+            verify(output, never()).onNext(any(KvPageRes.class));
+            verify(output, never()).onCompleted();
+        } finally {
+            release.countDown();
+            halfClose.join(2000);
+            cancel.join(2000);
+            context.cancel(null);
+            service.shutdownScans();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
+            assertFalse(halfClose.isAlive());
+            assertFalse(cancel.isAlive());
+        }
+    }
+
     @Test
     public void testFailedSelectionCleanupBlocksLifecycleCompletion() throws Exception {
         ScanIterator iterator = mock(ScanIterator.class);
@@ -293,8 +363,8 @@ public class ScanLifecycleTest extends ScanTestSupport {
             for (Field field : input.getClass().getDeclaredFields()) {
                 field.setAccessible(true);
                 Object captured = field.get(input);
-                if (captured instanceof ScanBatchResponse) {
-                    response = (ScanBatchResponse) captured;
+                if (captured instanceof ScanBatchResponse batchResponse) {
+                    response = batchResponse;
                 }
             }
             org.junit.Assert.assertNotNull(response);
@@ -1044,8 +1114,8 @@ public class ScanLifecycleTest extends ScanTestSupport {
             // Preserve cleanup even when the old implementation allocated a second producer.
             Object remaining = iterator.get(response);
             response.onCompleted();
-            if (remaining instanceof ScanIterator) {
-                ((ScanIterator) remaining).close();
+            if (remaining instanceof ScanIterator iteratorToClose) {
+                iteratorToClose.close();
             }
             executor.shutdownNow();
         }

@@ -212,11 +212,9 @@ public class Index implements GraphType, Cloneable {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof Index)) {
+        if (!(obj instanceof Index other)) {
             return false;
         }
-
-        Index other = (Index) obj;
         return this.id().equals(other.id());
     }
 
@@ -246,8 +244,8 @@ public class Index implements GraphType, Cloneable {
                                    Object fieldValues) {
         if (type.isStringIndex()) {
             String value = "";
-            if (fieldValues instanceof Id) {
-                value = IdGenerator.asStoredString((Id) fieldValues);
+            if (fieldValues instanceof Id id) {
+                value = IdGenerator.asStoredString(id);
             } else if (fieldValues != null) {
                 value = fieldValues.toString();
             }

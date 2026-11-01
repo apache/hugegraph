@@ -75,7 +75,7 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
 
     @PostConstruct
     public void init() {
-        RaftEngine.getInstance().init(pdConfig.getRaft());
+        RaftStartup.init(pdConfig);
         RaftEngine.getInstance().addStateListener(this);
         kvService = new KvService(pdConfig);
         subjects = new KvWatchSubject(pdConfig);

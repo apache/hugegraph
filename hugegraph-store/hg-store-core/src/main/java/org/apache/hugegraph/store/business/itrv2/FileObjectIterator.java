@@ -17,21 +17,23 @@
 
 package org.apache.hugegraph.store.business.itrv2;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 import org.apache.hugegraph.store.business.itrv2.io.SortShuffleSerializer;
 
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class FileObjectIterator<T> implements Iterator<T> {
+public class FileObjectIterator<T> implements Iterator<T>, AutoCloseable {
 
     private FileInputStream fis = null;
     private T current;
+    private boolean closed;
     private final String fn;
     private final SortShuffleSerializer<T> serializer;
 
@@ -42,36 +44,53 @@ public class FileObjectIterator<T> implements Iterator<T> {
 
     @Override
     public boolean hasNext() {
+        if (this.current != null) {
+            return true;
+        }
+        if (this.closed) {
+            return false;
+        }
         try {
             if (fis == null) {
                 fis = new FileInputStream(this.fn);
             }
             current = readObject(fis);
-
-            if (current != null) {
-                return true;
-            } else {
-                String parent = new File(this.fn).getParent();
-                new File(parent).delete();
+            if (current == null) {
+                close();
             }
-        } catch (Exception e) {
-            log.error("Failed to read object from file", e);
-            if (fis != null) {
-                try {
-                    fis.close();
-                    fis = null;
-                } catch (IOException ex) {
-                    log.warn("Failed to close file stream during error handling", ex);
-                }
-
-            }
+            return current != null;
+        } catch (IOException e) {
+            close();
+            throw new UncheckedIOException("Failed to read object from file " + this.fn, e);
+        } catch (RuntimeException e) {
+            close();
+            throw e;
         }
-        return false;
     }
 
     @Override
     public T next() {
-        return current;
+        if (!hasNext()) {
+            throw new NoSuchElementException();
+        }
+        T result = this.current;
+        this.current = null;
+        return result;
+    }
+
+    @Override
+    public void close() {
+        this.closed = true;
+        this.current = null;
+        if (this.fis != null) {
+            try {
+                this.fis.close();
+            } catch (IOException e) {
+                log.warn("Failed to close file stream", e);
+            } finally {
+                this.fis = null;
+            }
+        }
     }
 
     public T readObject(InputStream input) throws IOException {

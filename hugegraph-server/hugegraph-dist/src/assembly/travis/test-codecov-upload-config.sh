@@ -38,9 +38,11 @@ expected_files = {
         "hstore": "${{ env.REPORT_DIR }}/*.xml",
     },
     ".github/workflows/server-tests.yml": {
-        "build-server": "${{ env.REPORT_DIR }}/*.xml",
+        "build-server": "${{ env.REPORT_DIR }}/*.xml,hugegraph-server/target/site/jacoco/jacoco.xml",
     },
 }
+expected_flags = {"build-commons": "commons", "pd": "pd", "store": "store", "hstore": "hstore",
+                  "build-server": "server_${{ inputs.backend }}"}
 action_pattern = re.compile(
     r"^(?P<indent>\s*)(?P<dash>-\s+)?uses:\s*"
     r"(?:(?P<quote>['\"])codecov/codecov-action@"
@@ -176,7 +178,7 @@ for workflow_path in workflow_paths:
         if not files_match(uploads, expected_workflow_files):
             errors.append(f"{relative_path}: unexpected Codecov files inputs")
 
-    for line_number, _, version, inputs in uploads:
+    for line_number, job, version, inputs in uploads:
         version_match = version_pattern.match(version)
         if version_match is None or int(version_match.group("major")) < 5:
             errors.append(
@@ -189,6 +191,8 @@ for workflow_path in workflow_paths:
                 f"{relative_path}:{line_number}: Codecov upload must pass "
                 "secrets.CODECOV_TOKEN for trusted runs"
             )
+        if inputs.get("flags") != expected_flags.get(job):
+            errors.append(f"{relative_path}:{line_number}: unexpected Codecov flag for {job}")
         if inputs.get("disable_search") != "true":
             errors.append(
                 f"{relative_path}:{line_number}: Codecov upload must set "

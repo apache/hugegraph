@@ -17,46 +17,76 @@
 
 package org.apache.hugegraph.unit.serializer;
 
-import java.util.Arrays;
-import java.util.Date;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.Properties;
 import java.util.Set;
 
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.backend.serializer.AbstractSerializer;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.backend.serializer.BinarySerializer;
+import org.apache.hugegraph.backend.serializer.TextSerializer;
+import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
-import org.apache.hugegraph.backend.BackendColumn;
-import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.query.Condition;
 import org.apache.hugegraph.query.ConditionQuery;
-import org.apache.hugegraph.struct.schema.IndexLabel;
-import org.apache.hugegraph.structure.Index;
-import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
-import org.apache.hugegraph.type.HugeType;
-import org.apache.hugegraph.type.define.Directions;
-import org.apache.hugegraph.type.define.IdStrategy;
-import org.apache.hugegraph.type.define.IndexType;
+import org.apache.hugegraph.query.IdPrefixQuery;
 import org.apache.hugegraph.serializer.BytesBuffer;
-import org.apache.hugegraph.type.define.HugeKeys;
-import org.apache.hugegraph.util.Bytes;
-import org.apache.hugegraph.backend.serializer.BinarySerializer;
-import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.type.define.IdStrategy;
+import org.apache.hugegraph.type.define.IndexType;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
+import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.DateUtil;
 import org.junit.Test;
 import org.mockito.Mockito;
 
 public class BinarySerializerTest extends BaseUnitTest {
+
+    @Test
+    public void testEdgeQueryLabelCandidateContract() {
+        for (AbstractSerializer serializer : Arrays.asList(
+                new BinarySerializer(FakeObjects.newConfig()),
+                new TextSerializer(FakeObjects.newConfig()))) {
+            ConditionQuery eq = new ConditionQuery(HugeType.EDGE);
+            eq.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            eq.eq(HugeKeys.DIRECTION, Directions.OUT);
+            eq.eq(HugeKeys.LABEL, IdGenerator.of(2));
+            ConditionQuery in = new ConditionQuery(HugeType.EDGE);
+            in.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            in.eq(HugeKeys.DIRECTION, Directions.OUT);
+            in.query(Condition.in(HugeKeys.LABEL, Arrays.asList(IdGenerator.of(2))));
+            Assert.assertEquals(((IdPrefixQuery) serializer.writeQuery(eq)).prefix(),
+                                ((IdPrefixQuery) serializer.writeQuery(in)).prefix());
+
+            ConditionQuery multiple = new ConditionQuery(HugeType.EDGE);
+            multiple.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            multiple.eq(HugeKeys.DIRECTION, Directions.OUT);
+            multiple.query(Condition.in(HugeKeys.LABEL,
+                                         Arrays.asList(IdGenerator.of(2), IdGenerator.of(3))));
+            Assert.assertThrows(IllegalStateException.class, () -> serializer.writeQuery(multiple));
+        }
+    }
 
     @Test
     public void testLegacyStoredLabelExpiryReadEliminateAndAppendKeys() throws IOException {

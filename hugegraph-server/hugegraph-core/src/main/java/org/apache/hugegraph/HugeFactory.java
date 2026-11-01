@@ -187,10 +187,10 @@ public class HugeFactory {
         }
         try {
 
+            TaskManager.instance().shutdown(timeout);
             if (!EventHub.destroy(timeout)) {
                 throw new TimeoutException(timeout + "s");
             }
-            TaskManager.instance().shutdown(timeout);
             OltpTraverser.destroy();
         } catch (Throwable e) {
             LOG.error("Error while shutdown", e);

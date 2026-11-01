@@ -23,6 +23,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
@@ -65,8 +66,8 @@ public class RebuildAPI extends API {
         LOG.debug("Graph [{}] rebuild vertex label: {}", graph, name);
 
         HugeGraph g = graph(manager, graphSpace, graph);
-        return ImmutableMap.of("task_id",
-                               g.schema().vertexLabel(name).rebuildIndex());
+        return rebuildResult(g.schema().vertexLabel(name).rebuildIndex(),
+                             "vertex label", name);
     }
 
     @PUT
@@ -87,8 +88,8 @@ public class RebuildAPI extends API {
         LOG.debug("Graph [{}] rebuild edge label: {}", graph, name);
 
         HugeGraph g = graph(manager, graphSpace, graph);
-        return ImmutableMap.of("task_id",
-                               g.schema().edgeLabel(name).rebuildIndex());
+        return rebuildResult(g.schema().edgeLabel(name).rebuildIndex(),
+                             "edge label", name);
     }
 
     @PUT
@@ -109,7 +110,15 @@ public class RebuildAPI extends API {
         LOG.debug("Graph [{}] rebuild index label: {}", graph, name);
 
         HugeGraph g = graph(manager, graphSpace, graph);
-        return ImmutableMap.of("task_id",
-                               g.schema().indexLabel(name).rebuild());
+        return rebuildResult(g.schema().indexLabel(name).rebuild(),
+                             "index label", name);
+    }
+
+    private static Map<String, Id> rebuildResult(Id taskId, String type, String name) {
+        // Builders intentionally return null when their label no longer exists.
+        if (taskId == null) {
+            throw new NotFoundException("The %s '%s' does not exist", type, name);
+        }
+        return ImmutableMap.of("task_id", taskId);
     }
 }

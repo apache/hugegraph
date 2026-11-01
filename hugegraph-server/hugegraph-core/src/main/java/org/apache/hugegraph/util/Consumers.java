@@ -57,6 +57,7 @@ public final class Consumers<V> {
     private final CountDownLatch latch;
     private final BlockingQueue<V> queue;
     private volatile Throwable exception = null;
+    private volatile boolean stopped;
 
     public Consumers(ExecutorService executor, Consumer<V> consumer) {
         this(executor, consumer, null);
@@ -98,6 +99,7 @@ public final class Consumers<V> {
 
     public void start(String name) {
         this.exception = null;
+        this.stopped = false;
         if (this.executor == null) {
             return;
         }
@@ -117,15 +119,15 @@ public final class Consumers<V> {
     private Void safeRun(ContextCallable<Void> task) {
         try {
             return task.call(); // may fail before/after runAndDone()
-        } catch (Exception e) {
+        } catch (Throwable e) {
             // This exception is from ContextCallable wrapper (setContext/resetContext/delegate dispatch),
             // not from runAndDone() business logic (that one is handled inside runAndDone()).
-            if (this.exception == null) {
-                this.exception = e;
+            if (this.recordException(e)) {
                 LOG.error("Consumer worker failed in ContextCallable wrapper", e);
             } else {
                 LOG.warn("Additional worker failure in ContextCallable wrapper; first exception already recorded", e);
             }
+            this.stop();
             this.exceptionHandle(e);
         } finally {
             this.latch.countDown();
@@ -136,23 +138,31 @@ public final class Consumers<V> {
     private Void runAndDone() {
         try {
             this.run();
-        } catch (Exception e) {
+        } catch (Throwable e) {
             if (e instanceof StopExecution) {
-                this.queue.clear();
-                putQueueEnd();
+                Throwable[] suppressed = e.getSuppressed();
+                // Stop stays control flow, but failed cleanup must reach the caller.
+                for (Throwable failure : suppressed) {
+                    this.recordException(failure);
+                }
             } else {
-                if (this.exception == null) {
-                    this.exception = e;
+                if (this.recordException(e)) {
                     LOG.error("Unhandled exception in consumer task", e);
                 } else {
                     LOG.warn("Additional exception in consumer task; first exception already recorded", e);
                 }
             }
+            this.stop();
             this.exceptionHandle(e);
         } finally {
             this.done();
         }
         return null;
+    }
+
+    private void stop() {
+        this.stopped = true;
+        this.queue.clear();
     }
 
     private void run() {
@@ -167,6 +177,9 @@ public final class Consumers<V> {
     private boolean consume() {
         V elem = null;
         while (elem == null) {
+            if (this.stopped) {
+                return false;
+            }
             try {
                 elem = this.queue.poll(CONSUMER_WAKE_PERIOD, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
@@ -175,6 +188,9 @@ public final class Consumers<V> {
             }
         }
 
+        if (this.stopped) {
+            return false;
+        }
         if (elem == QUEUE_END) {
             putQueueEnd();
             return false;
@@ -192,9 +208,7 @@ public final class Consumers<V> {
         try {
             this.exceptionHandle.accept(e);
         } catch (Throwable ex) {
-            if (this.exception == null) {
-                this.exception = ex;
-            } else {
+            if (!this.recordException(ex)) {
                 LOG.warn("Error while calling exceptionHandle()", ex);
             }
         }
@@ -208,19 +222,32 @@ public final class Consumers<V> {
         try {
             this.doneHandle.run();
         } catch (Throwable e) {
-            if (this.exception == null) {
-                this.exception = e;
-            } else {
+            if (!this.recordException(e)) {
                 LOG.warn("Error while calling done()", e);
             }
+            this.stop();
         }
+    }
+
+    private synchronized boolean recordException(Throwable failure) {
+        if (this.exception == null) {
+            this.exception = failure;
+            return true;
+        }
+        if (this.exception != failure) {
+            for (Throwable suppressed : this.exception.getSuppressed()) {
+                if (suppressed == failure) {
+                    return false;
+                }
+            }
+            this.exception.addSuppressed(failure);
+        }
+        return false;
     }
 
     private Throwable throwException() {
         assert this.exception != null;
-        Throwable e = this.exception;
-        this.exception = null;
-        return e;
+        return this.exception;
     }
 
     public void provide(V v) throws Throwable {
@@ -232,9 +259,20 @@ public final class Consumers<V> {
             throw this.throwException();
         } else {
             try {
-                this.queue.put(v);
+                while (!this.stopped &&
+                       !this.queue.offer(v, CONSUMER_WAKE_PERIOD, TimeUnit.MILLISECONDS)) {
+                    // A stopped worker must not leave a producer blocked on a full queue.
+                }
+                if (this.stopped) {
+                    this.queue.clear();
+                    if (this.exception != null) {
+                        throw this.throwException();
+                    }
+                    throw new StopExecution("Consumer stopped");
+                }
             } catch (InterruptedException e) {
-                LOG.warn("Interrupt while queuing QUEUE_END", e);
+                Thread.currentThread().interrupt();
+                throw e;
             }
         }
     }
@@ -242,8 +280,12 @@ public final class Consumers<V> {
     private void putQueueEnd() {
         if (this.executor != null) {
             try {
-                this.queue.put(QUEUE_END);
+                while (!this.stopped &&
+                       !this.queue.offer(QUEUE_END, CONSUMER_WAKE_PERIOD, TimeUnit.MILLISECONDS)) {
+                    // Stop wakes consumers through its state, without another END token.
+                }
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 LOG.warn("Interrupted while enqueue", e);
             }
         }
@@ -258,11 +300,13 @@ public final class Consumers<V> {
                 putQueueEnd();
                 this.latch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 String error = "Interrupted while waiting for consumers";
                 for (Future f : this.runningFutures) {
                     f.cancel(true);
                 }
-                this.exception = new HugeException(error, e);
+                this.recordException(new HugeException(error, e));
+                this.stop();
                 LOG.warn(error, e);
             }
         }
@@ -331,11 +375,11 @@ public final class Consumers<V> {
     }
 
     public static RuntimeException wrapException(Throwable e) {
-        if (e instanceof RuntimeException) {
-            throw (RuntimeException) e;
+        if (e instanceof RuntimeException runtimeException) {
+            throw runtimeException;
         }
-        throw new HugeException("Error when running task: %s",
-                                HugeException.rootCause(e).getMessage(), e);
+        throw new HugeException("Error when running task: %s", e,
+                                HugeException.rootCause(e).getMessage());
     }
 
     public static class ExecutorPool {

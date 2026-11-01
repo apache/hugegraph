@@ -64,47 +64,35 @@ public class CollectionFactory {
     }
 
     public static <V> List<V> newList(CollectionType type) {
-        switch (type) {
-            case EC:
-                return new FastList<>();
-            case JCF:
-                return new ArrayList<>();
-            case FU:
-                return new ObjectArrayList<>();
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new FastList<>();
+            case JCF -> new ArrayList<>();
+            case FU -> new ObjectArrayList<>();
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <V> List<V> newList(CollectionType type,
                                       int initialCapacity) {
-        switch (type) {
-            case EC:
-                return new FastList<>(initialCapacity);
-            case JCF:
-                return new ArrayList<>(initialCapacity);
-            case FU:
-                return new ObjectArrayList<>(initialCapacity);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new FastList<>(initialCapacity);
+            case JCF -> new ArrayList<>(initialCapacity);
+            case FU -> new ObjectArrayList<>(initialCapacity);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <V> List<V> newList(CollectionType type,
                                       Collection<V> collection) {
-        switch (type) {
-            case EC:
-                return new FastList<>(collection);
-            case JCF:
-                return new ArrayList<>(collection);
-            case FU:
-                return new ObjectArrayList<>(collection);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new FastList<>(collection);
+            case JCF -> new ArrayList<>(collection);
+            case FU -> new ObjectArrayList<>(collection);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public <V> Set<V> newSet() {
@@ -120,47 +108,35 @@ public class CollectionFactory {
     }
 
     public static <V> Set<V> newSet(CollectionType type) {
-        switch (type) {
-            case EC:
-                return new UnifiedSet<>();
-            case JCF:
-                return new HashSet<>();
-            case FU:
-                return new ObjectOpenHashSet<>();
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedSet<>();
+            case JCF -> new HashSet<>();
+            case FU -> new ObjectOpenHashSet<>();
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <V> Set<V> newSet(CollectionType type,
                                     int initialCapacity) {
-        switch (type) {
-            case EC:
-                return new UnifiedSet<>(initialCapacity);
-            case JCF:
-                return new HashSet<>(initialCapacity);
-            case FU:
-                return new ObjectOpenHashSet<>(initialCapacity);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedSet<>(initialCapacity);
+            case JCF -> new HashSet<>(initialCapacity);
+            case FU -> new ObjectOpenHashSet<>(initialCapacity);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <V> Set<V> newSet(CollectionType type,
                                     Collection<V> collection) {
-        switch (type) {
-            case EC:
-                return new UnifiedSet<>(collection);
-            case JCF:
-                return new HashSet<>(collection);
-            case FU:
-                return new ObjectOpenHashSet<>(collection);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedSet<>(collection);
+            case JCF -> new HashSet<>(collection);
+            case FU -> new ObjectOpenHashSet<>(collection);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public <K, V> Map<K, V> newMap() {
@@ -180,47 +156,35 @@ public class CollectionFactory {
          * EC is faster 10%-20% than JCF, and it's more stable & less
          * memory cost(size is bigger, EC is better).
          */
-        switch (type) {
-            case EC:
-                return new UnifiedMap<>();
-            case JCF:
-                return new HashMap<>();
-            case FU:
-                return new Object2ObjectOpenHashMap<>();
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedMap<>();
+            case JCF -> new HashMap<>();
+            case FU -> new Object2ObjectOpenHashMap<>();
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <K, V> Map<K, V> newMap(CollectionType type,
                                           int initialCapacity) {
-        switch (type) {
-            case EC:
-                return new UnifiedMap<>(initialCapacity);
-            case JCF:
-                return new HashMap<>(initialCapacity);
-            case FU:
-                return new Object2ObjectOpenHashMap<>(initialCapacity);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedMap<>(initialCapacity);
+            case JCF -> new HashMap<>(initialCapacity);
+            case FU -> new Object2ObjectOpenHashMap<>(initialCapacity);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <K, V> Map<K, V> newMap(CollectionType type,
                                           Map<? extends K, ? extends V> map) {
-        switch (type) {
-            case EC:
-                return new UnifiedMap<>(map);
-            case JCF:
-                return new HashMap<>(map);
-            case FU:
-                return new Object2ObjectOpenHashMap<>(map);
-            default:
-                throw new AssertionError(
+        return switch (type) {
+            case EC -> new UnifiedMap<>(map);
+            case JCF -> new HashMap<>(map);
+            case FU -> new Object2ObjectOpenHashMap<>(map);
+            default -> throw new AssertionError(
                         "Unsupported collection type: " + type);
-        }
+        };
     }
 
     public static <V> MutableIntObjectMap<V> newIntObjectMap() {

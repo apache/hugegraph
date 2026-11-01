@@ -52,6 +52,7 @@ assert_output() {
 }
 
 assert_contract() {
+    local expected_timeout="${1:-300}"
     ! grep -q '/v1/health' "${CALL_LOG}" || \
         fail "/v1/health must not gate readiness"
     [[ -s "${ARGS_LOG}" ]] || fail "curl was not called"
@@ -68,11 +69,15 @@ assert_contract() {
     if grep -Fv -- '--max-time 3' "${ARGS_LOG}" | grep -q .; then
         fail "per-peer maximum timeout was not preserved"
     fi
-    assert_equal "outer timeout" "300s" "$(cat "${TIMEOUT_LOG}")"
+    assert_equal "outer timeout" "${expected_timeout}s" "$(cat "${TIMEOUT_LOG}")"
 }
 
 run_case() {
     local scenario="$1" peers="$2" abort_after="$3" password="${4:-test-password}"
+    local timeout_args=()
+    if [[ "$#" -ge 5 ]]; then
+        timeout_args=("WAIT_STORAGE_TIMEOUT_S=$5")
+    fi
     : > "${CALL_LOG}"
     : > "${ARGS_LOG}"
     : > "${CONFIG_LOG}"
@@ -80,7 +85,8 @@ run_case() {
     : > "${TIMEOUT_LOG}"
     : > "${DIST_ROOT}/conf/graphs/hugegraph.properties"
 
-    CASE_OUTPUT=$(env \
+    CASE_OUTPUT=$(env -u WAIT_STORAGE_TIMEOUT_S \
+        ${timeout_args[@]+"${timeout_args[@]}"} \
         PATH="${MOCK_BIN}:${PATH}" \
         MOCK_SCENARIO="${scenario}" \
         MOCK_ABORT_AFTER="${abort_after}" \
@@ -309,4 +315,23 @@ assert_output "No pd.peers configured, skipping storage wait"
     fail "warned about an unused PD credential with no pd.peers configured"
 echo "  PASS no credential warning without pd.peers"
 
-echo "10 passed, 0 failed"
+for storage_timeout in 1 600 86400; do
+    run_case "pd1-up" "pd0:8620,pd1:8620" 6 "test-password" "${storage_timeout}"
+    assert_equal "custom timeout ${storage_timeout} rc" "0" "${CASE_RC}"
+    assert_output "Timeout = ${storage_timeout}s"
+    assert_contract "${storage_timeout}"
+    echo "  PASS custom timeout ${storage_timeout}"
+done
+
+for storage_timeout in '' 0 -1 1.5 abc 86401 999999999999999999999; do
+    run_case "pd1-up" "pd0:8620,pd1:8620" 6 "test-password" "${storage_timeout}"
+    assert_equal "invalid timeout '${storage_timeout}' rc" "2" "${CASE_RC}"
+    assert_output "WAIT_STORAGE_TIMEOUT_S must be an integer from 1 to 86400 seconds"
+    [[ ! -s "${TIMEOUT_LOG}" && ! -s "${CALL_LOG}" ]] || \
+        fail "invalid timeout started polling PD"
+    [[ ! -s "${DIST_ROOT}/conf/graphs/hugegraph.properties" ]] || \
+        fail "invalid timeout modified the graph config"
+    echo "  PASS invalid timeout '${storage_timeout}'"
+done
+
+echo "20 passed, 0 failed"

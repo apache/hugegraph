@@ -27,7 +27,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
-import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.mutable.MutableLong;
 import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.id.Id;
@@ -57,7 +56,6 @@ import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 
 import com.google.common.base.Objects;
 
-@SuppressWarnings("deprecation") // StringEscapeUtils
 public abstract class AbstractAlgorithm implements Algorithm {
 
     public static final long MAX_RESULT_SIZE = 100L * Bytes.MB;
@@ -307,6 +305,26 @@ public abstract class AbstractAlgorithm implements Algorithm {
             }
         }
 
+        protected Object countElements(Iterator<? extends Element> elements) {
+            Throwable failure = null;
+            try {
+                Map<String, MutableLong> counts = new HashMap<>();
+                long total = 0L;
+                while (elements.hasNext()) {
+                    String label = elements.next().label();
+                    counts.computeIfAbsent(label, key -> new MutableLong()).increment();
+                    this.updateProgress(++total);
+                }
+                counts.put("*", new MutableLong(total));
+                return JsonUtil.asJson(counts);
+            } catch (RuntimeException | Error e) {
+                failure = e;
+                throw e;
+            } finally {
+                closeIterator(elements, failure);
+            }
+        }
+
         protected long traverse(String sourceLabel, String sourceCLabel,
                                 Consumer<Vertex> consumer) {
             return this.traverse(sourceLabel, sourceCLabel, consumer, null);
@@ -329,6 +347,7 @@ public abstract class AbstractAlgorithm implements Algorithm {
                                                           consumer, done);
             consumers.start("task-" + this.job.task().id());
             long total = 0L;
+            Throwable failure = null;
             try {
                 while (vertices.hasNext()) {
                     this.updateProgress(++this.progress);
@@ -339,12 +358,40 @@ public abstract class AbstractAlgorithm implements Algorithm {
             } catch (StopExecution e) {
                 // pass
             } catch (Throwable e) {
-                throw Consumers.wrapException(e);
+                failure = e;
             } finally {
-                consumers.await();
-                CloseableIterator.closeIterator(vertices);
+                awaitConsumers(consumers, vertices, failure);
             }
             return total;
+        }
+
+        protected static void awaitConsumers(Consumers<?> consumers,
+                                             Iterator<?> vertices,
+                                             Throwable failure) {
+            try {
+                consumers.await();
+            } catch (Throwable e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
+            }
+            try {
+                CloseableIterator.closeIterator(vertices);
+            } catch (Throwable e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+            if (failure != null) {
+                throw Consumers.wrapException(failure);
+            }
         }
 
         protected Iterator<Vertex> vertices() {
@@ -443,17 +490,31 @@ public abstract class AbstractAlgorithm implements Algorithm {
         protected <V> V execute(GraphTraversal<?, ?> traversal,
                                 Callable<V> callback) {
             long capacity = Query.defaultCapacity(MAX_QUERY_LIMIT);
+            Throwable failure = null;
             try {
                 return callback.call();
             } catch (Exception e) {
-                throw new HugeException("Failed to execute algorithm: %s",
-                                        e, e.getMessage());
+                HugeException error = new HugeException("Failed to execute algorithm: %s",
+                                                        e, e.getMessage());
+                failure = error;
+                throw error;
+            } catch (Error e) {
+                failure = e;
+                throw e;
             } finally {
                 Query.defaultCapacity(capacity);
                 try {
                     traversal.close();
-                } catch (Exception e) {
-                    throw new HugeException("Can't close traversal", e);
+                } catch (Exception | Error e) {
+                    if (failure == null) {
+                        if (e instanceof Error error) {
+                            throw error;
+                        }
+                        throw new HugeException("Can't close traversal", e);
+                    }
+                    if (failure != e) {
+                        failure.addSuppressed(e);
+                    }
                 }
             }
         }
@@ -626,10 +687,8 @@ public abstract class AbstractAlgorithm implements Algorithm {
         }
 
         private StringBuilder appendString(String str) {
-            if (str.indexOf('"') >= 0) {
-                str = StringEscapeUtils.escapeJson(str);
-            }
-            return this.json.append('"').append(str).append('"');
+            E.checkNotNull(str, "string");
+            return this.json.append(JsonUtil.toJson(str));
         }
 
         public void checkSizeLimit() {

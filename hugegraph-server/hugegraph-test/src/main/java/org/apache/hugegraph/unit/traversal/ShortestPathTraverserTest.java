@@ -360,11 +360,11 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
                                                Id label,
                                                long limit) {
             Object result = this.edges.removeFirst();
-            if (result instanceof RuntimeException) {
-                throw (RuntimeException) result;
+            if (result instanceof RuntimeException runtimeException) {
+                throw runtimeException;
             }
-            if (result instanceof Error) {
-                throw (Error) result;
+            if (result instanceof Error error) {
+                throw error;
             }
             return (Iterator<Edge>) result;
         }

@@ -200,19 +200,14 @@ public final class LockUtil {
     }
 
     public static String hugeType2Group(HugeType type) {
-        switch (type) {
-            case PROPERTY_KEY:
-                return PROPERTY_KEY_ADD_UPDATE;
-            case VERTEX_LABEL:
-                return VERTEX_LABEL_ADD_UPDATE;
-            case EDGE_LABEL:
-                return EDGE_LABEL_ADD_UPDATE;
-            case INDEX_LABEL:
-                return INDEX_LABEL_ADD_UPDATE;
-            default:
-                throw new AssertionError(String.format(
+        return switch (type) {
+            case PROPERTY_KEY -> PROPERTY_KEY_ADD_UPDATE;
+            case VERTEX_LABEL -> VERTEX_LABEL_ADD_UPDATE;
+            case EDGE_LABEL -> EDGE_LABEL_ADD_UPDATE;
+            case INDEX_LABEL -> INDEX_LABEL_ADD_UPDATE;
+            default -> throw new AssertionError(String.format(
                         "Invalid HugeType '%s'", type));
-        }
+        };
     }
 
     /**

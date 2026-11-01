@@ -50,7 +50,7 @@ run_launcher() {
     local -a provider_env=(-u TOPLINGDB_ROCKSDB_PROVIDER)
     [ "$provider" = default ] || provider_env=("TOPLINGDB_ROCKSDB_PROVIDER=$provider")
     mkdir -p "$top/bin" "$top/conf" "$top/lib" "$top/topling"
-    cp "$SOURCE_BIN/start-hugegraph-store.sh" "$top/bin/"
+    cp "$SOURCE_BIN/start-hugegraph-store.sh" "$SOURCE_BIN/jvm-module.options" "$top/bin/"
     cp "$SHARED_BIN/preload-topling.sh" "$top/bin/"
     cat > "$top/bin/util.sh" <<'MOCK'
 # Substitute only utility calls needed by this launcher fixture.

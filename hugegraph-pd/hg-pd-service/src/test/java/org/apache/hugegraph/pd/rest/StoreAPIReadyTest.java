@@ -35,6 +35,7 @@ import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.entity.LeaderChangeContext;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.error.RaftException;
 
 /**
  * Pins the status a readiness probe actually receives from {@code GET /v1/ready}: 503 while
@@ -120,6 +121,83 @@ public class StoreAPIReadyTest {
         return new LeaderChangeContext(LEADER, 5, Status.OK());
     }
 
+    @Test
+    public void testFatalErrorSurvivesLeaderStopAndAnswers503() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onLeaderStart(5);
+        this.stateMachine.onError(new RaftException());
+        this.stateMachine.onLeaderStop(new Status(-1, "snapshot failed"));
+
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkHealthy().getStatusCode());
+        Assert.assertEquals("", this.api.checkHealthy().getBody());
+        ResponseEntity<Map<String, Object>> response = this.api.checkReady();
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        Assert.assertEquals(State.STATE_ERROR.name(), response.getBody().get("state"));
+        Assert.assertEquals(Boolean.FALSE, response.getBody().get("isLeader"));
+    }
+
+    @Test
+    public void testQuorumLossRemainsLive() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onLeaderStart(5);
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onLeaderStop(Status.OK());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onStartFollowing(context());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onStopFollowing(context());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkReady().getStatusCode());
+    }
+
+    @Test
+    public void testQueuedFollowerCallbacksCannotRecoverFatalError() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onLeaderStart(5);
+        this.stateMachine.onError(new RaftException());
+        this.stateMachine.onLeaderStop(Status.OK());
+        this.stateMachine.onStartFollowing(context());
+        this.stateMachine.onStopFollowing(context());
+        assertTerminal(State.STATE_ERROR);
+    }
+
+    @Test
+    public void testQueuedLeaderStartCannotRecoverFatalError() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onError(new RaftException());
+        this.stateMachine.onLeaderStart(6);
+        this.stateMachine.onLeaderStop(Status.OK());
+        assertTerminal(State.STATE_ERROR);
+    }
+
+    @Test
+    public void testQueuedTransitionsCannotRecoverShutdown() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onShutdown();
+        this.stateMachine.onLeaderStart(6);
+        this.stateMachine.onLeaderStop(Status.OK());
+        this.stateMachine.onStartFollowing(context());
+        this.stateMachine.onStopFollowing(context());
+        assertTerminal(State.STATE_SHUTDOWN);
+    }
+
+    private void assertTerminal(State state) {
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE, this.api.checkHealthy().getStatusCode());
+        ResponseEntity<Map<String, Object>> response = this.api.checkReady();
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        Assert.assertEquals(state.name(), response.getBody().get("state"));
+        Assert.assertEquals(Boolean.FALSE, response.getBody().get("isLeader"));
+    }
+
+    @Test
+    public void testShutdownIsNotLive() {
+        this.stateMachine.onShutdown();
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkHealthy().getStatusCode());
+    }
+
     /**
      * A started raft node that fails the test if the endpoint calls it. Readiness is served
      * from the state machine callbacks precisely so that it never waits on the node lock.
@@ -128,17 +206,13 @@ public class StoreAPIReadyTest {
         return (Node) Proxy.newProxyInstance(
                 Node.class.getClassLoader(), new Class<?>[]{Node.class},
                 (proxy, method, args) -> {
-                    switch (method.getName()) {
-                        case "toString":
-                            return "untouchable raft node";
-                        case "hashCode":
-                            return System.identityHashCode(proxy);
-                        case "equals":
-                            return proxy == args[0];
-                        default:
-                            throw new AssertionError("the ready path must not touch the raft " +
-                                                     "node, it called " + method.getName());
-                    }
+                    return switch (method.getName()) {
+                        case "toString" -> "untouchable raft node";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == args[0];
+                        default -> throw new AssertionError("the ready path must not touch the raft " +
+                                                 "node, it called " + method.getName());
+                    };
                 });
     }
 }

@@ -149,8 +149,8 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
 
             startCmd.addAll(Arrays.asList(
                     "-Dname=HugeGraphServer" + this.index,
-                    "@" + Paths.get(SERVER_PACKAGE_PATH, BIN_DIR,
-                                    JVM_MODULE_OPTIONS_FILE),
+                    moduleOptions(Paths.get(SERVER_PACKAGE_PATH, BIN_DIR,
+                                            JVM_MODULE_OPTIONS_FILE)),
                     "-cp", storeClassPath,
                     "org.apache.hugegraph.dist.HugeGraphServer",
                     "./conf/gremlin-server.yaml",

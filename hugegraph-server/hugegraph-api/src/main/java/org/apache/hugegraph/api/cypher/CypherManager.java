@@ -44,6 +44,10 @@ public final class CypherManager {
         this.configurationFile = configurationFile;
     }
 
+    public CypherClient getAnonymousClient() {
+        return new CypherClient(this::cloneConfig);
+    }
+
     public CypherClient getClient(String userName, String password) {
         E.checkArgument(userName != null && !userName.isEmpty(),
                         "The userName parameter can't be null or empty");

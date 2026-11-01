@@ -176,16 +176,12 @@ public class IndexLabelRebuildJob extends SchemaJob {
     private SchemaElement schemaElement() {
         HugeType type = this.schemaType();
         Id id = this.schemaId();
-        switch (type) {
-            case VERTEX_LABEL:
-                return this.graph().vertexLabel(id);
-            case EDGE_LABEL:
-                return this.graph().edgeLabel(id);
-            case INDEX_LABEL:
-                return this.graph().indexLabel(id);
-            default:
-                throw new AssertionError(String.format(
+        return switch (type) {
+            case VERTEX_LABEL -> this.graph().vertexLabel(id);
+            case EDGE_LABEL -> this.graph().edgeLabel(id);
+            case INDEX_LABEL -> this.graph().indexLabel(id);
+            default -> throw new AssertionError(String.format(
                         "Invalid HugeType '%s' for rebuild", type));
-        }
+        };
     }
 }

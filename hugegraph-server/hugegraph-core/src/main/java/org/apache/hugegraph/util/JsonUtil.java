@@ -103,8 +103,7 @@ public final class JsonUtil {
      * @return target number
      */
     public static Object castNumber(Object object, Class<?> clazz) {
-        if (object instanceof Number) {
-            Number number = (Number) object;
+        if (object instanceof Number number) {
             if (clazz == Byte.class) {
                 object = number.byteValue();
             } else if (clazz == Integer.class) {

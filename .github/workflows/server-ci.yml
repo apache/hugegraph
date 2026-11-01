@@ -2,172 +2,215 @@ name: "HugeGraph-Server CI"
 
 on:
   push:
-    branches:
-      - master
-      - 'release-*'
-      - 'test-*'
-      - 'tinkerpop-*'
+    branches: [master, 'release-*', 'test-*', 'tinkerpop-*']
   pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+      timezone: Asia/Singapore
   workflow_dispatch:
+    inputs:
+      test-set:
+        description: Tests to run on the selected branch
+        type: choice
+        default: mainline
+        options: [mainline, dependencies, distributed, macos-arm, hbase, riscv64, codeql, full]
 
-# Keep the newest PR run; preserve independent push, release and manual runs.
+# New PR heads and master pushes replace their old runs; scheduled and manual runs stay independent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref) || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
-  plan:
+  preflight:
+    name: check-license
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     outputs:
+      dependency_baseline: ${{ steps.baseline.outputs.enabled }}
+      selection_result: ${{ steps.select.outcome }}
+      java_result: ${{ steps.java.outcome }}
+      java_versions: ${{ steps.java.outputs.versions }}
       server: ${{ steps.select.outputs.server }}
       commons: ${{ steps.select.outputs.commons }}
+      struct: ${{ steps.select.outputs.struct }}
+      pd: ${{ steps.select.outputs.pd }}
+      store: ${{ steps.select.outputs.store }}
+      hstore: ${{ steps.select.outputs.hstore }}
       pd_store: ${{ steps.select.outputs.pd_store }}
       cluster: ${{ steps.select.outputs.cluster }}
       docker: ${{ steps.select.outputs.docker }}
       helm: ${{ steps.select.outputs.helm }}
       dependency_license: ${{ steps.select.outputs.dependency_license }}
-      compatibility: ${{ steps.select.outputs.compatibility }}
-      smoke: ${{ steps.select.outputs.smoke }}
+      macos: ${{ steps.select.outputs.macos }}
+      macos_full: ${{ steps.select.outputs.macos_full }}
+      hbase: ${{ steps.select.outputs.hbase }}
+      riscv64: ${{ steps.select.outputs.riscv64 }}
       security: ${{ steps.select.outputs.security }}
+      distributed_smoke: ${{ steps.select.outputs.distributed_smoke }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Test selection, gate and retry policy
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
       - name: Select affected tests
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           python3 .github/scripts/ci-policy.py plan --project server
-          --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
-          --output plan.json
-      - uses: actions/upload-artifact@v4
+          --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH"
+          --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/ci-plan.json"
+
+      - name: Select trusted master baseline
+        id: baseline
+        env:
+          ENABLED: ${{ ((github.repository == 'apache/hugegraph' && github.event.repository.fork == false) || github.repository == 'hugegraph/hugegraph') && github.ref == 'refs/heads/master' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test-set == 'dependencies')) }}
+        run: echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
+
+      - name: Read project Java runtime
+        id: java
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          runtime = Path('.github/workflows/.java-version').read_text().strip()
+          if not re.fullmatch(r'[1-9][0-9]*(\.[0-9]+)*', runtime):
+              raise ValueError('Project Java runtime must be a non-empty numeric version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('versions=' + json.dumps([runtime]), file=output)
+          PYTHON
+
+      - name: Record selection
+        if: ${{ !cancelled() && steps.select.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
         with:
           name: ci-plan
-          path: plan.json
+          path: ${{ runner.temp }}/ci-plan.json
           retention-days: 7
           overwrite: true
 
-  java-runtime:
-    uses: ./.github/workflows/java-runtime.yml
-    permissions:
-      contents: read
+      - name: Test CI policy and deployment checks
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
-  wait-storage-shell-test:
-    name: Startup contracts
-    needs: plan
-    if: needs.plan.outputs.server == 'true'
-    permissions:
-      contents: read
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Check Helm chart
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.select.outputs.helm == 'true' }}
+        uses: ./.github/actions/helm-checks
+
+      - name: Check license headers
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: apache/skywalking-eyes@main
         with:
-          persist-credentials: false
+          log: info
+          token: ${{ github.token }}
+          config: .licenserc.yaml
 
-      - name: Test CI retry freshness checks
-        run: python3 -m unittest discover -s .github/scripts -p 'test_check_rerun.py'
+      - name: License Check (RAT)
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          mvn apache-rat:check -ntp
+          find . -name rat.txt -print0 | xargs -0 -I file cat file > "$RUNNER_TEMP/merged-rat.txt"
+          cat "$RUNNER_TEMP/merged-rat.txt"
 
-      - name: Run wait-storage.sh peer failover tests
-        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
+  build-server:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.server == 'true' }}
+    uses: ./.github/workflows/server-tests.yml
+    with:
+      backend: memory
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+    secrets: inherit
 
-      - name: Run RISC-V Java runtime contract tests
-        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-riscv64-java-runtime.sh
-
-      - name: Check TinkerPop report execution gates
-        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-tinkerpop-reports.sh
-
-  # RocksDB coverage uses the project runtime and any additional test JDKs.
-  # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
-  # Keep the job ID for the Codecov configuration validator.
   server-rocksdb:
-    needs: [plan, java-runtime]
-    if: needs.plan.outputs.server == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.server == 'true' }}
     uses: ./.github/workflows/server-tests.yml
     with:
       backend: rocksdb
-      java-versions: ${{ needs.java-runtime.outputs.versions }}
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
     secrets: inherit
 
   commons:
-    name: commons
-    needs: plan
-    if: needs.plan.outputs.commons == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.commons == 'true' }}
     uses: ./.github/workflows/commons-ci.yml
+    with:
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
     secrets: inherit
 
   pd_store:
-    name: pd_store
-    needs: plan
-    if: needs.plan.outputs.pd_store == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.pd_store == 'true' }}
     uses: ./.github/workflows/pd-store-ci.yml
+    with:
+      run-struct: ${{ needs.preflight.outputs.struct == 'true' }}
+      run-pd: ${{ needs.preflight.outputs.pd == 'true' }}
+      run-store: ${{ needs.preflight.outputs.store == 'true' }}
+      run-hstore: ${{ needs.preflight.outputs.hstore == 'true' }}
     secrets: inherit
 
   cluster:
-    name: cluster
-    needs: plan
-    if: needs.plan.outputs.cluster == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.cluster == 'true' }}
     uses: ./.github/workflows/cluster-test-ci.yml
     secrets: inherit
 
   docker:
-    name: docker
-    needs: plan
-    if: needs.plan.outputs.docker == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.docker == 'true' || needs.preflight.outputs.distributed_smoke == 'true') }}
     uses: ./.github/workflows/docker-build-ci.yml
-    secrets: inherit
-
-  helm:
-    name: helm
-    needs: plan
-    if: needs.plan.outputs.helm == 'true'
-    uses: ./.github/workflows/helm-chart-ci.yml
+    with:
+      smoke-only: ${{ needs.preflight.outputs.distributed_smoke == 'true' && needs.preflight.outputs.docker != 'true' }}
 
   dependency_license:
-    name: dependency_license
-    needs: plan
-    if: needs.plan.outputs.dependency_license == 'true'
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.dependency_license == 'true' || (needs.preflight.outputs.dependency_baseline == 'true' && needs.preflight.result == 'success')) }}
     uses: ./.github/workflows/check-dependencies.yml
+    with:
+      check-inventory: ${{ needs.preflight.outputs.dependency_license == 'true' }}
+      submit-baseline: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' }}
 
-  affected-module-tests:
-    name: affected-module-tests
-    needs: [plan, java-runtime, wait-storage-shell-test, server-rocksdb, commons, pd_store, cluster, docker, helm, dependency_license]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Check planning and runtime results
-        env:
-          JOB_RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PYGATE'
-          import json, os
-          results = json.loads(os.environ['JOB_RESULTS'])
-          if results['plan']['result'] != 'success':
-              raise SystemExit('CI planning failed')
-          if results['plan']['outputs'].get('server') == 'true':
-              for job in ['java-runtime', 'wait-storage-shell-test']:
-                  if results[job]['result'] != 'success':
-                      raise SystemExit('Selected prerequisite failed: ' + job)
-          results['server_rocksdb'] = results['server-rocksdb']
-          with open('results.json', 'w') as output:
-              json.dump(results, output)
-          PYGATE
-      - uses: actions/download-artifact@v4
-        with:
-          name: ci-plan
-      - name: Report selected suites and their real results
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/ci-policy.py gate --mode advisory --plan plan.json --results results.json --output test-results.json
+  dependency_baseline:
+    needs: [preflight, dependency_license]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' && needs.dependency_license.result == 'success' }}
+    uses: ./.github/workflows/submit-dependencies.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      artifact-id: ${{ needs.dependency_license.outputs.artifact_id }}
+      inventory-artifact-id: ${{ needs.dependency_license.outputs.inventory_artifact_id }}
+
+  compatibility:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.macos == 'true' || needs.preflight.outputs.hbase == 'true' || needs.preflight.outputs.riscv64 == 'true') }}
+    uses: ./.github/workflows/server-compatibility-ci.yml
+    with:
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+      macos: ${{ needs.preflight.outputs.macos == 'true' }}
+      macos-full: ${{ needs.preflight.outputs.macos_full == 'true' }}
+      hbase: ${{ needs.preflight.outputs.hbase == 'true' }}
+      riscv64: ${{ needs.preflight.outputs.riscv64 == 'true' }}
+    secrets: inherit
+
+  codeql:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.security == 'true' }}
+    uses: ./.github/workflows/codeql-analysis.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write

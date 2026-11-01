@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.task;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.Date;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -29,14 +30,13 @@ import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Transaction;
 import org.slf4j.Logger;
 
-import com.google.common.collect.ImmutableSet;
 
 public abstract class TaskCallable<V> implements Callable<V> {
 
     private static final Logger LOG = Log.logger(TaskCallable.class);
 
     private static final String ERROR_COMMIT = "Failed to commit changes: ";
-    private static final Set<String> ERROR_MESSAGES = ImmutableSet.of(
+    private static final Set<String> ERROR_MESSAGES = Set.of(
             /*
              * "The max length of bytes is" exception message occurs when
              * task input size exceeds TASK_INPUT_SIZE_LIMIT or task result size
@@ -56,7 +56,11 @@ public abstract class TaskCallable<V> implements Callable<V> {
     }
 
     protected void done() {
-        this.closeTx();
+        // Future cancellation runs done() on its caller, whose transaction may predate the callback.
+        // The scheduler closes callback-owned transactions and the actual worker's transaction separately.
+        if (this.task == null || !this.task.isCancelled()) {
+            this.closeTx();
+        }
     }
 
     protected void cancelled() {
@@ -106,7 +110,8 @@ public abstract class TaskCallable<V> implements Callable<V> {
                 LOG.error("Failed to save task with error \"{}\": {}",
                           e, task.asMap(false));
                 String message = e.getMessage();
-                if (message.contains(ERROR_COMMIT) && needSaveWithEx(message)) {
+                if (message != null && message.contains(ERROR_COMMIT) &&
+                    needSaveWithEx(message)) {
                     task.failToSave(e);
                     this.graph().taskScheduler().save(task);
                     return;
@@ -139,8 +144,14 @@ public abstract class TaskCallable<V> implements Callable<V> {
     @SuppressWarnings("unchecked")
     public static <V> TaskCallable<V> fromClass(String className) {
         try {
-            Class<?> clazz = Class.forName(className);
-            return (TaskCallable<V>) clazz.newInstance();
+            Class<?> clazz = Class.forName(className).asSubclass(TaskCallable.class);
+            return (TaskCallable<V>) clazz.getDeclaredConstructor().newInstance();
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new HugeException("Failed to load task: %s", cause, className);
         } catch (Exception e) {
             throw new HugeException("Failed to load task: %s", e, className);
         }

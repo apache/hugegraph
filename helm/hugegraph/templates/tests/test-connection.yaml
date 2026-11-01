@@ -15,6 +15,19 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
+{{- $smoke := `def ids = [] as Set;
+(graph.schema().getVertexLabels() + graph.schema().getEdgeLabels()).each {
+    ids.addAll(it.indexLabels())
+};
+ids.each {
+    def index = graph.indexLabel(it);
+    if (!index.status().ok()) {
+        throw new IllegalStateException('Index ' + index.name() + ' is ' +
+                                        index.status().name() + ' (CREATED expected)')
+    }
+};
+graph.traversal().V().limit(1).count()` }}
 # Official Helm chart test hook — only runs with: helm test <release>
 # Not an install-time hook. Safe with --wait (no init Job in no-init design).
 apiVersion: v1
@@ -44,6 +57,9 @@ spec:
   containers:
     - name: curl
       image: {{ .Values.server.waitImage | quote }}
+      {{- if .Values.server.__waitImageInherited }}
+      imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+      {{- end }}
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:
@@ -74,7 +90,12 @@ spec:
           PORT="{{ .Values.server.port }}"
           FLOOR="{{ include "hugegraph.server.replicaFloor" . }}"
           DEADLINE_S="${HG_TEST_DEADLINE_S:-150}"
-          BODY='{"gremlin":"graph.traversal().V().limit(1).count()","aliases":{"graph":"DEFAULT-hugegraph"}}'
+          BODY='{{ dict "gremlin" $smoke "aliases" (dict "graph" (.Values.server.testGraphAlias | default "DEFAULT-hugegraph")) | toJson | replace "'" "'\"'\"'" }}'
+          {{- if .Values.server.testGremlin }}
+          BUSINESS_BODY='{{ dict "gremlin" .Values.server.testGremlin "aliases" (dict "graph" (.Values.server.testGraphAlias | default "DEFAULT-hugegraph")) | toJson | replace "'" "'\"'\"'" }}'
+          {{- else }}
+          BUSINESS_BODY=""
+          {{- end }}
           {{- if .Values.server.auth.enabled }}
           AUTH_HEADER=$(printf 'admin:%s' "${PASSWORD}" | base64 | tr -d '\r\n')
           request() {
@@ -84,7 +105,7 @@ spec:
           gremlin() {
             printf 'header = "Authorization: Basic %s"\n' "${AUTH_HEADER}" |
               curl --config - -sS --compressed --connect-timeout 3 --max-time 20 \
-                -H 'Content-Type: application/json' -X POST -d "${BODY}" \
+                -H 'Content-Type: application/json' -X POST -d "$2" \
                 -w '\n%{http_code}\n' "$1" 2>&1
           }
           {{- else }}
@@ -93,10 +114,21 @@ spec:
           }
           gremlin() {
             curl -sS --compressed --connect-timeout 3 --max-time 20 \
-              -H 'Content-Type: application/json' -X POST -d "${BODY}" \
+              -H 'Content-Type: application/json' -X POST -d "$2" \
               -w '\n%{http_code}\n' "$1" 2>&1
           }
           {{- end }}
+          check_gremlin() {
+            OUT=$(gremlin "$1" "$3") || true
+            CODE=$(printf '%s\n' "${OUT}" | grep -E '^[0-9][0-9][0-9]$' | tail -1) || CODE=""
+            if [ "${CODE}" = "200" ]; then
+              echo "helm test: $2 OK on $1"
+              return 0
+            fi
+            printf 'helm test: %s failed on %s code=%s body: %.400s\n' \
+              "$2" "$1" "${CODE:-no-response}" "${OUT}"
+            return 1
+          }
           echo "helm test: GET http://${SVC}:${PORT}/versions"
           request "http://${SVC}:${PORT}/versions"
           echo
@@ -111,6 +143,9 @@ spec:
           # Pods, retrying until the deadline so a transient PD election is
           # not misread as a broken Pod.
           echo "helm test: Gremlin on every Server Pod via ${HEADLESS} (floor ${FLOOR})"
+          if [ -z "${BUSINESS_BODY}" ]; then
+            echo "helm test: business assertions skipped (server.testGremlin is empty)"
+          fi
           START=$(date +%s)
           while :; do
             # The headless Service answers with every Ready Pod's addresses,
@@ -131,18 +166,16 @@ spec:
             FAILED=""
             for IP in ${IPS}; do
               case "${IP}" in *:*) TARGET="[${IP}]" ;; *) TARGET="${IP}" ;; esac
-              OUT=$(gremlin "http://${TARGET}:${PORT}/gremlin") || true
-              CODE=$(printf '%s\n' "${OUT}" | grep -E '^[0-9][0-9][0-9]$' | tail -1) || CODE=""
-              if [ "${CODE}" = "200" ]; then
-                echo "helm test: Gremlin OK on ${IP}"
-              else
+              URL="http://${TARGET}:${PORT}/gremlin"
+              if ! check_gremlin "${URL}" "Gremlin binding/index-state" "${BODY}"; then
                 FAILED="${FAILED}${IP}(${CODE:-no-response}) "
-                printf 'helm test: Gremlin failed on %s code=%s body: %.400s\n' \
-                  "${IP}" "${CODE:-no-response}" "${OUT}"
+              elif [ -n "${BUSINESS_BODY}" ] &&
+                   ! check_gremlin "${URL}" "business assertion" "${BUSINESS_BODY}"; then
+                FAILED="${FAILED}${IP}(${CODE:-no-response}) "
               fi
             done
             if [ -z "${FAILED}" ] && [ "${COUNT}" -ge "${FLOOR}" ]; then
-              echo "helm test: OK (${COUNT} Server Pods, all Gremlin-bound)"
+              echo "helm test: OK (${COUNT} Server Pods, all configured checks passed)"
               exit 0
             fi
             if [ $(( $(date +%s) - START )) -ge "${DEADLINE_S}" ]; then

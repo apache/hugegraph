@@ -1080,6 +1080,16 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
             return Bytes.equals(this.name, other.name) &&
                    Bytes.equals(this.value, other.value);
         }
+
+        /**
+         * Hashes the same name and value bytes that equals() compares. A scan allocates a new
+         * column per row, so the hash-based union, intersection and limit-dedup iterators rely on
+         * byte-equal columns landing on one key.
+         */
+        @Override
+        public int hashCode() {
+            return 31 * Arrays.hashCode(this.name) + Arrays.hashCode(this.value);
+        }
     }
 
     class RefCounter {

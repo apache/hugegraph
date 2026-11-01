@@ -156,8 +156,8 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             }
         }
         this.queue.clear();
-        if (failure instanceof RuntimeException) {
-            throw (RuntimeException) failure;
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
         }
         if (failure != null) {
             throw (Error) failure;
@@ -260,8 +260,8 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
     private static InterruptedException interruption(Throwable failure) {
         Throwable cause = failure;
         while (cause != null) {
-            if (cause instanceof InterruptedException) {
-                return (InterruptedException) cause;
+            if (cause instanceof InterruptedException interruption) {
+                return interruption;
             }
             cause = cause.getCause();
         }
@@ -329,11 +329,11 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     private RuntimeException initializationFailure(Throwable failure) {
         this.closeAfterFailure(failure);
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error error) {
+            throw error;
         }
-        if (failure instanceof RuntimeException) {
-            return (RuntimeException) failure;
+        if (failure instanceof RuntimeException runtimeFailure) {
+            return runtimeFailure;
         }
         return new IllegalStateException(failure);
     }

@@ -296,8 +296,8 @@ public class HugeTraverser {
 
     public static List<HugeEdge> pathEdges(Iterator<Edge> iterator, HugeEdge edge) {
         List<HugeEdge> edges = new ArrayList<>();
-        if (iterator instanceof NestedIterator) {
-            edges = ((NestedIterator) iterator).pathEdges();
+        if (iterator instanceof NestedIterator nestedIterator) {
+            edges = nestedIterator.pathEdges();
         }
         edges.add(edge);
         return edges;
@@ -602,7 +602,9 @@ public class HugeTraverser {
 
         ConditionQuery condQuery = (ConditionQuery) query;
         if (!GraphTransaction.matchFullEdgeSortKeys(condQuery, this.graph())) {
-            Id label = condQuery.condition(HugeKeys.LABEL);
+            // Sort-key validation needs one concrete edge label so that the
+            // error message points to the exact schema label in use.
+            Id label = condQuery.conditionValue(HugeKeys.LABEL);
             E.checkArgument(false, "The properties %s does not match " +
                                    "sort keys of edge label '%s'",
                             this.graph().mapPkId2Name(properties.keySet()),
@@ -732,10 +734,9 @@ public class HugeTraverser {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Node)) {
+            if (!(object instanceof Node other)) {
                 return false;
             }
-            Node other = (Node) object;
             return Objects.equals(this.id, other.id) &&
                    Objects.equals(this.parent, other.parent);
         }

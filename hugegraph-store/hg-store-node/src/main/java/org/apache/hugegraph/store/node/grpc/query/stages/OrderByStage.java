@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.store.node.grpc.query.stages;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -36,12 +38,9 @@ import org.apache.hugegraph.structure.BaseElement;
 
 import com.google.protobuf.ByteString;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
  * Sorting
  */
-@Slf4j
 public class OrderByStage implements QueryStage {
 
     private SortShuffle sortShuffle;
@@ -90,25 +89,21 @@ public class OrderByStage implements QueryStage {
         if (result == null) {
             return null;
         }
-        if (!result.isEmpty()) {
-            try {
+        try {
+            if (!result.isEmpty()) {
                 if (result.getResultType() == PipelineResultType.MKV) {
                     sortShuffle.append(result.getKv());
                 } else if (result.getResultType() == PipelineResultType.HG_ELEMENT) {
                     sortShuffle.append(result.getElement());
                 }
                 return null;
-            } catch (Exception e) {
-                log.info("GROUP_BY_STAGE, append: ", e);
-            }
-        } else {
-            // last empty flag
-            try {
+            } else {
+                // last empty flag
                 sortShuffle.finish();
                 iterator = sortShuffle.getIterator();
-            } catch (Exception e) {
-                log.error("GROUP_BY_STAGE:", e);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to sort query results", e);
         }
 
         return new TypeTransIterator<PipelineResult, PipelineResult>(new Iterator<>() {

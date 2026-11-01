@@ -20,12 +20,19 @@ package org.apache.hugegraph.unit;
 import java.net.URI;
 import java.net.URL;
 import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.BeforeClass;
 
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.rpc.RpcServer;
+import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
+
+import com.alipay.sofa.rpc.config.ServerConfig;
+import com.alipay.sofa.rpc.server.Server;
+import io.netty.channel.ChannelFuture;
 
 public class BaseUnitTest {
 
@@ -53,6 +60,34 @@ public class BaseUnitTest {
     }
 
     protected static void stopServer(RpcServer rpcServer) {
-        rpcServer.destroy();
+        closeServer(rpcServer, rpcServer::destroy);
+    }
+
+    protected static void unexportServer(RpcServer rpcServer) {
+        closeServer(rpcServer, rpcServer::unexportAll);
+    }
+
+    protected static ChannelFuture listener(RpcServer rpcServer) {
+        if (!rpcServer.enabled()) {
+            return null;
+        }
+        ServerConfig config = Whitebox.getInternalState(rpcServer, "serverConfig");
+        Server server = config.getServer();
+        if (server == null || !server.isStarted()) {
+            return null;
+        }
+        Object remoting = Whitebox.getInternalState(server, "remotingServer");
+        return Whitebox.getInternalState(remoting, "channelFuture");
+    }
+
+    private static void closeServer(RpcServer rpcServer, Runnable close) {
+        ChannelFuture binding = listener(rpcServer);
+        close.run();
+        if (binding != null) {
+            // Bolt stops asynchronously; the next fixture may reuse this port.
+            ChannelFuture closed = binding.channel().closeFuture();
+            Assert.assertTrue(closed.awaitUninterruptibly(5, TimeUnit.SECONDS));
+            Assert.assertTrue(closed.isSuccess());
+        }
     }
 }

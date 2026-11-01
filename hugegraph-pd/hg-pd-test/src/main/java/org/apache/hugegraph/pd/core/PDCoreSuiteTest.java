@@ -17,12 +17,23 @@
 
 package org.apache.hugegraph.pd.core;
 
+import org.apache.hugegraph.pd.core.meta.IdMetaStoreReadIndexTest;
 import org.apache.hugegraph.pd.core.meta.MetadataKeyHelperTest;
 import org.apache.hugegraph.pd.core.store.HgKVStoreImplTest;
+import org.apache.hugegraph.pd.core.store.RaftKVStoreTest;
 import org.apache.hugegraph.pd.raft.IpAuthHandlerTest;
+import org.apache.hugegraph.pd.raft.KVOperationTest;
+import org.apache.hugegraph.pd.raft.PeerUtilTest;
+import org.apache.hugegraph.pd.raft.RaftEngineCliProcessorsTest;
 import org.apache.hugegraph.pd.raft.RaftEngineIpAuthIntegrationTest;
 import org.apache.hugegraph.pd.raft.RaftEngineLeaderAddressTest;
+import org.apache.hugegraph.pd.raft.RaftEngineReadIndexTest;
 import org.apache.hugegraph.pd.raft.RaftEngineReadinessTest;
+import org.apache.hugegraph.pd.raft.RaftEngineRpcTimeoutTest;
+import org.apache.hugegraph.pd.raft.RaftReflectionUtilTest;
+import org.apache.hugegraph.pd.raft.RaftStateMachineSnapshotTest;
+import org.apache.hugegraph.pd.raft.ZipUtilsTest;
+import org.apache.hugegraph.pd.service.PDServiceDrainSubmissionTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -30,10 +41,14 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        GraphSpaceUsageTest.class,
+        GraphSpaceCleanupTest.class,
         RaftStateMachineTest.class,
         MetadataKeyHelperTest.class,
+        IdMetaStoreReadIndexTest.class,
         HgKVStoreImplTest.class,
         PDNativeOwnerTest.class,
+        RaftStartupTest.class,
         PDConfigTest.class,
         ConfigServiceTest.class,
         IdServiceTest.class,
@@ -42,11 +57,25 @@ import lombok.extern.slf4j.Slf4j;
         PartitionServiceTest.class,
         StoreMonitorDataServiceTest.class,
         StoreServiceTest.class,
+        StoreDrainTest.class,
+        StorePlacementSubmissionTest.class,
+        PDServiceDrainSubmissionTest.class,
+        StoreNodeLifecycleTest.class,
+        StoreActiveLeaseStateTest.class,
         TaskScheduleServiceTest.class,
         IpAuthHandlerTest.class,
+        RaftEngineCliProcessorsTest.class,
         RaftEngineIpAuthIntegrationTest.class,
         RaftEngineLeaderAddressTest.class,
         RaftEngineReadinessTest.class,
+        RaftReflectionUtilTest.class,
+        KVOperationTest.class,
+        PeerUtilTest.class,
+        ZipUtilsTest.class,
+        RaftKVStoreTest.class,
+        RaftEngineReadIndexTest.class,
+        RaftStateMachineSnapshotTest.class,
+        RaftEngineRpcTimeoutTest.class,
         // StoreNodeServiceTest.class,
 })
 @Slf4j

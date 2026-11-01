@@ -607,9 +607,11 @@ if [[ -n "$STORE_UTIL_SH" ]]; then
         }
 
         curl() {
-            [[ "$1" == "-fL" && "$2" == "-o" && "$4" == "--" ]] || return 64
+            [[ "$1" == "-fL" && "$2" == "--connect-timeout" && "$3" == "5" &&
+               "$4" == "--max-time" && "$5" == "30" && "$6" == "-o" &&
+               "$8" == "--" ]] || return 64
             if [[ "$CALLER" == "installer" ]]; then
-                echo "valid" > "$3"
+                echo "valid" > "$7"
                 return 0
             fi
             touch "$STALE_DOWNLOAD"
@@ -659,6 +661,46 @@ if [[ -n "$STORE_UTIL_SH" ]]; then
 
         LEFTOVERS=$(find "$WORK" -name 'lib.so.*' -type f | wc -l | tr -d ' ')
         expect "concurrent replacement cleans private temp files" "0" "$LEFTOVERS"
+    )
+
+    echo ""
+    echo "10. Store optional download timeout preserves the cache and cleans partial bytes"
+    (
+        source "$STORE_UTIL_SH"
+        WORK=$(mktemp -d)
+        DEST="$WORK/lib.so"
+        CURL_CALLED="$WORK/curl-called"
+        trap 'rm -rf "$WORK"' EXIT
+        echo "cached" > "$DEST"
+
+        md5sum() { echo "good  $1"; }
+        curl() { touch "$CURL_CALLED"; return 28; }
+        if download_and_verify "https://example.com/lib.so" "$DEST" "good" >/dev/null 2>&1 &&
+           [[ ! -e "$CURL_CALLED" ]]; then
+            pass "verified jemalloc cache requires no network"
+        else
+            fail "verified jemalloc cache requires no network" "cache was rejected or curl was called"
+        fi
+
+        md5sum() { echo "bad  $1"; }
+        curl() {
+            [[ "$1" == "-fL" && "$2" == "--connect-timeout" && "$3" == "5" &&
+               "$4" == "--max-time" && "$5" == "30" && "$6" == "-o" &&
+               "$8" == "--" ]] || return 64
+            touch "$CURL_CALLED"
+            echo "partial" > "$7"
+            return 28
+        }
+        if download_and_verify "https://example.com/lib.so" "$DEST" "good" >/dev/null 2>&1; then
+            fail "bounded jemalloc timeout is reported" "download incorrectly succeeded"
+        elif [[ -e "$CURL_CALLED" ]]; then
+            pass "bounded jemalloc timeout is reported"
+        else
+            fail "bounded jemalloc timeout is reported" "curl did not receive the required timeouts"
+        fi
+        expect "timed out replacement preserves the old destination" "cached" "$(cat "$DEST")"
+        LEFTOVERS=$(find "$WORK" -name 'lib.so.*' -type f | wc -l | tr -d ' ')
+        expect "jemalloc timeout discards partial bytes" "0" "$LEFTOVERS"
     )
 fi
 

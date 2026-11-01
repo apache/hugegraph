@@ -1,0 +1,111 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Hubble persistence inheritance and temporary data mount
+tests:
+  - it: creates the seventh default persistent volume after three PD and three Store claims
+    template: hubble-pvc.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PersistentVolumeClaim
+
+  - it: defaults to the persistent data mount with Recreate rollout
+    template: hubble-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - exists:
+          path: spec.template.spec.volumes[0].persistentVolumeClaim
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /hubble-data
+
+  - it: global temporary storage omits the Hubble PVC
+    template: hubble-pvc.yaml
+    set:
+      persistence.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: temporary storage uses the same datasource path on emptyDir
+    template: hubble-deployment.yaml
+    set:
+      persistence.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[0].emptyDir
+          value: {}
+      - notExists:
+          path: spec.template.spec.volumes[0].persistentVolumeClaim
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /hubble-data
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SPRING_DATASOURCE_URL
+            value: jdbc:h2:file:/hubble-data/db;DB_CLOSE_ON_EXIT=FALSE
+
+  - it: explicit Hubble persistence wins over global temporary storage
+    template: hubble-pvc.yaml
+    set:
+      persistence.enabled: false
+      hubble.persistence.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: explicit Hubble temporary storage wins over global persistence
+    template: hubble-pvc.yaml
+    set:
+      persistence.enabled: true
+      hubble.persistence.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: disabled UI never creates a PVC
+    template: hubble-pvc.yaml
+    set:
+      hubble.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: empty storageClass inherits the Kubernetes default
+    template: hubble-pvc.yaml
+    set:
+      hubble.persistence.storageClassName: ""
+    asserts:
+      - notExists:
+          path: spec.storageClassName
+
+  - it: dash storageClass explicitly disables the Kubernetes default
+    template: hubble-pvc.yaml
+    set:
+      hubble.persistence.storageClassName: "-"
+    asserts:
+      - equal:
+          path: spec.storageClassName
+          value: ""

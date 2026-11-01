@@ -20,7 +20,6 @@ package org.apache.hugegraph.space;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.lang.StringUtils;
@@ -35,9 +34,9 @@ public class GraphSpace {
             "The system default graph space";
     public static final String DEFAULT_CREATOR_NAME = "anonymous";
 
-    public static final int DEFAULT_CPU_LIMIT = 4;
-    public static final int DEFAULT_MEMORY_LIMIT = 8;
-    public static final int DEFAULT_STORAGE_LIMIT = 100;
+    public static final int DEFAULT_CPU_LIMIT = 128;
+    public static final int DEFAULT_MEMORY_LIMIT = 128;
+    public static final int DEFAULT_STORAGE_LIMIT = 10240;
 
     public static final int DEFAULT_MAX_GRAPH_NUMBER = 100;
     public static final int DEFAULT_MAX_ROLE_NUMBER = 100;
@@ -49,8 +48,8 @@ public class GraphSpace {
     private String description;
     private int cpuLimit;
     private int memoryLimit; // GB
-    private int computeCpuLimit;
-    private int computeMemoryLimit; // GB
+    private int computeCpuLimit = DEFAULT_CPU_LIMIT;
+    private int computeMemoryLimit = DEFAULT_MEMORY_LIMIT; // GB
     private String olapNamespace;
     private String storageNamespace;
     private int maxGraphNumber;
@@ -60,6 +59,7 @@ public class GraphSpace {
     private int cpuUsed;
     private int memoryUsed; // GB
     private int storageUsed; // GB
+    private long storageUsedKb = -1;
     private int graphNumberUsed;
     private int roleNumberUsed;
     private String operatorImagePath = ""; // path of compute operator image
@@ -227,6 +227,12 @@ public class GraphSpace {
 
     public void setStorageUsed(int storageUsed) {
         this.storageUsed = storageUsed;
+        this.storageUsedKb = -1;
+    }
+
+    public void setStorageUsedKb(long storageUsedKb) {
+        this.storageUsedKb = storageUsedKb;
+        this.storageUsed = (int) (storageUsedKb / (1024L * 1024L));
     }
 
     public int computeCpuLimit() {
@@ -390,12 +396,10 @@ public class GraphSpace {
         infos.put("cpu_used", this.cpuUsed);
         infos.put("memory_used", this.memoryUsed);
         infos.put("storage_used", this.storageUsed);
-        // Locale.ROOT: the default locale may format with a decimal comma
-        // ("0,33" on pl_PL, de_DE, fr_FR, ...), which parseFloat() rejects
-        float storageUserPercent = Float.parseFloat(
-                String.format(Locale.ROOT, "%.2f", (float) this.storageUsed /
-                                                   ((float) this.storageLimit * 1.0)));
-        infos.put("storage_percent", storageUserPercent);
+        long usedKb = this.storageUsedKb >= 0 ? this.storageUsedKb :
+                      this.storageUsed * 1024L * 1024L;
+        infos.put("storage_used_kb", usedKb);
+        infos.put("storage_percent", (float) (usedKb / (this.storageLimit * 1024.0 * 1024.0)));
         infos.put("graph_number_used", this.graphNumberUsed);
         infos.put("role_number_used", this.roleNumberUsed);
 

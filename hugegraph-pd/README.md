@@ -91,6 +91,10 @@ bin/start-hugegraph-pd.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-y ENABLE_OTEL] [-d D
 - `-y`: Enable OpenTelemetry tracing (`true` or `false`, default: `false`)
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
+The launcher always loads `bin/jvm-module.options`, including with custom `JAVA_OPTIONS` or `-j`.
+Keep this file in the distribution: it grants the Java 17 access required by Hessian Raft serialization;
+startup fails if the file is missing or unreadable. Direct Java launches must include `@bin/jvm-module.options`.
+
 ### Configuration
 
 Key configuration file: `conf/application.yml`
@@ -248,6 +252,10 @@ docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:latest .
 # Generate the REST secret once and keep it: every PD REST client needs this same value, and a new one silently breaks the clients already using the old one. Store it somewhere durable rather than only in this shell.
 export HG_PD_AUTH_SECRET_KEY="$(openssl rand -hex 24)"
 
+# The image runs as UID 10001; a host data directory must be writable by it
+# (see docker/README.md, "Container user")
+mkdir -p /path/to/data && sudo chown 10001:10001 /path/to/data
+
 # Run container
 docker run -d \
   -p 8620:8620 \
@@ -287,6 +295,7 @@ docker/docker-compose-3pd-3store-3server.yml
 - PD uses Raft consensus for leader election and data replication
 - Cluster can tolerate up to `(N-1)/2` node failures (e.g., 1 failure in 3-node cluster)
 - Leader handles all write operations; followers handle read operations
+- Never delete RocksDB `LOCK` files under `pd.data-path` to get a restarted PD going; see [PD Core Settings](docs/configuration.md#pd-core-settings)
 
 ### Network Requirements
 
@@ -304,7 +313,7 @@ docker/docker-compose-3pd-3store-3server.yml
 
 PD exposes metrics via REST API at:
 - Health check: `http://<pd-host>:8620/actuator/health`
-- Liveness: `http://<pd-host>:8620/v1/health` (REST listener is up)
+- Liveness: `http://<pd-host>:8620/v1/health` (`503` for terminal Raft error or shutdown; elections and temporary quorum loss remain healthy)
 - Readiness: `http://<pd-host>:8620/v1/ready` (`200` only while the PD sees a raft leader)
 - Metrics: `http://<pd-host>:8620/actuator/metrics`
 

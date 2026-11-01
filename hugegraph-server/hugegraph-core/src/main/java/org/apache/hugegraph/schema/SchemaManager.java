@@ -124,14 +124,36 @@ public class SchemaManager {
     }
 
     public void copyFrom(SchemaManager schema) {
+        this.copyFrom(schema, true);
+    }
+
+    /** Copy only schemas known to contain no edge labels. */
+    public void copyFromWithoutEdges(SchemaManager schema) {
+        this.copyFrom(schema, false);
+    }
+
+    private void copyFrom(SchemaManager schema, boolean allowEdges) {
+        // Use a single edge snapshot. If labels appear after the initial API
+        // preflight, do not copy them with potentially missing hierarchy data.
+        List<EdgeLabel> edgeLabels = schema.getEdgeLabels();
+        E.checkArgument(allowEdges || edgeLabels.isEmpty(),
+                        "Schema cloning does not currently support graphs with edge labels");
         for (PropertyKey pk : schema.getPropertyKeys()) {
             new PropertyKeyBuilder(this.transaction, this.graph, pk).create();
         }
         for (VertexLabel vl : schema.getVertexLabels()) {
             new VertexLabelBuilder(this.transaction, this.graph, vl).create();
         }
-        for (EdgeLabel el : schema.getEdgeLabels()) {
-            new EdgeLabelBuilder(this.transaction, this.graph, el).create();
+        // A sublabel refers to its parent by name during creation.
+        for (EdgeLabel el : edgeLabels) {
+            if (!el.edgeLabelType().sub()) {
+                new EdgeLabelBuilder(this.transaction, this.graph, el).create();
+            }
+        }
+        for (EdgeLabel el : edgeLabels) {
+            if (el.edgeLabelType().sub()) {
+                new EdgeLabelBuilder(this.transaction, this.graph, el).create();
+            }
         }
         for (IndexLabel il : schema.getIndexLabels()) {
             new IndexLabelBuilder(this.transaction, this.graph, il).create();

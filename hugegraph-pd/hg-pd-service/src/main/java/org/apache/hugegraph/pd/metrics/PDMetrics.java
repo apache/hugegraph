@@ -56,6 +56,7 @@ public final class PDMetrics {
     private MeterRegistry registry;
     private Map<String, Pair<Long, Long>> lasts = new ConcurrentHashMap();
     private int interval = 120 * 1000;
+    private StoreStateMetrics storeStateMetrics;
 
     public synchronized void init(MeterRegistry meterRegistry) {
 
@@ -71,6 +72,11 @@ public final class PDMetrics {
         Gauge.builder(PREFIX + ".graphs", () -> updateGraphs())
              .description("Number of graphs registered in PD")
              .register(registry);
+        // PDService creates its StoreNodeService in @PostConstruct, so look it up per read
+        this.storeStateMetrics = new StoreStateMetrics(
+                registry,
+                () -> this.pdService.getStoreNodeService().getStores(),
+                () -> this.pdService.getStoreNodeService().getShardGroups());
         Gauge.builder(PREFIX + ".stores", () -> updateStores())
              .description("Number of stores registered in PD")
              .register(registry);
@@ -111,21 +117,12 @@ public final class PDMetrics {
     }
 
     private long updateStores() {
-        return getStores();
+        // Also registers the per-store gauges of stores that joined since the last scrape
+        return this.storeStateMetrics.storeCount();
     }
 
     private long getGraphs() {
         return getGraphMetas().size();
-    }
-
-    private long getStores() {
-        try {
-            return this.pdService.getStoreNodeService().getStores(null).size();
-        } catch (PDException e) {
-            log.error(e.getMessage(), e);
-            e.printStackTrace();
-        }
-        return 0;
     }
 
     private long setTerms() {

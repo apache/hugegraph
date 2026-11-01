@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import org.apache.hugegraph.pd.client.impl.PDPulseImpl2;
 import org.apache.hugegraph.pd.client.interceptor.Authentication;
@@ -52,6 +53,7 @@ import org.apache.hugegraph.pd.grpc.Pdpb.GetPartitionRequest;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetPartitionResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.GraphStatsResponse;
 import org.apache.hugegraph.pd.grpc.watch.WatchResponse;
+import org.apache.hugegraph.pd.grpc.watch.WatchType;
 import org.apache.hugegraph.pd.watch.NodeEvent;
 import org.apache.hugegraph.pd.watch.PartitionEvent;
 import org.apache.hugegraph.pd.watch.PartitionEvent.ChangeType;
@@ -165,7 +167,8 @@ public class PDClient {
                 if (response.getChangeType() == ChangeType.DEL) {
                     cache.removeAll(response.getGraph());
                 }
-                listeners.forEach(listener -> listener.onPartitionChanged(response));
+                notifyListeners(WatchType.WATCH_TYPE_PARTITION_CHANGE,
+                                listener -> listener.onPartitionChanged(response));
             }
 
             @Override
@@ -200,7 +203,8 @@ public class PDClient {
                     }
                 }
 
-                listeners.forEach(listener -> listener.onStoreChanged(response));
+                notifyListeners(WatchType.WATCH_TYPE_STORE_NODE_CHANGE,
+                                listener -> listener.onStoreChanged(response));
             }
 
             @Override
@@ -214,7 +218,8 @@ public class PDClient {
         graphWatcher = pdWatch.watchGraph(new PDWatch.Listener<>() {
             @Override
             public void onNext(WatchResponse response) {
-                listeners.forEach(listener -> listener.onGraphChanged(response));
+                notifyListeners(WatchType.WATCH_TYPE_GRAPH_CHANGE,
+                                listener -> listener.onGraphChanged(response));
             }
 
             @Override
@@ -245,7 +250,8 @@ public class PDClient {
                             break;
                     }
                 }
-                listeners.forEach(listener -> listener.onShardGroupChanged(response));
+                notifyListeners(WatchType.WATCH_TYPE_SHARD_GROUP_CHANGE,
+                                listener -> listener.onShardGroupChanged(response));
             }
 
             @Override
@@ -254,6 +260,17 @@ public class PDClient {
             }
         });
 
+    }
+
+    private void notifyListeners(WatchType eventType, Consumer<PDEventListener> action) {
+        for (PDEventListener listener : this.listeners) {
+            try {
+                action.accept(listener);
+            } catch (RuntimeException e) {
+                String listenerClass = listener == null ? "null" : listener.getClass().getName();
+                log.error("PD watch listener {} failed to handle {} event", listenerClass, eventType, e);
+            }
+        }
     }
 
     private synchronized void closeStub(boolean closeWatcher) {
@@ -314,7 +331,7 @@ public class PDClient {
                 var leaderIp = getLeaderIp(stub);
                 if (!leaderIp.equalsIgnoreCase(host)) {
                     leaderHost = leaderIp;
-                    proxy.set(getStub(PDGrpc.newBlockingStub(channel)));
+                    proxy.set(getStub(PDGrpc.newBlockingStub(getChannel(leaderIp))));
                 } else {
                     proxy.set(stub);
                     leaderHost = host;
@@ -604,17 +621,7 @@ public class PDClient {
         KVPair<Metapb.Partition, Metapb.Shard> partShard =
                 cache.getPartitionById(graphName, partId);
         if (partShard == null) {
-            Pdpb.GetPartitionByIDRequest request = Pdpb.GetPartitionByIDRequest.newBuilder()
-                                                                               .setHeader(header)
-                                                                               .setGraphName(
-                                                                                       graphName)
-                                                                               .setPartitionId(
-                                                                                       partId)
-                                                                               .build();
-            GetPartitionResponse response =
-                    blockingUnaryCall(PDGrpc.getGetPartitionByIDMethod(), request);
-            handleResponseError(response.getHeader());
-            partShard = new KVPair<>(response.getPartition(), response.getLeader());
+            partShard = getPartitionByIdDirect(graphName, partId);
             if (config.isEnableCache()) {
                 cache.update(graphName, partShard.getKey().getId(), partShard.getKey());
                 cache.updateShardGroup(getShardGroup(partShard.getKey().getId()));
@@ -634,6 +641,19 @@ public class PDClient {
             }
         }
         return partShard;
+    }
+
+    /**
+     * Query this graph partition without the cache or any additional shard-group lookup.
+     * In particular, a NOT_FOUND error belongs to this partition RPC rather than cache filling.
+     */
+    public KVPair<Metapb.Partition, Metapb.Shard> getPartitionByIdDirect(String graphName,
+                                                                      int partId) throws PDException {
+        Pdpb.GetPartitionByIDRequest request = Pdpb.GetPartitionByIDRequest.newBuilder()
+                .setHeader(header).setGraphName(graphName).setPartitionId(partId).build();
+        GetPartitionResponse response = blockingUnaryCall(PDGrpc.getGetPartitionByIDMethod(), request);
+        handleResponseError(response.getHeader());
+        return new KVPair<>(response.getPartition(), response.getLeader());
     }
 
     public ShardGroup getShardGroup(int partId) throws PDException {
@@ -965,14 +985,14 @@ public class PDClient {
         } catch (Exception e) {
             log.error(method.getFullMethodName() + " exception, {}", e.getMessage());
             if (e instanceof StatusRuntimeException) {
-                StatusRuntimeException se = (StatusRuntimeException) e;
                 if (retry < proxy.getHostCount()) {
                     closeStub(true);
                     return blockingUnaryCall(method, req, ++retry);
                 }
             }
+            throw new PDException(ErrorType.PD_UNREACHABLE_VALUE,
+                                  "RPC blocking call failed: " + method.getFullMethodName(), e);
         }
-        return null;
     }
 
     private void handleResponseError(Pdpb.ResponseHeader header) throws
@@ -1021,6 +1041,13 @@ public class PDClient {
                                                                      .setGraphSpace(graphSpace)
                                                                      .build();
         Pdpb.SetGraphSpaceResponse response = getStub().setGraphSpace(request);
+        handleResponseError(response.getHeader());
+    }
+
+    public void deleteGraphSpace(String graphSpaceName) throws PDException {
+        Pdpb.DeleteGraphSpaceRequest request = Pdpb.DeleteGraphSpaceRequest.newBuilder()
+                .setHeader(header).setGraphSpaceName(graphSpaceName).build();
+        Pdpb.DeleteGraphSpaceResponse response = getStub().deleteGraphSpace(request);
         handleResponseError(response.getHeader());
     }
 

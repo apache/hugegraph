@@ -17,7 +17,13 @@
 
 package org.apache.hugegraph.unit.store;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.backend.store.ram.IntObjectMap;
 import org.junit.Assert;
@@ -26,47 +32,46 @@ import org.junit.Test;
 public class RamIntObjectMapTest {
 
     @Test
-    public void testConcurrency() {
+    public void testConcurrency() throws Exception {
         int size = 32;
         IntObjectMap<Integer> map = new IntObjectMap<>(size);
-
-        final int numThreads = 10;
-        final CountDownLatch startSignal = new CountDownLatch(1);
-        final CountDownLatch doneSignal = new CountDownLatch(numThreads);
-
-        for (int i = 0; i < numThreads; i++) {
-            new Thread(() -> {
-                try {
-                    startSignal.await();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                    Assert.fail(e.getMessage());
-                }
-
-                for (int j = 0; j < size; j++) {
-                    map.set(j, j);
-                }
-
-                doneSignal.countDown();
-            }).start();
-        }
-
-        startSignal.countDown();
-
+        int numThreads = 10;
+        CountDownLatch startSignal = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        List<Future<?>> workers = new ArrayList<>();
         try {
-            doneSignal.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-            Assert.fail(e.getMessage());
-        }
-
-        for (int i = 0; i < numThreads; i++) {
-            new Thread(() -> {
-                for (int j = 0; j < size; j++) {
-                    Integer value = map.get(j);
-                    Assert.assertNotNull(value);
-                }
-            }).start();
+            for (int i = 0; i < numThreads; i++) {
+                workers.add(executor.submit(() -> {
+                    startSignal.await();
+                    for (int j = 0; j < size; j++) {
+                        map.set(j, j);
+                    }
+                    return null;
+                }));
+            }
+            startSignal.countDown();
+            for (Future<?> worker : workers) {
+                worker.get(10, TimeUnit.SECONDS);
+            }
+            workers.clear();
+            for (int i = 0; i < numThreads; i++) {
+                workers.add(executor.submit(() -> {
+                    for (int j = 0; j < size; j++) {
+                        Assert.assertEquals(Integer.valueOf(j), map.get(j));
+                    }
+                }));
+            }
+            for (Future<?> worker : workers) {
+                worker.get(10, TimeUnit.SECONDS);
+            }
+            Assert.assertEquals(size, map.size());
+            for (int j = 0; j < size; j++) {
+                Assert.assertEquals(Integer.valueOf(j), map.get(j));
+            }
+        } finally {
+            startSignal.countDown();
+            executor.shutdownNow();
+            Assert.assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
     }
 }

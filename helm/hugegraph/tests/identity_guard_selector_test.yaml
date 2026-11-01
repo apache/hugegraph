@@ -46,6 +46,9 @@ kubernetesProvider:
           app.kubernetes.io/instance: RELEASE-NAME
           app.kubernetes.io/component: pd
       spec:
+        volumeClaimTemplates:
+          - metadata:
+              name: pd-data
         replicas: "3"
         selector:
           matchLabels:
@@ -54,6 +57,8 @@ kubernetesProvider:
             app.kubernetes.io/component: pd
 tests:
   - it: refuses the selector label change with the reason
+    release:
+      upgrade: true
     set:
       nameOverride: NAME
     asserts:
@@ -61,6 +66,8 @@ tests:
           errorPattern: "changes the app.kubernetes.io/name selector label of the pd StatefulSet RELEASE-NAME-pd from RELEASE to NAME"
 
   - it: lets the same override through when the selector already matches
+    release:
+      upgrade: true
     set:
       nameOverride: RELEASE
     asserts:

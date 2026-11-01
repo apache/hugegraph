@@ -626,60 +626,53 @@ public class NodeTxSessionProxy implements HgStoreSession {
 
     private Function<HgScanQuery, Map<Long, List<NodeTkv>>> toTkvMapFunc(
             HgScanQuery.ScanMethod scanMethod) {
-        switch (scanMethod) {
-            case RANGE:
-                return scanQuery -> {
-                    List<HgOwnerKey> starts = scanQuery.getStartList();
-                    List<HgOwnerKey> ends = scanQuery.getEndList();
-                    int size = starts.size();
-                    return IntStream.range(0, size)
-                                    .boxed()
-                                    .map(i -> this.toNodeTkvList(scanQuery.getTable(),
-                                                                 starts.get(i), ends.get(i)))
-                                    .flatMap(List::stream)
+        return switch (scanMethod) {
+            case RANGE -> scanQuery -> {
+                List<HgOwnerKey> starts = scanQuery.getStartList();
+                List<HgOwnerKey> ends = scanQuery.getEndList();
+                int size = starts.size();
+                return IntStream.range(0, size)
+                                .boxed()
+                                .map(i -> this.toNodeTkvList(scanQuery.getTable(),
+                                                             starts.get(i), ends.get(i)))
+                                .flatMap(List::stream)
+                                .collect(groupingBy(NodeTkv::getNodeId));
+            };
+            case PREFIX -> scanQuery ->
+                    scanQuery.getPrefixList()
+                             .stream()
+                             .map(keyPrefix -> this.toNodeTkvList(scanQuery.getTable(),
+                                                                  keyPrefix))
+                             .flatMap(List::stream)
+                             .collect(groupingBy(NodeTkv::getNodeId));
+            default -> scanQuery -> this.toNodeTkvList(scanQuery.getTable())
+                                    .stream()
                                     .collect(groupingBy(NodeTkv::getNodeId));
-                };
-            case PREFIX:
-                return scanQuery ->
-                        scanQuery.getPrefixList()
-                                 .stream()
-                                 .map(keyPrefix -> this.toNodeTkvList(scanQuery.getTable(),
-                                                                      keyPrefix))
-                                 .flatMap(List::stream)
-                                 .collect(groupingBy(NodeTkv::getNodeId));
-
-            default:
-                return scanQuery -> this.toNodeTkvList(scanQuery.getTable())
-                                        .stream()
-                                        .collect(groupingBy(NodeTkv::getNodeId));
-        }
+        };
     }
 
     private BiFunction<String, List<NodeTkv>, HgScanQuery.ScanBuilder> toScanQueryFunc(
             HgScanQuery.ScanMethod scanMethod) {
-        switch (scanMethod) {
-            case RANGE:
-                return (table, tkvList) -> {
-                    List<HgOwnerKey> startList = new LinkedList();
-                    List<HgOwnerKey> endList = new LinkedList();
+        return switch (scanMethod) {
+            case RANGE -> (table, tkvList) -> {
+                List<HgOwnerKey> startList = new LinkedList();
+                List<HgOwnerKey> endList = new LinkedList();
 
-                    tkvList.stream().forEach(e -> {
-                        startList.add(e.getKey());
-                        endList.add(e.getEndKey());
-                    });
+                tkvList.stream().forEach(e -> {
+                    startList.add(e.getKey());
+                    endList.add(e.getEndKey());
+                });
 
-                    return HgScanQuery.ScanBuilder.rangeOf(table, startList, endList);
-                };
-            case PREFIX:
-                return (table, tkvList) ->
-                        HgScanQuery.ScanBuilder.prefixOf(table,
-                                                         tkvList.stream()
-                                                                .map(e -> e.getKey())
-                                                                .collect(Collectors.toList())
-                        );
-            default:
-                return (table, tkvList) -> HgScanQuery.ScanBuilder.tableOf(table);
-        }
+                return HgScanQuery.ScanBuilder.rangeOf(table, startList, endList);
+            };
+            case PREFIX -> (table, tkvList) ->
+                    HgScanQuery.ScanBuilder.prefixOf(table,
+                                                     tkvList.stream()
+                                                            .map(e -> e.getKey())
+                                                            .collect(Collectors.toList())
+                    );
+            default -> (table, tkvList) -> HgScanQuery.ScanBuilder.tableOf(table);
+        };
 
     }
 

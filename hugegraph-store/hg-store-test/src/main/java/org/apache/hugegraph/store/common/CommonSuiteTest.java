@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.common;
 
+import org.apache.hugegraph.store.client.HgPairTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -25,7 +26,10 @@ import lombok.extern.slf4j.Slf4j;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         ByteBufferAllocatorTest.class,
-        KVByteBufferTest.class
+        KVByteBufferTest.class,
+        Base58EncoderTest.class,
+        KeyUtilTest.class,
+        HgPairTest.class
 })
 
 @Slf4j

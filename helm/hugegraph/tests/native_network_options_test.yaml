@@ -1,0 +1,152 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Native Service options and catch-all Ingress
+templates:
+  - server-service.yaml
+  - hubble-service.yaml
+  - pd-service-client.yaml
+  - server-ingress.yaml
+  - hubble-ingress.yaml
+tests:
+  - it: defaults to automatic NodePorts for Server and Hubble
+    template: server-service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - notExists:
+          path: spec.ports[0].nodePort
+  - it: enables the Hubble NodePort by default
+    template: hubble-service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+  - it: leaves PD reachable only inside the cluster by default
+    template: pd-service-client.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+  - it: renders a valid custom NodePort below the standard cluster range
+    template: server-service.yaml
+    set:
+      server.service.nodePort: 8802
+    asserts:
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 8802
+  - it: omits zero NodePort for automatic allocation
+    template: hubble-service.yaml
+    set:
+      hubble.service.nodePort: 0
+    asserts:
+      - notExists:
+          path: spec.ports[0].nodePort
+  - it: preserves explicit native load balancer settings including false
+    template: server-service.yaml
+    set:
+      server.service.type: LoadBalancer
+      server.service.externalTrafficPolicy: Local
+      server.service.loadBalancerClass: internal.example/controller
+      server.service.loadBalancerIP: 10.1.2.3
+      server.service.loadBalancerSourceRanges: [10.0.0.0/8]
+      server.service.externalIPs: [10.1.2.4]
+      server.service.allocateLoadBalancerNodePorts: false
+    asserts:
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
+      - equal:
+          path: spec.loadBalancerClass
+          value: internal.example/controller
+      - equal:
+          path: spec.loadBalancerIP
+          value: 10.1.2.3
+      - equal:
+          path: spec.loadBalancerSourceRanges
+          value: [10.0.0.0/8]
+      - equal:
+          path: spec.externalIPs
+          value: [10.1.2.4]
+      - equal:
+          path: spec.allocateLoadBalancerNodePorts
+          value: false
+  - it: applies native load balancer settings to Hubble
+    template: hubble-service.yaml
+    set:
+      hubble.service.type: LoadBalancer
+      hubble.service.externalTrafficPolicy: Local
+      hubble.service.allocateLoadBalancerNodePorts: false
+    asserts:
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
+      - equal:
+          path: spec.allocateLoadBalancerNodePorts
+          value: false
+  - it: applies native load balancer settings to PD
+    template: pd-service-client.yaml
+    set:
+      pd.service.type: LoadBalancer
+      pd.service.externalTrafficPolicy: Local
+      pd.service.allocateLoadBalancerNodePorts: false
+    asserts:
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
+      - equal:
+          path: spec.allocateLoadBalancerNodePorts
+          value: false
+  - it: renders hostless Server ingress using native catch-all semantics
+    template: server-ingress.yaml
+    set:
+      server.ingress.enabled: true
+      server.ingress.hosts:
+        - paths:
+            - path: /
+              pathType: Prefix
+    asserts:
+      - notExists:
+          path: spec.rules[0].host
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+  - it: renders an empty host as a Hubble catch-all ingress
+    template: hubble-ingress.yaml
+    set:
+      hubble.ingress.enabled: true
+      hubble.ingress.hosts:
+        - host: ""
+          paths:
+            - path: /
+              pathType: Prefix
+    asserts:
+      - notExists:
+          path: spec.rules[0].host
+  - it: supplies a catch-all rule when ingress hosts are omitted
+    template: server-ingress.yaml
+    set:
+      server.ingress.enabled: true
+      server.ingress.hosts: []
+    asserts:
+      - notExists:
+          path: spec.rules[0].host
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: RELEASE-NAME-hugegraph-server

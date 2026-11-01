@@ -45,6 +45,8 @@ WAIT_TIMEOUT=30   # seconds for timeout on wait calls
 PASS=0
 FAIL=0
 ERRORS=()
+STARTUP_LOG="$HUGEGRAPH_ROOT/logs/startup-test.log"
+RUNTIME_STARTED=false
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -102,6 +104,23 @@ cleanup() {
     fi
     sleep 3
     crontab -l 2>/dev/null | grep -v monitor-hugegraph | crontab - 2>/dev/null || true
+    if [[ "$RUNTIME_STARTED" == true ]]; then
+        local logs=("$STARTUP_LOG")
+        if [[ "${STDOUT_MODE:-false}" != true ]]; then
+            logs+=("$HUGEGRAPH_ROOT/logs/hugegraph-server.log"
+                   "$HUGEGRAPH_ROOT/logs/hugegraph-server-stdout.log")
+        fi
+        if bash "$SCRIPT_DIR/check-java-runtime-logs.sh" "${logs[@]}"; then
+            pass "startup has no Java runtime compatibility errors"
+        else
+            fail "startup log contains a compatibility error or is unavailable"
+        fi
+        RUNTIME_STARTED=false
+    fi
+    # Each positive start must be checked independently of previous runs.
+    mkdir -p "$HUGEGRAPH_ROOT/logs"
+    rm -f "$STARTUP_LOG" "$HUGEGRAPH_ROOT/logs/hugegraph-server.log" \
+          "$HUGEGRAPH_ROOT/logs/hugegraph-server-stdout.log"
 }
 
 # Wait until server HTTP endpoint responds (200 or 401) or timeout
@@ -195,9 +214,15 @@ fi
 # Run init-store.sh once if RocksDB has not been initialized yet
 if [[ ! -d "$HUGEGRAPH_ROOT/rocksdb-data" ]]; then
     info "RocksDB not initialized — running init-store.sh..."
-    if "$BIN/init-store.sh" >/dev/null 2>&1; then
+    mkdir -p "$HUGEGRAPH_ROOT/logs"
+    INIT_LOG="$HUGEGRAPH_ROOT/logs/startup-init.log"
+    if "$BIN/init-store.sh" >"$INIT_LOG" 2>&1; then
+        if ! bash "$SCRIPT_DIR/check-java-runtime-logs.sh" "$INIT_LOG"; then
+            exit 1
+        fi
         pass "init-store.sh completed successfully"
     else
+        cat "$INIT_LOG"
         echo -e "${RED}ERROR:${NC} init-store.sh failed. Cannot run tests."
         exit 1
     fi
@@ -212,7 +237,8 @@ cleanup
 section "Test 1 — daemon mode regression"
 
 info "Starting in daemon mode (waiting up to ${STARTUP_WAIT}s for HTTP)..."
-"$START_SCRIPT" -d true -t "$STARTUP_WAIT" >/dev/null 2>&1
+RUNTIME_STARTED=true
+"$START_SCRIPT" -d true -t "$STARTUP_WAIT" >"$STARTUP_LOG" 2>&1
 EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 0 ]]; then
@@ -259,7 +285,8 @@ cleanup
 section "Test 2 — foreground mode blocks until Java exits"
 
 info "Starting in foreground mode (backgrounded for observation)..."
-"$START_SCRIPT" -d false >/dev/null 2>&1 &
+RUNTIME_STARTED=true
+"$START_SCRIPT" -d false >"$STARTUP_LOG" 2>&1 &
 SCRIPT_PID=$!
 
 info "Waiting up to ${STARTUP_WAIT}s for server to come up..."
@@ -314,7 +341,8 @@ cleanup
 section "Test 3 — foreground PID tracking and exit propagation"
 
 info "Starting in foreground mode..."
-"$START_SCRIPT" -d false >/dev/null 2>&1 &
+RUNTIME_STARTED=true
+"$START_SCRIPT" -d false >"$STARTUP_LOG" 2>&1 &
 SCRIPT_PID=$!
 
 info "Waiting up to ${STARTUP_WAIT}s for server..."
@@ -372,7 +400,8 @@ info "Clearing crontab..."
 crontab -l 2>/dev/null | grep -v monitor-hugegraph | crontab - 2>/dev/null || true
 
 info "Starting in daemon mode with -m true (waiting up to ${STARTUP_WAIT}s)..."
-"$START_SCRIPT" -d true -m true -t "$STARTUP_WAIT" >/dev/null 2>&1
+RUNTIME_STARTED=true
+"$START_SCRIPT" -d true -m true -t "$STARTUP_WAIT" >"$STARTUP_LOG" 2>&1
 EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 0 ]]; then
@@ -388,7 +417,8 @@ else
 fi
 
 info "Stopping server..."
-"$STOP_SCRIPT" -m false >/dev/null 2>&1 || true
+# Stop the registered monitor before shutdown so cron cannot restart this fixture.
+"$STOP_SCRIPT" >/dev/null 2>&1 || true
 
 cleanup
 
@@ -397,7 +427,8 @@ cleanup
 section "Test 5 — SIGTERM forwarded to Java in foreground mode"
 
 info "Starting in foreground mode..."
-"$START_SCRIPT" -d false >/dev/null 2>&1 &
+RUNTIME_STARTED=true
+"$START_SCRIPT" -d false >"$STARTUP_LOG" 2>&1 &
 SCRIPT_PID=$!
 
 info "Waiting up to ${STARTUP_WAIT}s for server..."
@@ -414,6 +445,18 @@ if [[ -z "$FG_PID" ]]; then
     fail "could not get Java PID — skipping signal forwarding check"
     kill "$SCRIPT_PID" 2>/dev/null || true
 else
+    # A monitor restart can overwrite the shared pid file. Verify that this
+    # assertion observes the wrapper's own child before testing signal forwarding.
+    FG_PARENT_PID=$(ps -o ppid= -p "$FG_PID" 2>/dev/null | tr -d '[:space:]') || FG_PARENT_PID=""
+    FG_PID_OWNED=false
+    if [[ "$FG_PARENT_PID" == "$SCRIPT_PID" ]]; then
+        FG_PID_OWNED=true
+    else
+        fail "pid file PID $FG_PID is not a child of wrapper $SCRIPT_PID (parent $FG_PARENT_PID)"
+        ps -o pid=,ppid=,stat= -p "$SCRIPT_PID,$FG_PID" 2>/dev/null || true
+        [[ ! -f "$HUGEGRAPH_ROOT/logs/monitor.log" ]] || tail -n 80 "$HUGEGRAPH_ROOT/logs/monitor.log"
+    fi
+
     info "Sending SIGTERM to wrapper script (pid $SCRIPT_PID)..."
     kill -TERM "$SCRIPT_PID" 2>/dev/null || true
 
@@ -422,11 +465,14 @@ else
 
     # Allow a bounded shutdown window and treat a zombie as already terminated.
     # If wait_script_exit timed out, a live Java process remains a failure.
-    if wait_for_process_exit "$FG_PID" "$SETTLE_WAIT"; then
-        pass "Java process terminated after SIGTERM sent to wrapper"
-    else
-        fail "Java process still running after SIGTERM — signal not forwarded"
-        kill "$FG_PID" 2>/dev/null || true
+    if [[ "$FG_PID_OWNED" == true ]]; then
+        if wait_for_process_exit "$FG_PID" "$SETTLE_WAIT"; then
+            pass "Java process terminated after SIGTERM sent to wrapper"
+        else
+            fail "Java process still running after SIGTERM — signal not forwarded"
+            ps -o pid=,ppid=,stat= -p "$SCRIPT_PID,$FG_PID" 2>/dev/null || true
+            [[ ! -f "$HUGEGRAPH_ROOT/logs/monitor.log" ]] || tail -n 80 "$HUGEGRAPH_ROOT/logs/monitor.log"
+        fi
     fi
 
     if [[ $ACTUAL_EXIT -ne 0 ]]; then

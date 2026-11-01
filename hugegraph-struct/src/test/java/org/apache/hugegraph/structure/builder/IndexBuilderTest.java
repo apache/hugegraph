@@ -20,31 +20,32 @@ package org.apache.hugegraph.structure.builder;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hugegraph.HugeGraphSupplier;
+import org.apache.hugegraph.analyzer.Analyzer;
+import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
-import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.query.MatchedIndex;
-import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.VertexLabel;
-import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.structure.BaseEdge;
+import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
-import org.apache.hugegraph.type.define.IndexType;
-import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.EdgeLabelType;
+import org.apache.hugegraph.type.define.IndexType;
+import org.apache.hugegraph.type.define.WriteType;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -81,6 +82,16 @@ public class IndexBuilderTest {
         builder.forEachIndex(vertex, label, index -> words.add(index.fieldValues()));
         Assert.assertEquals(Set.of("alpha", "beta", "alpha beta"), words);
         Assert.assertEquals("alpha beta", IndexBuilder.propertyValueToString(List.of("alpha", "beta")));
+    }
+
+    @Test
+    public void testSearchPredicateUsesSharedAnalysisForScalarAndCollection() {
+        Analyzer analyzer = text -> Set.of(text.split(" "));
+        Assert.assertTrue(IndexBuilder.searchPredicate(analyzer, "(alpha)").test("alpha beta"));
+        Assert.assertTrue(IndexBuilder.searchPredicate(analyzer, "(alpha|gamma)").test(List.of("beta", "gamma")));
+        Assert.assertTrue(IndexBuilder.searchPredicate(analyzer, "alpha delta").test("alpha beta"));
+        Assert.assertFalse(IndexBuilder.searchPredicate(analyzer, "(gamma)").test("alpha beta"));
+        Assert.assertFalse(IndexBuilder.searchPredicate(analyzer, "(alpha)").test("alphabet"));
     }
 
     @Test

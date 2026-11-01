@@ -35,6 +35,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import javax.security.sasl.AuthenticationException;
@@ -765,6 +766,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     }
 
     @Override
+    public Predicate<Object> searchPredicate(String text) {
+        this.verifyAnyPermission();
+        return this.hugegraph.searchPredicate(text);
+    }
+
+    @Override
     public String name() {
         this.verifyAnyPermission();
         return this.hugegraph.name();
@@ -803,6 +810,27 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     public void mode(GraphMode mode) {
         this.verifyPermission(HugePermission.WRITE, ResourceType.STATUS);
         this.hugegraph.mode(mode);
+    }
+
+    @Override
+    public Map<String, Object> loadingMode() {
+        this.verifyPermission(HugePermission.WRITE, ResourceType.STATUS);
+        return this.hugegraph.loadingMode();
+    }
+
+    @Override
+    public Map<String, Object> loadingMode(String action, String instance, long epoch,
+                                            String token, String principal) {
+        this.verifyPermission(HugePermission.WRITE, ResourceType.STATUS);
+        Context context = getContext();
+        E.checkState(context != null, "Missing authenticated loading owner context");
+        return this.hugegraph.loadingMode(action, instance, epoch, token, context.user().username());
+    }
+
+    @Override
+    public Map<String, Object> recoverLoadingMode(String instance, long epoch, long revision) {
+        this.verifyAdminPermission();
+        return this.hugegraph.recoverLoadingMode(instance, epoch, revision);
     }
 
     @Override
@@ -889,6 +917,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                                     RpcServiceConfig4Client clientConfig) {
         this.verifyAdminPermission();
         this.hugegraph.registerRpcServices(serverConfig, clientConfig);
+    }
+
+    @Override
+    public void unregisterRpcServices() {
+        this.verifyAdminPermission();
+        this.hugegraph.unregisterRpcServices();
     }
 
     @Override
@@ -2056,8 +2090,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public RolePermission rolePermission(AuthElement element) {
             String username = currentUsername();
-            if (!(element instanceof HugeUser) ||
-                !((HugeUser) element).name().equals(username)) {
+            if (!(element instanceof HugeUser user) ||
+                !user.name().equals(username)) {
                 verifyUserPermission(HugePermission.READ, element);
             }
             return this.authManager.rolePermission(element);
@@ -2463,8 +2497,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public void apply(Traversal.Admin<?, ?> traversal) {
             String script;
-            if (traversal instanceof HugeScriptTraversal) {
-                script = ((HugeScriptTraversal<?, ?>) traversal).script();
+            if (traversal instanceof HugeScriptTraversal<?, ?> hugeScriptTraversal) {
+                script = hugeScriptTraversal.script();
             } else {
                 GroovyTranslator translator = GroovyTranslator.of("g");
                 Script script1 = translator.translate(traversal.getBytecode());

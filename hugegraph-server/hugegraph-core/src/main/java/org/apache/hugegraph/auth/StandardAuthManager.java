@@ -743,21 +743,18 @@ public class StandardAuthManager implements AuthManager {
 
     @Override
     public RolePermission rolePermission(AuthElement element) {
-        if (element instanceof HugeUser) {
-            return this.rolePermission((HugeUser) element);
-        } else if (element instanceof HugeTarget) {
-            return this.rolePermission((HugeTarget) element);
+        if (element instanceof HugeUser hugeUser) {
+            return this.rolePermission(hugeUser);
+        } else if (element instanceof HugeTarget hugeTarget) {
+            return this.rolePermission(hugeTarget);
         }
 
         List<HugeAccess> accesses = new ArrayList<>();
-        if (element instanceof HugeBelong) {
-            HugeBelong belong = (HugeBelong) element;
+        if (element instanceof HugeBelong belong) {
             accesses.addAll(this.listAccessByGroup(belong.target(), -1));
-        } else if (element instanceof HugeGroup) {
-            HugeGroup group = (HugeGroup) element;
+        } else if (element instanceof HugeGroup group) {
             accesses.addAll(this.listAccessByGroup(group.id(), -1));
-        } else if (element instanceof HugeAccess) {
-            HugeAccess access = (HugeAccess) element;
+        } else if (element instanceof HugeAccess access) {
             accesses.add(access);
         } else {
             E.checkArgument(false, "Invalid type for role permission: %s",
@@ -1188,8 +1185,8 @@ public class StandardAuthManager implements AuthManager {
                 LOG.error("Failed to rollback transaction: {}",
                           rollbackException.getMessage(), rollbackException);
             }
-            if (e instanceof HugeException) {
-                throw (HugeException) e;
+            if (e instanceof HugeException hugeException) {
+                throw hugeException;
             } else {
                 throw new HugeException("Failed to commit transaction: %s",
                                         e.getMessage(), e);

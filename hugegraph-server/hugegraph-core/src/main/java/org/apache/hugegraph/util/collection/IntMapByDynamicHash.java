@@ -148,8 +148,8 @@ public class IntMapByDynamicHash implements IntMap {
      */
     @Override
     public boolean put(int key, int value) {
-        int hash = this.hash(key);
         Entry[] currentArray = this.table;
+        int hash = this.hash(key, currentArray.length);
         Entry o = (Entry) IntMapByDynamicHash.tableAt(currentArray, hash);
         if (o == null) {
             Entry newEntry = new Entry(key, value);
@@ -229,8 +229,8 @@ public class IntMapByDynamicHash implements IntMap {
      */
     @Override
     public int get(int key) {
-        int hash = this.hash(key);
         Entry[] currentArray = this.table;
+        int hash = this.hash(key, currentArray.length);
         Entry o = (Entry) IntMapByDynamicHash.tableAt(currentArray, hash);
         if (o == RESIZED || o == RESIZING) {
             return this.slowGet(key, currentArray);
@@ -283,8 +283,8 @@ public class IntMapByDynamicHash implements IntMap {
      */
     @Override
     public boolean remove(int key) {
-        int hash = this.hash(key);
         Entry[] currentTable = this.table;
+        int hash = this.hash(key, currentTable.length);
         Entry o = (Entry) IntMapByDynamicHash.tableAt(currentTable, hash);
         if (o == RESIZED || o == RESIZING) {
             return this.slowRemove(key, currentTable) != null;
@@ -327,7 +327,6 @@ public class IntMapByDynamicHash implements IntMap {
                 currentTable = this.helpWithResizeWhileCurrentIndex(currentTable, index);
             } else {
                 Entry e = o;
-                Entry prev = null;
 
                 while (e != null) {
                     int candidate = e.getKey();
@@ -340,12 +339,10 @@ public class IntMapByDynamicHash implements IntMap {
                         // Key found, but CAS failed, restart the loop
                         break;
                     }
-                    prev = e;
                     e = e.getNext();
                 }
 
-                if (prev != null) {
-                    // Key doesn't found
+                if (e == null) {
                     return null;
                 }
             }
@@ -424,10 +421,6 @@ public class IntMapByDynamicHash implements IntMap {
     @Override
     public boolean concurrent() {
         return true;
-    }
-
-    private int hash(int key) {
-        return key & (table.length - 2);
     }
 
     private int hash(int key, int length) {

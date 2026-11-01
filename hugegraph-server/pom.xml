@@ -53,7 +53,6 @@
         <checkstyle.version>8.45</checkstyle.version>
         <protobuf.version>3.21.7</protobuf.version>
         <jmh.version>1.36</jmh.version>
-        <arthas.version>3.7.1</arthas.version>
         <swagger.version>2.2.18</swagger.version>
     </properties>
 

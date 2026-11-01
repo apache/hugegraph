@@ -19,10 +19,12 @@ package org.apache.hugegraph.ct.node;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
@@ -78,6 +80,58 @@ public class AbstractNodeWrapperTest {
 
         String diagnostics = output.toString(StandardCharsets.UTF_8.name());
         Assert.assertTrue(diagnostics, diagnostics.contains(failure));
+    }
+
+    @Test
+    public void testModuleOptionsRejectMissingFile() throws Exception {
+        TestNodeWrapper wrapper = new TestNodeWrapper(newNodeDirectory());
+        Path options = temporaryFolder.newFile("jvm-module.options").toPath();
+        Assert.assertEquals("@" + options.toAbsolutePath(), wrapper.moduleOptions(options));
+        Files.delete(options);
+        Assert.assertThrows(IOException.class, () -> wrapper.moduleOptions(options));
+    }
+
+    @Test
+    public void testStopForwardsStartupLogBeforeCleanup() throws Exception {
+        File nodeDirectory = newNodeDirectory();
+        TestNodeWrapper wrapper = new TestNodeWrapper(nodeDirectory);
+        Files.writeString(Paths.get(wrapper.getLogPath()),
+                          "startup diagnostic\n" + "operation succeeded\n".repeat(250));
+        wrapper.attach(startSleeperProcess());
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8.name()));
+            wrapper.stop();
+        } finally {
+            System.setOut(originalOut);
+        }
+        Assert.assertTrue(output.toString(StandardCharsets.UTF_8.name()).contains("startup diagnostic"));
+        Assert.assertFalse(nodeDirectory.exists());
+    }
+
+    @Test
+    public void testStopRetainsDirectoryWhenLogIsUnavailable() throws Exception {
+        for (boolean malformed : new boolean[]{false, true}) {
+            File nodeDirectory = newNodeDirectory();
+            TestNodeWrapper wrapper = new TestNodeWrapper(nodeDirectory);
+            if (malformed) {
+                Files.write(Paths.get(wrapper.getLogPath()), new byte[]{(byte) 0xff});
+            }
+            wrapper.attach(startSleeperProcess());
+            PrintStream originalOut = System.out;
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try {
+                System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8.name()));
+                wrapper.stop();
+            } finally {
+                System.setOut(originalOut);
+            }
+            Assert.assertFalse(wrapper.isAlive());
+            Assert.assertTrue(nodeDirectory.exists());
+            Assert.assertTrue(output.toString(StandardCharsets.UTF_8.name())
+                                    .contains("Unable to inspect cluster runtime logs:"));
+        }
     }
 
     private File newNodeDirectory() throws Exception {

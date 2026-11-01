@@ -22,12 +22,12 @@ suite: Install notes
 templates:
   - NOTES.txt
 tests:
-  - it: says a template-only render rolls the Pods on every sync
+  - it: directs template-only pipelines to deterministic credential sources
     asserts:
       - matchRegexRaw:
           pattern: "Chart-generated credentials are in use: pd.auth, server.auth.admin, server.auth.token"
       - matchRegexRaw:
-          pattern: "every sync changes the\\s+Secret, rolls the Pods that read it"
+          pattern: "For GitOps/template-only pipelines use fixed credentials or existingSecret"
       - notMatchRegexRaw:
           pattern: "without rolling"
 

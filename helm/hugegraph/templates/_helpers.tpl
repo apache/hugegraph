@@ -15,11 +15,117 @@
 # limitations under the License.
 #
 
+{{/* Resolve inherited defaults once. Never use default/or for explicit booleans. */}}
+{{- define "hugegraph.resolveValues" -}}
+{{- if not (get .Values "__hugegraphResolved") -}}
+{{- $_ := set .Values "__hugegraphResolved" true -}}
+{{/* Old official Server images use hg-test when no cluster is configured. */}}
+{{- if not (hasKey .Values "metadataCluster") -}}
+{{- $_ := set .Values "metadataCluster" "hg-test" -}}
+{{- end -}}
+{{- $legacy := not (hasKey .Values "mode") -}}
+{{- if not (hasKey .Values "hubble") -}}
+{{- $_ := set .Values "hubble" (dict "enabled" false "service" dict "persistence" dict) -}}
+{{- end -}}
+{{- if not (hasKey .Values "seatunnel") -}}
+{{- $_ := set .Values "seatunnel" (dict "enabled" false "service" dict) -}}
+{{- end -}}
+{{- if not (hasKey .Values "vermeer") -}}
+{{- $_ := set .Values "vermeer" (dict "enabled" false "service" dict) -}}
+{{- end -}}
+{{/* --reuse-values can combine an old release with only vermeer.enabled=true.
+Fail before dereferencing missing blocks; keep values.yaml the sole defaults source. */}}
+{{- if .Values.vermeer.enabled -}}
+{{- range $key := list "mode" "image" "auth" "hugegraphCredentials" "master" "worker" "probes" "terminationGracePeriodSeconds" "podLabels" "podAnnotations" -}}
+{{- if not (hasKey $.Values.vermeer $key) -}}
+{{- fail (printf "vermeer is missing new chart defaults (%s): legacy --reuse-values does not import newly added settings. Export and review existing effective values with helm get values --all -o yaml, then upgrade with -f existing-values.yaml --set vermeer.enabled=true without --reuse-values so Helm merges the new defaults" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.vermeer.enabled (not (hasKey .Values.vermeer.auth "admin")) -}}
+{{- fail "vermeer.auth.admin is missing new chart defaults: export and review existing effective values, then upgrade with -f existing-values.yaml without --reuse-values so Helm imports the admin login defaults" -}}
+{{- end -}}
+{{- $strict := eq (.Values.mode | default "easy") "strict" -}}
+{{- $serviceType := ternary "ClusterIP" "NodePort" (or $strict $legacy) -}}
+{{- range $comp := list "server" "hubble" "seatunnel" "vermeer" -}}
+{{- $component := get $.Values $comp -}}
+{{- $svc := get $component "service" | default dict -}}
+{{- $_ := set $component "service" $svc -}}
+{{- $typeInherited := or (not (hasKey $svc "type")) (eq (get $svc "type" | toString) "<nil>") -}}
+{{- $_ := set $component "__serviceTypeInherited" $typeInherited -}}
+{{- if $typeInherited -}}{{- $_ := set $svc "type" $serviceType -}}{{- end -}}
+{{- end -}}
+{{- $np := .Values.networkPolicy | default dict -}}
+{{- $_ := set .Values "networkPolicy" $np -}}
+{{- if or (not (hasKey $np "enabled")) (eq (get $np "enabled" | toString) "<nil>") -}}{{- $_ := set $np "enabled" $strict -}}{{- end -}}
+{{- $persistent := true -}}
+{{- if hasKey (.Values.persistence | default dict) "enabled" -}}{{- $persistent = .Values.persistence.enabled -}}{{- end -}}
+{{- range $comp := list "pd" "store" "hubble" -}}
+{{- $component := get $.Values $comp -}}
+{{- $key := ternary "persistence" "storage" (eq $comp "hubble") -}}
+{{- $storage := get $component $key | default dict -}}
+{{- $_ := set $component $key $storage -}}
+{{- if or (not (hasKey $storage "enabled")) (eq (get $storage "enabled" | toString) "<nil>") -}}{{- $_ := set $storage "enabled" $persistent -}}{{- end -}}
+{{- end -}}
+{{- if .Values.vermeer.enabled -}}
+{{- range $role := list "master" "worker" -}}
+{{- $storage := get (get $.Values.vermeer $role) "storage" -}}
+{{- if or (not (hasKey $storage "enabled")) (eq (get $storage "enabled" | toString) "<nil>") -}}
+{{- $_ := set $storage "enabled" $persistent -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $registry := trimSuffix "/" (get (.Values.global | default dict) "imageRegistry" | default "") -}}
+{{- if contains "://" $registry -}}{{- fail "global.imageRegistry must be a registry host/path without http:// or https://" -}}{{- end -}}
+{{- if $registry -}}
+{{- range $comp := list "pd" "store" "server" "hubble" "seatunnel" "vermeer" -}}
+{{- $image := get (get $.Values $comp) "image" | default dict -}}
+{{- if $image -}}
+{{- $_ := set $image "repository" (include "hugegraph.registryImage" (dict "reference" $image.repository "registry" $registry)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $comp := list "store" "server" -}}
+{{- $values := get $.Values $comp -}}
+{{- $override := get $values "waitImage" | default "" -}}
+{{- $componentImage := include "hugegraph.image" (dict "image" $values.image "appVersion" $.Chart.AppVersion) -}}
+{{- if $override -}}
+{{- $_ := set $values "waitImage" (include "hugegraph.registryImage" (dict "reference" $override "registry" $registry)) -}}
+{{- else -}}
+{{- $_ := set $values "waitImage" $componentImage -}}
+{{- end -}}
+{{- $_ := set $values "__waitImageInherited" (eq $values.waitImage $componentImage) -}}
+{{- end -}}
+{{- $server := .Values.server -}}
+{{- if not (hasKey $server "storageWaitTimeoutSeconds") -}}{{- $_ := set $server "storageWaitTimeoutSeconds" 300 -}}{{- end -}}
+{{- $startup := $server.probes.startup -}}
+{{- if $legacy -}}
+{{- $period := int $startup.periodSeconds -}}
+{{- $budget := add (int $server.storageWaitTimeoutSeconds) 150 -}}
+{{- $_ := set $startup "failureThreshold" (max (int $startup.failureThreshold) (add (div (add (sub $budget 1) $period) $period) 1)) -}}
+{{- end -}}
+{{- if or (not (hasKey $startup "failureThreshold")) (eq (get $startup "failureThreshold" | toString) "<nil>") -}}
+{{- $period := int $startup.periodSeconds -}}
+{{- $budget := add (int $server.storageWaitTimeoutSeconds) 150 -}}
+{{- $_ := set $startup "failureThreshold" (add (div (add (sub $budget 1) $period) $period) 1) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* A qualified component reference overrides the global registry. */}}
+{{- define "hugegraph.registryImage" -}}
+{{- $reference := .reference -}}
+{{- $first := first (splitList "/" $reference) -}}
+{{- $qualified := and (contains "/" $reference) (or (contains "." $first) (contains ":" $first) (eq $first "localhost")) -}}
+{{- if and .registry (not $qualified) -}}{{- printf "%s/%s" .registry $reference -}}{{- else -}}{{- $reference -}}{{- end -}}
+{{- end }}
+
 {{/*
-Expand the name of the chart.
+Keep the application identity stable when the distribution chart is renamed.
+The OCI artifact is hugegraph-helm; Kubernetes resources still use hugegraph.
 */}}
 {{- define "hugegraph.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- default "hugegraph" .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
@@ -29,7 +135,7 @@ Create a default fully qualified app name.
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- $name := default "hugegraph" .Values.nameOverride }}
 {{- if contains $name .Release.Name }}
 {{- .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -80,6 +186,22 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 
 {{- define "hugegraph.hubble.dataName" -}}
 {{- printf "%s-hubble-data" (include "hugegraph.fullname" . | trunc 51 | trimSuffix "-") }}
+{{- end }}
+
+{{/*
+PD and Store pod securityContext. The images run as UID/GID 10001, so their data
+volumes need fsGroup 10001. Apply it here as well as in values.yaml: --reuse-values
+keeps a pre-existing release's empty value. An explicit fsGroup is kept as set.
+*/}}
+{{- define "hugegraph.dataPodSecurityContext" -}}
+{{- $context := deepCopy (. | default dict) -}}
+{{- if not (hasKey $context "fsGroup") -}}
+{{- $_ := set $context "fsGroup" 10001 -}}
+{{- if not (hasKey $context "fsGroupChangePolicy") -}}
+{{- $_ := set $context "fsGroupChangePolicy" "OnRootMismatch" -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $context -}}
 {{- end }}
 
 {{- define "hugegraph.test.name" -}}
@@ -141,7 +263,7 @@ next render finds the Secret through lookup instead).
 {{- define "hugegraph.generatedCredential" -}}
 {{- if not (hasKey .root.Values "__generatedCredentials") -}}{{- $_ := set .root.Values "__generatedCredentials" dict -}}{{- end -}}
 {{- $memo := get .root.Values "__generatedCredentials" -}}
-{{- if not (hasKey $memo .name) -}}{{- $_ := set $memo .name (randAlphaNum 32) -}}{{- end -}}
+{{- if not (hasKey $memo .name) -}}{{- $_ := set $memo .name (randAlphaNum (int (get . "length" | default 32))) -}}{{- end -}}
 {{- get $memo .name -}}
 {{- end }}
 
@@ -278,15 +400,16 @@ with chart-generated credentials, see README, Template-only pipelines.
 {{/*
 Path the PD startup and liveness probes hit.
 
-/v1/health answers 200 as soon as the REST listener is up and never consults
-raft, which is what a multi-PD deployment wants: losing leadership is normal
-during an election, and restarting a follower for it would turn one election
-into a rolling outage. Readiness carries the raft-aware signal instead.
+/v1/health stays 200 during elections and quorum loss, and images with the
+apache/hugegraph#3222 fix answer 503 on fatal raft errors or shutdown. Losing
+leadership alone must not restart followers and turn an election into a
+rolling outage. Readiness carries the leader-availability signal instead.
 
 A single PD has no election to lose. There, a PD that steps down and cannot
 recover, as after a failed snapshot on a full disk
-(apache/hugegraph#3222), keeps answering /v1/health forever and liveness
-never restarts it, so the default moves to /v1/ready when pd.replicas is 1.
+(apache/hugegraph#3222), keeps answering /v1/health forever on older images.
+For compatibility with those images, the default moves to /v1/ready when
+pd.replicas is 1.
 
 The startup probe follows this path as well. Kubernetes suppresses liveness
 until the startup probe succeeds, so leaving startup on /v1/health would give
@@ -295,8 +418,9 @@ readiness after a restart, and a slow log replay would crash-loop instead of
 booting. Following the same path puts that window inside the startup budget
 (300 s by default) instead.
 
-Setting pd.livenessPath overrides the choice in both places. If PD starts
-answering 503 from /v1/health in this state, this value stops being needed.
+Setting pd.livenessPath overrides the choice in both places. Drop the
+single-PD readiness derivation once the minimum supported image includes
+the /v1/health fatal raft error fix.
 */}}
 {{- define "hugegraph.pd.livenessPath" -}}
 {{- $explicit := get .Values.pd "livenessPath" | default "" -}}
@@ -528,9 +652,8 @@ initialized cluster the flags are inert and the authoritative values live
 in PD metadata, changeable only through PD's own config API. PD reconciles
 existing shard groups toward the stored value when a partition patrol is
 triggered (TaskScheduleService reallocShards). The empty-value derivation
-is 3 when store.replicas is at least 3, else 1, because PD clamps a shard
-count of 2 to 1 (two shards cannot elect a leader) and its config API
-accepts only odd values. store-max-shard-count is rendered only when set,
+is 3 when store.replicas is at least 3, else 1. PD requires an odd
+replica count and rejects allocations with insufficient eligible Stores. store-max-shard-count is rendered only when set,
 keeping the image default. All lookups tolerate absent keys so releases
 stored before these values existed keep rendering under --reuse-values.
 
@@ -542,9 +665,13 @@ without the property ignore the flag. Set pd.raftIpWhitelistEnabled=true to
 restore the image default.
 
 raft.rpc-timeout is a plain runtime property, applied on every start rather
-than seeded at bootstrap. It bounds how long the surviving PDs wait on a
-peer that stopped answering without closing its sockets, which is what a
-leader election waits on; empty preserves the image default.
+than seeded at bootstrap; empty preserves the image default. It bounds raft
+requests between PDs, and on images that wait for a raft ReadIndex before
+they read an id counter, that wait. Images that have raft.rpc-connect-timeout
+use that option for the Ping that opens a connection to a peer (default 1000,
+set through pd.javaOpts); it does not bound requests on a connection that is
+already open. On older images raft.rpc-timeout is the timeout of that Ping as
+well, which is what a leader election waited on.
 */}}
 {{- define "hugegraph.pd.effectiveJavaOpts" -}}
 {{- $pd := .Values.pd -}}
@@ -573,18 +700,12 @@ leader election waits on; empty preserves the image default.
 {{- end }}
 
 {{/*
-Keep the startup probe alive for the 300-second storage wait, the Server's
-start command, and process overhead, on a conservative timeline: kubelet may
-run the first probe immediately, so the guaranteed alive time is
-(failureThreshold - 1) * periodSeconds, not the full product. The minimum
-below keeps that guaranteed time at 450 seconds or more. Older stored values
-remain accepted, but their rendered threshold is raised to this floor.
+Unspecified probes reserve storageWaitTimeoutSeconds plus 150 seconds.
+An explicitly configured threshold is preserved and checked by validateValues.
+Kubelet may probe immediately: the budget is (failureThreshold - 1) * periodSeconds.
 */}}
 {{- define "hugegraph.server.startupFailureThreshold" -}}
-{{- $period := int .Values.server.probes.startup.periodSeconds -}}
-{{- $configured := int .Values.server.probes.startup.failureThreshold -}}
-{{- $minimum := add (div (add 449 $period) $period) 1 -}}
-{{- max $configured $minimum -}}
+{{- .Values.server.probes.startup.failureThreshold -}}
 {{- end }}
 
 {{/*
@@ -593,16 +714,20 @@ HG_SERVER_STARTUP_TIMEOUT_S. The image defaults that to 120 seconds, which is
 shorter than the storage wait alone, so a Server still coming up kills itself
 before Kubernetes has given up on it. The value therefore tracks the startup
 probe's guaranteed alive time, (failureThreshold - 1) * periodSeconds,
-because the first probe can fail immediately, minus the 300-second storage
+because the first probe can fail immediately, minus the configured storage
 wait the entrypoint runs before the start command, so the start command and
 kubelet give up together instead of the image outliving the probe. Floored
 at the image's own 120-second default, and capped at the entrypoint's 86400
 maximum rather than rendered into a Pod that refuses to start.
 */}}
+{{- define "hugegraph.server.startupProbeBudget" -}}
+{{- $startup := .Values.server.probes.startup -}}
+{{- add (int ($startup.initialDelaySeconds | default 0)) (mul (sub (int $startup.failureThreshold) 1) (int $startup.periodSeconds)) -}}
+{{- end }}
+
 {{- define "hugegraph.server.startupTimeoutSeconds" -}}
-{{- $period := int .Values.server.probes.startup.periodSeconds -}}
-{{- $threshold := include "hugegraph.server.startupFailureThreshold" . | int -}}
-{{- min 86400 (max 120 (sub (mul (sub $threshold 1) $period) 300)) -}}
+{{- $budget := include "hugegraph.server.startupProbeBudget" . | int -}}
+{{- min 86400 (max 120 (sub $budget (int .Values.server.storageWaitTimeoutSeconds))) -}}
 {{- end }}
 
 {{/*
@@ -653,6 +778,33 @@ The minimum Server replica count that a PDB must remain valid against.
 Cross-field validation that JSON Schema draft-07 cannot express.
 */}}
 {{- define "hugegraph.validateValues" -}}
+{{- include "hugegraph.resolveValues" . -}}
+{{- include "hugegraph.nativeServices.validate" . -}}
+{{- include "hugegraph.metadataCluster.validate" . -}}
+{{- include "hugegraph.vermeer.validate" . -}}
+{{- if (.Values.seatunnel | default dict).enabled -}}
+{{- if not (has .Values.seatunnel.mode (list "standalone" "cluster")) -}}
+{{- fail "seatunnel.mode must be standalone or cluster" -}}
+{{- end -}}
+{{- if and (eq .Values.seatunnel.mode "cluster") (lt (int .Values.seatunnel.replicas) 2) -}}
+{{- fail "seatunnel.replicas must be at least 2 in cluster mode" -}}
+{{- end -}}
+{{- end -}}
+
+{{- include "hugegraph.resolveValues" . -}}
+{{- if (.Values.seatunnel | default dict).enabled -}}
+{{- $svc := .Values.seatunnel.service -}}
+{{- range $key := list "username" "password" -}}
+{{- $value := get ($.Values.seatunnel.auth | default dict) $key | default "" -}}
+{{- if or (ne $value (trim $value)) (contains "${" $value) -}}
+{{- fail (printf "seatunnel.auth.%s cannot contain ${...} placeholders or leading/trailing whitespace: native Engine YAML expands or trims them" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $startupBudget := include "hugegraph.server.startupProbeBudget" . | int -}}
+{{- if lt $startupBudget (add (int .Values.server.storageWaitTimeoutSeconds) 120) -}}
+{{- fail "server.probes.startup.failureThreshold and periodSeconds must leave at least server.storageWaitTimeoutSeconds + 120 seconds to wait for storage and start Server; increase the probe budget or reduce server.storageWaitTimeoutSeconds" -}}
+{{- end -}}
 {{- range $comp := list "pd" "store" "server" "hubble" -}}
 {{- $compLabels := get (get $.Values $comp | default dict) "podLabels" | default dict -}}
 {{- range $reserved := list "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" -}}
@@ -694,15 +846,25 @@ and skip it. An operator who has completed the documented manual scale-down
 procedure has already scaled the live StatefulSet, so desired equals live
 and the upgrade passes.
 */}}
+{{- if .Release.IsUpgrade -}}
 {{- range $comp := list "pd" "store" -}}
 {{- $stsName := "" -}}
 {{- if eq $comp "pd" -}}{{- $stsName = include "hugegraph.pd.name" $ -}}{{- else -}}{{- $stsName = include "hugegraph.store.name" $ -}}{{- end -}}
 {{- $live := lookup "apps/v1" "StatefulSet" $.Release.Namespace $stsName -}}
 {{- if $live -}}
+{{- $wasPersistent := false -}}
+{{- range $claim := get (get $live "spec") "volumeClaimTemplates" | default list -}}
+{{- if eq (dig "metadata" "name" "" $claim) (printf "%s-data" $comp) -}}{{- $wasPersistent = true -}}{{- end -}}
+{{- end -}}
+{{- if ne $wasPersistent (get (get (get $.Values $comp) "storage") "enabled") -}}
+{{- fail (printf "%s.storage.enabled cannot change on an initialized release: StatefulSet volumeClaimTemplates are immutable and changing storage can discard data. Use a fresh release and migrate data" $comp) -}}
+{{- end -}}
+
 {{- $liveReplicas := int (dig "spec" "replicas" 0 $live) -}}
 {{- $desired := int (get (get $.Values $comp) "replicas") -}}
 {{- if and (gt $liveReplicas 0) (lt $desired $liveReplicas) -}}
-{{- fail (printf "%s.replicas cannot shrink from %d to %d through a helm upgrade: raft and shard membership are persisted, and removing Pods does not reconfigure them. Follow the manual scale-down procedure in the README (Scaling), which ends by scaling the live StatefulSet; the upgrade passes once the live replicas match the value" $comp $liveReplicas $desired) -}}
+{{- $procedure := ternary "Reconfigure the persisted PD voting membership before scaling the live StatefulSet" "Retire leaving Store IDs and migrate their shards before scaling the live StatefulSet" (eq $comp "pd") -}}
+{{- fail (printf "%s.replicas cannot shrink from %d to %d through a helm upgrade: persisted membership is not changed by removing Pods. %s; see docs/operations.md (Topology and scheduling). The upgrade passes once live replicas match the value" $comp $liveReplicas $desired $procedure) -}}
 {{- end -}}
 {{/*
 PD raft membership is the persisted voting configuration, and the peer list
@@ -715,7 +877,7 @@ from no REST route, so the chart cannot perform it and does not pretend to.
 Growing Store is ordinary scale-out and stays allowed.
 */}}
 {{- if and (eq $comp "pd") (gt $liveReplicas 0) (gt $desired $liveReplicas) -}}
-{{- fail (printf "pd.replicas cannot grow from %d to %d through a helm upgrade: the rendered peer list reaches raft only as the initial configuration, so new Pods would start without joining the voting configuration. Change the persisted membership through PD first, then scale the live StatefulSet, then upgrade with the matching value; the README (Scaling) has the procedure and its limits. A fresh install at any replica count is unaffected" $liveReplicas $desired) -}}
+{{- fail (printf "pd.replicas cannot grow from %d to %d through a helm upgrade: the rendered peer list reaches raft only as the initial configuration, so new Pods would start without joining the voting configuration. Change the persisted membership through PD first, then scale the live StatefulSet, then upgrade with the matching value; see docs/operations.md (Topology and scheduling) for the supported lifecycle. A fresh install at any replica count is unaffected" $liveReplicas $desired) -}}
 {{- end -}}
 {{/*
 Raft identity. Every PD and Store names itself to its peers as
@@ -763,6 +925,22 @@ the instance and component labels instead, which do not depend on the name.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- $hubbleLive := lookup "apps/v1" "Deployment" .Release.Namespace (include "hugegraph.hubble.name" .) -}}
+{{- if and $hubbleLive .Values.hubble.enabled -}}
+{{- $wasPersistent := false -}}
+{{- $hasDataVolume := false -}}
+{{- range $volume := dig "spec" "template" "spec" "volumes" list $hubbleLive -}}
+{{- if eq ($volume.name | default "") "data" -}}{{- $hasDataVolume = true -}}{{- end -}}
+{{- if and (eq ($volume.name | default "") "data") (hasKey $volume "persistentVolumeClaim") -}}{{- $wasPersistent = true -}}{{- end -}}
+{{- end -}}
+{{- if ne $wasPersistent .Values.hubble.persistence.enabled -}}
+{{- if not $hasDataVolume -}}
+{{- fail "hubble.persistence.enabled cannot change on an initialized release: legacy Hubble has no data volume and its UI records are in the container filesystem. Keep hubble.persistence.enabled=false with --reuse-values or an explicit GitOps value; enabling persistence requires a reviewed metadata migration first" -}}
+{{- end -}}
+{{- fail "hubble.persistence.enabled cannot change on an initialized release: changing storage can discard UI records. Migrate the data into a fresh deployment first" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{/*
 Only validate minAvailable where a PDB is actually rendered. The pd/store PDB
 templates require replicas > 1, so a single-replica release never creates one
@@ -784,9 +962,8 @@ and must not be failed for a value that has no effect.
 PD -D system properties must be empty or a positive integer. The schema
 enforces the types; these checks add a named failure for zero, negative, and
 nonsense values, and check an explicit shard count against PD's real
-constraints: PD's config API accepts only odd shard counts, PD clamps a
-count of 2 to 1 (two shards cannot elect a leader), and PD clamps the
-effective count to the number of live stores. All lookups tolerate absent
+constraints: PD accepts only positive odd shard counts and rejects
+placement when there are fewer eligible Stores than requested replicas. All lookups tolerate absent
 keys for releases stored before the values existed.
 */}}
 {{- $pdPartition := get .Values.pd "partition" | default dict -}}
@@ -801,18 +978,15 @@ keys for releases stored before the values existed.
 {{- $explicitShards := include "hugegraph.optionalScalar" (get $pdPartition "defaultShardCount") -}}
 {{- if regexMatch "^[1-9][0-9]*$" $explicitShards -}}
 {{- if eq (mod (int $explicitShards) 2) 0 -}}
-{{- fail "pd.partition.defaultShardCount must be odd: PD's config API rejects even shard counts, and PD clamps a bootstrap value of 2 to 1 because two shards cannot elect a leader" -}}
+{{- fail "pd.partition.defaultShardCount must be odd: PD rejects even shard counts because they cannot provide an odd voting majority" -}}
 {{- end -}}
 {{- if gt (int $explicitShards) (int .Values.store.replicas) -}}
-{{- fail "pd.partition.defaultShardCount is greater than store.replicas: PD would clamp the effective shard count to the number of live stores, so the extra replicas would silently never be placed. Raise store.replicas or lower the shard count" -}}
+{{- fail "pd.partition.defaultShardCount is greater than store.replicas: PD rejects placement without enough eligible Stores. Raise store.replicas or lower the shard count" -}}
 {{- end -}}
 {{- end -}}
 {{- $svc := get .Values.server "service" | default dict -}}
 {{- if and (get $svc "nodePort") (not (has (get $svc "type" | default "ClusterIP") (list "NodePort" "LoadBalancer"))) -}}
 {{- fail "server.service.nodePort requires server.service.type to be NodePort or LoadBalancer" -}}
-{{- end -}}
-{{- if and (ne (get $svc "type" | default "ClusterIP") "ClusterIP") (not (get $svc "allowInsecureExposure" | default false)) -}}
-{{- fail "server.service.type NodePort or LoadBalancer publishes the plain-HTTP Server API outside the cluster, so Basic-auth credentials and JWTs cross the network in cleartext; keep ClusterIP behind a port-forward or an HTTPS-terminating Ingress (server.ingress.tls), or set server.service.allowInsecureExposure=true once reachability is restricted by other means (NetworkPolicy, load balancer allowlist, firewall)" -}}
 {{- end -}}
 {{- $advertiseUrl := trim (default "" .Values.server.advertiseUrl) -}}
 {{- if and $advertiseUrl (not (or (hasPrefix "http://" $advertiseUrl) (hasPrefix "https://" $advertiseUrl))) -}}
@@ -823,18 +997,12 @@ keys for releases stored before the values existed.
 {{- if and (or (get $pdSvc "restNodePort") (get $pdSvc "grpcNodePort")) (not (has $pdSvcType (list "NodePort" "LoadBalancer"))) -}}
 {{- fail "pd.service.restNodePort and pd.service.grpcNodePort require pd.service.type to be NodePort or LoadBalancer" -}}
 {{- end -}}
-{{- if and (ne $pdSvcType "ClusterIP") (not (get $pdSvc "allowInsecureExposure" | default false)) -}}
-{{- fail "pd.service.type NodePort or LoadBalancer exposes PD's unauthenticated gRPC port outside the cluster, raft membership RPCs included; keep ClusterIP, or set pd.service.allowInsecureExposure=true once reachability is restricted by other means (NetworkPolicy, load balancer allowlist, firewall)" -}}
-{{- end -}}
 {{- $serverPdb := get .Values.server "pdb" | default dict -}}
 {{- $serverReplicaFloor := include "hugegraph.server.replicaFloor" . | int -}}
 {{- if and (get $serverPdb "enabled" | default false) (gt $serverReplicaFloor 1) (ge (int (get $serverPdb "minAvailable" | default 1)) $serverReplicaFloor) -}}
 {{- fail "server.pdb.minAvailable must be less than the active Server replica floor (server.hpa.minReplicas when HPA is enabled, otherwise server.replicas), otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
 {{- end -}}
 {{- $serverIngress := get .Values.server "ingress" | default dict -}}
-{{- if and (get $serverIngress "enabled" | default false) (empty (get $serverIngress "tls")) (not (get $serverIngress "allowPlainHttp" | default false)) -}}
-{{- fail "server.ingress.enabled without tls publishes Basic-auth credentials and JWTs over plain HTTP; configure server.ingress.tls, or set server.ingress.allowPlainHttp=true to accept that on a trusted network" -}}
-{{- end -}}
 {{- if get (get .Values.server "securityContext" | default dict) "readOnlyRootFilesystem" | default false -}}
 {{- fail "server.securityContext.readOnlyRootFilesystem=true breaks Server: its wrapper rewrites conf/rest-server.properties inside the image at startup and the chart mounts no writable volume there" -}}
 {{- end -}}
@@ -850,9 +1018,9 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 */}}
 {{- $reservedEnv := dict
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
-      "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_STARTUP_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
-      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
+      "store" (list "PD_CLUSTER" "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "HG_SERVER_CLUSTER" "POD_IP" "HG_SERVER_SERVICE_ID" "HG_SERVER_GRAPHSPACE" "SERVICE_ID" "GRAPH_SPACE" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_DEPLOY_IN_K8S" "HG_SERVER_STARTUP_TIMEOUT_S" "WAIT_STORAGE_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
 {{- range $entry := get $componentValues "extraEnv" | default list -}}
@@ -870,9 +1038,6 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- if and (get $hubbleSvc "nodePort") (not (has (get $hubbleSvc "type" | default "ClusterIP") (list "NodePort" "LoadBalancer"))) -}}
 {{- fail "hubble.service.nodePort requires hubble.service.type to be NodePort or LoadBalancer" -}}
 {{- end -}}
-{{- if and (ne (get $hubbleSvc "type" | default "ClusterIP") "ClusterIP") (not (get $hubbleSvc "allowInsecureExposure" | default false)) -}}
-{{- fail "hubble.service.type NodePort or LoadBalancer publishes the plain-HTTP Hubble UI outside the cluster, with no login of its own and the graph credentials typed into it; keep ClusterIP behind a port-forward or an HTTPS-terminating Ingress, or set hubble.service.allowInsecureExposure=true once reachability is restricted by other means (NetworkPolicy, load balancer allowlist, firewall)" -}}
-{{- end -}}
 {{- $hubbleImage := get $hubble "image" | default dict -}}
 {{- if and (eq (trim (get $hubbleImage "tag" | default "")) "") (eq (trim (get $hubbleImage "digest" | default "")) "") -}}
 {{- fail "hubble.image needs a tag or a digest: the chart appVersion tracks the Server release, not Hubble, so there is no meaningful fallback" -}}
@@ -881,9 +1046,6 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- fail "hubble.securityContext.readOnlyRootFilesystem=true breaks Hubble: its wrapper writes conf/hugegraph-hubble.properties inside the image at startup and the chart mounts no writable volume there" -}}
 {{- end -}}
 {{- $hubbleIngress := get $hubble "ingress" | default dict -}}
-{{- if and (get $hubbleIngress "enabled" | default false) (empty (get $hubbleIngress "tls")) (not (get $hubbleIngress "allowPlainHttp" | default false)) -}}
-{{- fail "hubble.ingress.enabled without tls publishes the plain-HTTP, unauthenticated Hubble UI; configure hubble.ingress.tls, or set hubble.ingress.allowPlainHttp=true to accept that on a trusted network" -}}
-{{- end -}}
 {{- end -}}
 {{- $pdAuth := get .Values.pd "auth" | default dict -}}
 {{/* A values set with no pd.auth block at all (a release stored before the
@@ -905,27 +1067,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- fail "server.auth.token requires existingSecret, value, or autoGenerate=true when auth is enabled" -}}
 {{- end -}}
 {{- end -}}
-{{/* NetworkPolicy exposure check runs last, so an exposure the other checks
-     refuse (allowInsecureExposure, Ingress TLS) is reported first. */}}
-{{- $networkPolicy := get .Values "networkPolicy" | default dict -}}
-{{- if get $networkPolicy "enabled" -}}
-{{- $exposed := dict
-      "pd" (ne $pdSvcType "ClusterIP")
-      "server" (or (ne (get $svc "type" | default "ClusterIP") "ClusterIP") (get $serverIngress "enabled" | default false) (ne $advertiseUrl ""))
-      "hubble" (and (get $hubble "enabled" | default false) (or (ne (get (get $hubble "service" | default dict) "type" | default "ClusterIP") "ClusterIP") (get (get $hubble "ingress" | default dict) "enabled" | default false))) -}}
-{{- range $comp := list "pd" "server" "hubble" -}}
-{{- if and (get $exposed $comp) (empty (get (get $networkPolicy $comp | default dict) "extraIngress")) -}}
-{{- fail (printf "networkPolicy.enabled admits nothing from outside the release, so the %s exposure (NodePort/LoadBalancer Service, Ingress%s) is unreachable; list its callers in networkPolicy.%s.extraIngress, for example the Ingress controller's namespace or a client CIDR" $comp (ternary ", server.advertiseUrl" "" (eq $comp "server")) $comp) -}}
-{{- end -}}
-{{- end -}}
-{{/* An in-cluster Hubble in pd mode receives whatever Server URL PD hands
-     out. With server.advertiseUrl set, that is the advertised external URL,
-     and Hubble's egress policy only admits traffic to Server Pods, so the
-     discovered URL would be unreachable from Hubble. */}}
-{{- if and (get $hubble "enabled" | default false) (eq (get $hubble "mode" | default "pd") "pd") (ne $advertiseUrl "") (empty (get (get $networkPolicy "hubble" | default dict) "extraEgress")) -}}
-{{- fail "networkPolicy.enabled restricts Hubble egress to the release's own Pods, but server.advertiseUrl makes PD hand Hubble that external URL for discovery; allow Hubble to reach it in networkPolicy.hubble.extraEgress, or leave server.advertiseUrl empty for in-cluster discovery" -}}
-{{- end -}}
-{{- end -}}
+
 {{- end }}
 
 {{/*
@@ -950,6 +1092,22 @@ resolver (CoreDNS in any namespace, NodeLocal DNSCache).
 {{- $rules = append $rules (printf "- protocol: TCP\n  port: %d" (int .)) -}}
 {{- end -}}
 {{- join "\n" $rules -}}
+{{- end }}
+
+{{/* Native SeaTunnel resources belong to this HugeGraph release. */}}
+{{- define "hugegraph.seatunnel.name" -}}
+{{- printf "%s-seatunnel" (include "hugegraph.fullname" . | trunc 44 | trimSuffix "-") -}}
+{{- end }}
+
+{{- define "hugegraph.netpol.seatunnelLabels" -}}
+{{ include "hugegraph.selectorLabels" . }}
+app.kubernetes.io/component: seatunnel
+{{- end }}
+
+{{- define "hugegraph.netpol.seatunnelPeer" -}}
+- podSelector:
+    matchLabels:
+      {{- include "hugegraph.netpol.seatunnelLabels" . | nindent 6 }}
 {{- end }}
 
 {{- define "hugegraph.netpol.dns" -}}
@@ -1000,4 +1158,245 @@ over tag; otherwise fall back to tag, then to the chart appVersion. Takes a dict
 {{- else -}}
 {{- printf "%s:%s" $img.repository (default .appVersion $img.tag) -}}
 {{- end -}}
+{{- end }}
+
+{{/* Native Vermeer identities stay stable across standalone/cluster mode changes. */}}
+{{- define "hugegraph.vermeer.masterName" -}}
+{{- printf "%s-vermeer-master" (include "hugegraph.fullname" . | trunc 39 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.workerName" -}}
+{{- printf "%s-vermeer-worker" (include "hugegraph.fullname" . | trunc 44 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.configName" -}}
+{{- printf "%s-vermeer-config" (include "hugegraph.fullname" . | trunc 48 | trimSuffix "-") -}}
+{{- end }}
+{{- define "hugegraph.vermeer.standaloneWorkerDataName" -}}
+{{- printf "%s-vermeer-standalone-worker-data" (include "hugegraph.fullname" . | trunc 31 | trimSuffix "-") -}}
+{{- end }}
+{{/* Stable signing factor and rollout checksum; external Secrets contribute their revision. */}}
+{{- define "hugegraph.vermeer.authSecretName" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- $existing := get $auth "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $existing -}}
+{{- else -}}
+{{- printf "%s-vermeer-auth" (.Release.Name | trunc 50 | trimSuffix "-") -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authSecretKey" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- get $auth "key" | default "token-factor" -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authSecretValue" -}}
+{{- $auth := get .Values.vermeer "auth" | default dict -}}
+{{- $value := get $auth "value" | default "" -}}
+{{- if $value -}}
+{{- $value | b64enc -}}
+{{- else -}}
+{{- $name := include "hugegraph.vermeer.authSecretName" . -}}
+{{- $key := include "hugegraph.vermeer.authSecretKey" . -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- include "hugegraph.generatedCredential" (dict "root" . "name" "vermeer-auth") | b64enc -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.vermeer.authChecksum" -}}
+{{- $parts := list (include "hugegraph.vermeer.authSecretName" .) (include "hugegraph.vermeer.authSecretKey" .) -}}
+{{- $authCfg := get .Values.vermeer "auth" | default dict -}}
+{{- $inline := get $authCfg "value" | default "" -}}
+{{- $existing := get $authCfg "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $existing -}}
+{{- if $secret -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $secret) -}}{{- end -}}
+{{- else if $inline -}}
+{{- $parts = append $parts (sha256sum $inline) -}}
+{{- else -}}
+{{- $parts = append $parts (include "hugegraph.vermeer.authSecretValue" . | b64dec | sha256sum) -}}
+{{- end -}}
+{{- join "|" $parts | sha256sum -}}
+{{- end }}
+
+
+{{- define "hugegraph.vermeer.validate" -}}
+{{- if (.Values.vermeer | default dict).enabled -}}
+{{- $v := .Values.vermeer -}}
+{{- $admin := $v.auth.admin -}}
+{{- if and (not $admin.existingSecret) (not $admin.password) (not $admin.autoGenerate) -}}
+{{- fail "vermeer.auth.admin requires existingSecret, password, or autoGenerate=true" -}}
+{{- end -}}
+{{- if and $admin.password (or (eq (trim $admin.password) "") (contains "\n" $admin.password) (contains "\r" $admin.password)) -}}
+{{- fail "vermeer.auth.admin.password must be one nonblank UTF-8 line; whitespace is preserved" -}}
+{{- end -}}
+{{- if and .Values.hubble.enabled (ne (.Values.hubble.mode | default "pd") "pd") -}}
+{{- fail "vermeer.enabled with Hubble requires hubble.mode=pd for graph-space discovery; disable Hubble to use Vermeer independently" -}}
+{{- end -}}
+{{- if .Values.hubble.enabled -}}
+{{- $hubbleContainer := .Values.hubble.securityContext | default dict -}}
+{{- $hubblePod := .Values.hubble.podSecurityContext | default dict -}}
+{{- $nonRoot := get $hubblePod "runAsNonRoot" | default false -}}
+{{- if hasKey $hubbleContainer "runAsNonRoot" -}}{{- $nonRoot = get $hubbleContainer "runAsNonRoot" -}}{{- end -}}
+{{- if and $nonRoot (le (int (include "hugegraph.hubble.vermeerUid" .)) 0) -}}
+{{- fail "Vermeer token files require an explicit positive hubble.securityContext.runAsUser or hubble.podSecurityContext.runAsUser when runAsNonRoot=true" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has $v.mode (list "standalone" "cluster")) -}}
+{{- fail "vermeer.mode must be standalone or cluster" -}}
+{{- end -}}
+{{- if ne .Values.server.backend "hstore" -}}
+{{- fail "vermeer.enabled requires server.backend=hstore" -}}
+{{- end -}}
+{{- if and (not $v.auth.existingSecret) (not $v.auth.value) (not $v.auth.autoGenerate) -}}
+{{- fail "vermeer.auth requires existingSecret, value, or autoGenerate=true" -}}
+{{- end -}}
+{{- if and (not $v.image.tag) (not $v.image.digest) -}}
+{{- fail "vermeer.image needs a tag or digest matching the file-credential and token-helper interface" -}}
+{{- end -}}
+{{- $ports := list (int $v.master.httpPort) (int $v.master.grpcPort) (int $v.worker.httpPort) (int $v.worker.grpcPort) -}}
+{{- if ne (len (uniq $ports)) 4 -}}
+{{- fail "vermeer master and worker HTTP/gRPC ports must be distinct" -}}
+{{- end -}}
+{{- range $reserved := list "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" -}}
+{{- if hasKey $v.podLabels $reserved -}}
+{{- fail (printf "vermeer.podLabels must not set %s" $reserved) -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $_ := $v.podAnnotations -}}
+{{- if hasPrefix "checksum/" $key -}}{{- fail "vermeer.podAnnotations must not set checksum/ annotations" -}}{{- end -}}
+{{- end -}}
+{{- range $role := list "master" "worker" -}}
+{{- range $entry := (get $v $role).extraEnv -}}
+{{- if has $entry.name (list "POD_IP" "VERMEER_AUTH_TOKEN_FACTOR_FILE" "VERMEER_ADMIN_PASSWORD_FILE" "VERMEER_PD_PASSWORD_FILE" "VERMEER_PD_PEERS" "VERMEER_HUGEGRAPH_USERNAME" "VERMEER_HUGEGRAPH_PASSWORD_FILE" "VERMEER_HUGEGRAPH_CREDENTIALS_FILE") -}}
+{{- fail (printf "vermeer.%s.extraEnv must not set chart-managed variable %s" $role $entry.name) -}}
+{{- end -}}
+{{- end -}}
+{{- if $.Release.IsUpgrade -}}
+{{- $name := include "hugegraph.vermeer.masterName" $ -}}
+{{- if eq $role "worker" -}}{{- $name = include "hugegraph.vermeer.workerName" $ -}}{{- end -}}
+{{- $live := lookup "apps/v1" "StatefulSet" $.Release.Namespace $name -}}
+{{- if $live -}}
+{{- $wasPersistent := false -}}
+{{- range $claim := dig "spec" "volumeClaimTemplates" list $live -}}
+{{- if eq (dig "metadata" "name" "" $claim) (printf "%s-data" $role) -}}{{- $wasPersistent = true -}}{{- end -}}
+{{- end -}}
+{{- if ne $wasPersistent (get (get $v $role) "storage").enabled -}}
+{{- fail (printf "vermeer.%s.storage.enabled cannot change on an initialized release; migrate retained data into a fresh workload" $role) -}}
+{{- end -}}
+{{- if eq $role "master" -}}
+{{- range $volume := dig "spec" "template" "spec" "volumes" list $live -}}
+{{- if and (eq $v.mode "standalone") (eq (get $volume "name") "worker-data") -}}
+{{- $workerPersistent := hasKey $volume "persistentVolumeClaim" -}}
+{{- if ne $workerPersistent $v.worker.storage.enabled -}}
+{{- fail "vermeer.worker.storage.enabled cannot change on an initialized standalone release; migrate retained data first" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Server owns the initialized namespace; Store must use that same PD key prefix. */}}
+{{- define "hugegraph.metadataCluster.validate" -}}
+{{- if regexMatch "(^|[[:space:]\"'])-Dpd[.]cluster(=|[[:space:]\"']|$)" (.Values.store.javaOpts | default "") -}}
+{{- fail "store.javaOpts must not set -Dpd.cluster; use shared metadataCluster so Server and Store read the same PD metadata namespace" -}}
+{{- end -}}
+{{- if .Release.IsUpgrade -}}
+{{- $live := lookup "apps/v1" "Deployment" .Release.Namespace (include "hugegraph.server.name" .) -}}
+{{- if $live -}}
+{{- $desired := .Values.metadataCluster -}}
+{{- $record := dig "metadata" "annotations" "hugegraph.apache.org/metadata-cluster" "" $live -}}
+{{- if and $record (ne $record $desired) -}}
+{{- fail "metadataCluster cannot change from the recorded Server metadata namespace: changing PD keys does not migrate existing metadata; retain the initialized value" -}}
+{{- end -}}
+{{- $observed := dict "explicit" false "unknown" false -}}
+{{- range $container := dig "spec" "template" "spec" "containers" list $live -}}
+{{- if eq (get $container "name") "server" -}}
+{{- range $entry := get $container "env" | default list -}}
+{{- if eq (get $entry "name") "HG_SERVER_CLUSTER" -}}
+{{- $_ := set $observed "explicit" true -}}
+{{- if hasKey $entry "valueFrom" -}}
+{{- $_ := set $observed "unknown" true -}}
+{{- else if ne (get $entry "value" | default "") $desired -}}
+{{- fail "metadataCluster cannot change from the existing Server HG_SERVER_CLUSTER value: changing PD keys does not migrate existing metadata; retain the initialized value" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not $record) (or (get $observed "unknown") (and (not (get $observed "explicit")) (ne $desired "hg-test"))) -}}
+{{- fail "metadataCluster adoption cannot verify the legacy Server namespace. First inspect the existing Server logs/configuration and record that same verified value in its hugegraph.apache.org/metadata-cluster Deployment annotation; then retain it as metadataCluster. This records existing metadata and does not migrate PD keys" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Native HTTP entries share mode defaults; internal RPC Services stay private. */}}
+{{- define "hugegraph.nativeServices.validate" -}}
+{{- range $component := list "seatunnel" "vermeer" -}}
+{{- $values := get $.Values $component | default dict -}}
+{{- if get $values "enabled" -}}
+{{- $svc := get $values "service" | default dict -}}
+{{- if not (has (get $svc "type") (list "ClusterIP" "NodePort")) -}}
+{{- fail (printf "%s.service.type must be ClusterIP or NodePort" $component) -}}
+{{- end -}}
+{{- if and (get $svc "nodePort") (ne (get $svc "type") "NodePort") -}}
+{{- fail (printf "%s.service.nodePort requires %s.service.type=NodePort" $component $component) -}}
+{{- end -}}
+{{- range $field := list "externalIPs" "externalTrafficPolicy" "loadBalancerClass" "loadBalancerIP" "loadBalancerSourceRanges" "allocateLoadBalancerNodePorts" -}}
+{{- if hasKey $svc $field -}}
+{{- fail (printf "%s.service.%s is not supported; native HTTP entries support ClusterIP or NodePort" $component $field) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Native UI password is distinct from the internal HMAC signing factor. */}}
+{{- define "hugegraph.vermeer.adminSecretName" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- if $admin.existingSecret -}}{{- $admin.existingSecret -}}
+{{- else -}}{{- printf "%s-vermeer-admin" (.Release.Name | trunc 49 | trimSuffix "-") -}}{{- end -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminSecretKey" -}}
+{{- .Values.vermeer.auth.admin.key | default "password" -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminSecretValue" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- $name := include "hugegraph.vermeer.adminSecretName" . -}}
+{{- $key := include "hugegraph.vermeer.adminSecretKey" . -}}
+{{- if $admin.existingSecret -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}{{- get (get $secret "data") $key -}}{{- end -}}
+{{- else if $admin.password -}}
+{{- $admin.password | b64enc -}}
+{{- else -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- $length := ternary 16 6 (eq (.Values.mode | default "easy") "strict") -}}
+{{- include "hugegraph.generatedCredential" (dict "root" . "name" "vermeer-admin" "length" $length) | b64enc -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+{{- define "hugegraph.vermeer.adminChecksum" -}}
+{{- $admin := .Values.vermeer.auth.admin -}}
+{{- $parts := list (include "hugegraph.vermeer.adminSecretName" .) (include "hugegraph.vermeer.adminSecretKey" .) -}}
+{{- if $admin.existingSecret -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $admin.existingSecret -}}
+{{- if $secret -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $secret) -}}{{- end -}}
+{{- else if $admin.password -}}
+{{- $parts = append $parts (sha256sum $admin.password) -}}
+{{- else -}}
+{{- $parts = append $parts (include "hugegraph.vermeer.adminSecretValue" . | b64dec | sha256sum) -}}
+{{- end -}}
+{{- join "|" $parts | sha256sum -}}
 {{- end }}

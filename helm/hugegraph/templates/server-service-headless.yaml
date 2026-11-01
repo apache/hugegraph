@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 # Headless Service enumerating the individual Server Pods. The helm test
 # hook resolves it to run its graph-bound Gremlin check against every Pod
 # (a broken-binding Pod passes readiness, so it appears here), and the

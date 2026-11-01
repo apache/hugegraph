@@ -406,22 +406,17 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
                 assert false : id;
                 return null;
             }
-            int key = (int) longId;
-            if (key >= this.size) {
+            if (longId >= this.size) {
                 return null;
             }
-            switch (type) {
-                case PROPERTY_KEY:
-                    return this.pks.get(key);
-                case VERTEX_LABEL:
-                    return this.vls.get(key);
-                case EDGE_LABEL:
-                    return this.els.get(key);
-                case INDEX_LABEL:
-                    return this.ils.get(key);
-                default:
-                    return null;
-            }
+            int key = (int) longId;
+            return switch (type) {
+                case PROPERTY_KEY -> this.pks.get(key);
+                case VERTEX_LABEL -> this.vls.get(key);
+                case EDGE_LABEL -> this.els.get(key);
+                case INDEX_LABEL -> this.ils.get(key);
+                default -> null;
+            };
         }
 
         public void set(HugeType type, Id id, V value) {
@@ -431,10 +426,10 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
                 assert false : id;
                 return;
             }
-            int key = (int) longId;
-            if (key >= this.size) {
+            if (longId >= this.size) {
                 return;
             }
+            int key = (int) longId;
 
             this.setValue(type, key, value);
         }
@@ -445,10 +440,10 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
             if (longId <= 0L) {
                 return;
             }
-            int key = (int) longId;
-            if (key >= this.size) {
+            if (longId >= this.size) {
                 return;
             }
+            int key = (int) longId;
 
             this.setValue(type, key, null);
         }

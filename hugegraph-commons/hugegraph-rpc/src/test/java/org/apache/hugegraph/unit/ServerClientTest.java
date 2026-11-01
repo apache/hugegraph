@@ -22,6 +22,13 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.rpc.RpcClientProvider;
@@ -38,9 +45,12 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.alipay.sofa.rpc.common.RpcOptions;
+import com.alipay.sofa.rpc.config.ProviderConfig;
+import com.alipay.sofa.rpc.config.ServerConfig;
 import com.alipay.sofa.rpc.core.exception.SofaRpcException;
 import com.alipay.sofa.rpc.core.exception.SofaRpcRuntimeException;
 import com.google.common.collect.ImmutableMap;
+import io.netty.channel.ChannelFuture;
 
 public class ServerClientTest extends BaseUnitTest {
 
@@ -59,7 +69,7 @@ public class ServerClientTest extends BaseUnitTest {
             rpcClient.destroy();
         }
         if (rpcServer != null) {
-            rpcServer.destroy();
+            stopServer(rpcServer);
         }
     }
 
@@ -69,7 +79,45 @@ public class ServerClientTest extends BaseUnitTest {
             rpcClient.unreferAll();
         }
         if (rpcServer != null) {
-            rpcServer.unexportAll();
+            unexportServer(rpcServer);
+        }
+    }
+
+    @Test
+    public void testUnexportWaitsBeforeReusingListenerPort() throws Exception {
+        rpcServer.config().addService(HelloService.class, new HelloServiceImpl());
+        startServer(rpcServer);
+        ChannelFuture binding = listener(rpcServer);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        binding.channel().eventLoop().execute(() -> {
+            entered.countDown();
+            try {
+                E.checkState(release.await(5, TimeUnit.SECONDS), "RPC close barrier timed out");
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(failure);
+            }
+        });
+        try {
+            Assert.assertTrue(entered.await(5, TimeUnit.SECONDS));
+            Future<?> closing = worker.submit(() -> unexportServer(rpcServer));
+            Assert.assertThrows(TimeoutException.class, () -> closing.get(1, TimeUnit.SECONDS));
+            Assert.assertTrue(rpcServer.config().configs().isEmpty());
+            Assert.assertTrue(binding.channel().isOpen());
+            Assert.assertFalse(binding.channel().closeFuture().isDone());
+            release.countDown();
+            closing.get(5, TimeUnit.SECONDS);
+            Assert.assertTrue(binding.channel().closeFuture().isSuccess());
+            rpcServer.config().addService(HelloService.class, new HelloServiceImpl());
+            startServer(rpcServer);
+            HelloService client = rpcClient.config().serviceProxy(HelloService.class);
+            Assert.assertEquals("hello tom!", client.hello("tom"));
+        } finally {
+            release.countDown();
+            worker.shutdownNow();
+            Assert.assertTrue(worker.awaitTermination(5, TimeUnit.SECONDS));
         }
     }
 
@@ -603,26 +651,64 @@ public class ServerClientTest extends BaseUnitTest {
     @Test
     public void testExportMultiTimesOfSameServer() {
         RpcServer rpcServerExport = new RpcServer(config("server-random"));
-        rpcServerExport.config().addService(HelloService.class,
-                                            new HelloServiceImpl());
-        rpcServerExport.exportAll();
-        rpcServerExport.exportAll();
-
-        stopServer(rpcServerExport);
+        try {
+            rpcServerExport.config().addService(HelloService.class, new HelloServiceImpl());
+            rpcServerExport.exportAll();
+            rpcServerExport.exportAll();
+            Assert.assertEquals(1, rpcServerExport.config().configs().get(
+                    HelloService.class.getName()).getServer().size());
+        } finally {
+            stopServer(rpcServerExport);
+        }
     }
 
     @Test
     public void testExportMultiTimesOfSameService() {
         RpcServer rpcServerExport = new RpcServer(config("server-random"));
-        rpcServerExport.config().addService(HelloService.class,
-                                            new HelloServiceImpl());
-        rpcServerExport.exportAll();
+        try {
+            rpcServerExport.config().addService(HelloService.class, new HelloServiceImpl());
+            rpcServerExport.exportAll();
+            rpcServerExport.config().addService("graph", HelloService.class, new HelloServiceImpl());
+            rpcServerExport.exportAll();
+            rpcServerExport.exportAll();
+            for (ProviderConfig<?> provider : rpcServerExport.config().configs().values()) {
+                Assert.assertEquals(1, provider.getServer().size());
+            }
+        } finally {
+            stopServer(rpcServerExport);
+        }
+    }
 
-        rpcServerExport.config().addService("graph", HelloService.class,
-                                            new HelloServiceImpl());
-        rpcServerExport.exportAll();
-
-        stopServer(rpcServerExport);
+    @Test
+    public void testExportRetriesWithoutDuplicatingConfiguredServers() {
+        RpcServer server = new RpcServer(config("server-random"));
+        AtomicInteger exports = new AtomicInteger();
+        IllegalStateException failure = new IllegalStateException("export failed before binding");
+        ProviderConfig<HelloService> provider = new ProviderConfig<>() {
+            @Override
+            public void export() {
+                if (exports.incrementAndGet() == 1) {
+                    throw failure;
+                }
+            }
+        };
+        // Sofa equality ignores settings such as serialization; preserve distinct config objects.
+        ServerConfig existing = new ServerConfig().setProtocol("bolt").setHost("127.0.0.1")
+                                                  .setPort(0).setSerialization("java");
+        provider.setServer(existing);
+        server.config().configs().put(HelloService.class.getName(), provider);
+        try {
+            Assert.assertThrows(IllegalStateException.class, server::exportAll,
+                                caught -> Assert.assertSame(failure, caught));
+            server.exportAll();
+            server.exportAll();
+            Assert.assertEquals(3, exports.get());
+            Assert.assertEquals(2, provider.getServer().size());
+            Assert.assertSame(existing, provider.getServer().get(0));
+            Assert.assertSame(Whitebox.getInternalState(server, "serverConfig"), provider.getServer().get(1));
+        } finally {
+            stopServer(server);
+        }
     }
 
     @Test
@@ -664,13 +750,24 @@ public class ServerClientTest extends BaseUnitTest {
         RpcProviderConfig serverConfig = rpcServerUnexport.config();
         String service = serverConfig.addService(HelloService.class,
                                                  new HelloServiceImpl());
+        String graphService = serverConfig.addService("graph", HelloService.class,
+                                                      new GraphHelloServiceImpl("graph"));
         rpcServerUnexport.exportAll();
         RpcClientProvider isolatedClient = clientFor(rpcServerUnexport);
         try {
             HelloService client = isolatedClient.config().serviceProxy(HelloService.class);
+            HelloService graphClient = isolatedClient.config().serviceProxy("graph", HelloService.class);
+            ChannelFuture binding = listener(rpcServerUnexport);
             Assert.assertEquals("hello tom!", client.hello("tom"));
             rpcServerUnexport.unexport(service);
             Assert.assertThrows(SofaRpcException.class, () -> client.hello("tom"));
+            Assert.assertEquals("graph: hello tom!", graphClient.hello("tom"));
+            Assert.assertTrue(binding.channel().isOpen());
+            rpcServerUnexport.unexport(graphService);
+            Assert.assertTrue(binding.channel().closeFuture().awaitUninterruptibly(5, TimeUnit.SECONDS));
+            Assert.assertTrue(binding.channel().closeFuture().isSuccess());
+            Assert.assertTrue(serverConfig.configs().isEmpty());
+            Assert.assertThrows(SofaRpcException.class, () -> graphClient.hello("tom"));
         } finally {
             isolatedClient.destroy();
             stopServer(rpcServerUnexport);
@@ -709,6 +806,108 @@ public class ServerClientTest extends BaseUnitTest {
             Assert.assertContains("The service 'fake' doesn't exist",
                                   e.getMessage());
         });
+    }
+
+    @Test
+    public void testRemoveServiceUsesImplementationIdentity() throws Exception {
+        RpcServer server = new RpcServer(config("server-random"));
+        GraphHelloServiceImpl original = new GraphHelloServiceImpl("graph");
+        RpcProviderConfig providers = server.config();
+        String serviceId = providers.addService("graph", HelloService.class, original);
+        PausedProvider provider = new PausedProvider();
+        provider.setId(serviceId).setUniqueId("graph");
+        provider.setInterfaceId(HelloService.class.getName()).setRef(original);
+        providers.configs().put(serviceId, provider);
+        server.exportAll();
+        RpcClientProvider client = clientFor(server);
+        ExecutorService worker = Executors.newFixedThreadPool(2);
+        try {
+            HelloService proxy = client.config().serviceProxy("graph", HelloService.class);
+            Assert.assertFalse(providers.removeService(serviceId, new GraphHelloServiceImpl("graph")));
+            Assert.assertEquals("graph: hello tom!", proxy.hello("tom"));
+            provider.armed = true;
+            Future<?> exporting = worker.submit(server::exportAll);
+            Assert.assertTrue(provider.entered.await(5, TimeUnit.SECONDS));
+            CountDownLatch removing = new CountDownLatch(1);
+            Future<Boolean> removal = worker.submit(() -> {
+                removing.countDown();
+                return providers.removeService(serviceId, original);
+            });
+            Assert.assertTrue(removing.await(5, TimeUnit.SECONDS));
+            Assert.assertThrows(TimeoutException.class, () -> removal.get(1, TimeUnit.SECONDS));
+            Assert.assertSame(provider, providers.configs().get(serviceId));
+            provider.release.countDown();
+            exporting.get(5, TimeUnit.SECONDS);
+            Assert.assertTrue(removal.get(5, TimeUnit.SECONDS));
+            Assert.assertFalse(providers.configs().containsKey(serviceId));
+            GraphHelloServiceImpl replacement = new GraphHelloServiceImpl("replacement");
+            providers.addService("graph", HelloService.class, replacement);
+            server.exportAll();
+            Assert.assertFalse(providers.removeService(serviceId, original));
+            Assert.assertSame(replacement, providers.configs().get(serviceId).getRef());
+            Assert.assertEquals("replacement: hello tom!", proxy.hello("tom"));
+        } finally {
+            provider.release.countDown();
+            worker.shutdownNow();
+            try {
+                Assert.assertTrue(worker.awaitTermination(5, TimeUnit.SECONDS));
+            } finally {
+                client.destroy();
+                stopServer(server);
+            }
+        }
+    }
+
+    private static class PausedProvider extends ProviderConfig<HelloService> {
+
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private volatile boolean armed;
+
+        @Override
+        public ProviderConfig<HelloService> setTimeout(int timeout) {
+            if (this.armed) {
+                this.entered.countDown();
+                try {
+                    E.checkState(this.release.await(5, TimeUnit.SECONDS), "RPC export barrier timed out");
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(failure);
+                }
+                this.armed = false;
+            }
+            return super.setTimeout(timeout);
+        }
+    }
+
+    @Test
+    public void testRemoveServiceProxyUsesProxyIdentity() {
+        RpcServer server = new RpcServer(config("server-random"));
+        server.config().addService("graph", HelloService.class, new GraphHelloServiceImpl("graph"));
+        server.config().addService("other", HelloService.class, new GraphHelloServiceImpl("other"));
+        server.exportAll();
+        RpcClientProvider client = clientFor(server);
+        try {
+            RpcConsumerConfig consumers = client.config();
+            HelloService original = consumers.serviceProxy("graph", HelloService.class);
+            HelloService second = consumers.serviceProxy("graph", HelloService.class);
+            HelloService other = consumers.serviceProxy("other", HelloService.class);
+            Assert.assertNotSame(original, second);
+            Assert.assertTrue(consumers.removeServiceProxy("graph", HelloService.class.getName(), original));
+            Assert.assertThrows(SofaRpcRuntimeException.class, () -> original.hello("tom"));
+            Assert.assertEquals("graph: hello tom!", second.hello("tom"));
+            Assert.assertFalse(consumers.removeServiceProxy("graph", HelloService.class.getName(), original));
+            Assert.assertTrue(consumers.removeServiceProxy("graph", HelloService.class.getName(), second));
+            List<?> bootstraps = Whitebox.getInternalState(consumers, "bootstraps");
+            Assert.assertEquals(1, bootstraps.size());
+            HelloService replacement = consumers.serviceProxy("graph", HelloService.class);
+            Assert.assertFalse(consumers.removeServiceProxy("graph", HelloService.class.getName(), original));
+            Assert.assertEquals("graph: hello tom!", replacement.hello("tom"));
+            Assert.assertEquals("other: hello tom!", other.hello("tom"));
+        } finally {
+            client.destroy();
+            stopServer(server);
+        }
     }
 
     @Test

@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- if get (get .Values "hubble" | default dict) "enabled" | default false }}
 apiVersion: v1
 kind: Service
@@ -30,6 +31,16 @@ metadata:
   {{- end }}
 spec:
   type: {{ get $svc "type" | default "ClusterIP" }}
+  {{- range $field := list "externalTrafficPolicy" "loadBalancerClass" "loadBalancerIP" "loadBalancerSourceRanges" "externalIPs" }}
+  {{- with get $svc $field }}
+  {{ $field }}: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- if hasKey $svc "allocateLoadBalancerNodePorts" }}
+  {{- if ne (get $svc "allocateLoadBalancerNodePorts") nil }}
+  allocateLoadBalancerNodePorts: {{ get $svc "allocateLoadBalancerNodePorts" }}
+  {{- end }}
+  {{- end }}
   selector:
     {{- include "hugegraph.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: hubble

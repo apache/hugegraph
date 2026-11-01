@@ -30,6 +30,11 @@ while [ -h "$SOURCE" ]; do
     [[ $SOURCE != /* ]] && SOURCE="$BIN/$SOURCE"
 done
 BIN="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
+if [[ ! -r "${JVM_MODULE_OPTIONS}" ]]; then
+    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >&2
+    exit 1
+fi
 # Set $CFG to $BIN/../conf
 cd -P $BIN/../conf
 CFG=$(pwd)
@@ -47,6 +52,7 @@ CP="$CP":$(find -L $LIB -name 'slf4j-log4j12*.jar' | sort | tr '\n' ':')
 CP="$CP":$(find -L $LIB -name 'hugegraph*.jar' | sort | tr '\n' ':')
 # Add the remaining jars in $BIN/../lib.
 CP="$CP":$(find -L $LIB -name '*.jar' \
+    \! -path "$LIB/arthas/*" \
                 \! -name 'hugegraph*' \
                 \! -name 'slf4j-log4j12*.jar' | sort | tr '\n' ':')
 # Add the jars in $BIN/../ext (at any subdirectory depth)
@@ -122,4 +128,4 @@ if [ -n "$SCRIPT_DEBUG" ]; then
 fi
 
 # Start the JVM, execute the application, and return its exit code
-exec $JAVA $JAVA_OPTIONS $MAIN_CLASS "$@"
+exec $JAVA @"${JVM_MODULE_OPTIONS}" $JAVA_OPTIONS $MAIN_CLASS "$@"

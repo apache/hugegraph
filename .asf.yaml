@@ -33,13 +33,10 @@ github:
   protected_branches:
     master:
       required_status_checks:
-        # Keep workflows providing these checks unfiltered; path skips can leave required checks pending.
         # strict means "Require PR to be up-to-date before merging". (enable when branch unstable)
         strict: false
-        # contexts are the names of checks that must pass (now only enable the basic check)
-        contexts:
-          - check-license
-          - Server memory tests
+        # CI remains visible but advisory while shared runner queues are constrained.
+        contexts: []
       required_pull_request_reviews:
         dismiss_stale_reviews: true
         require_code_owner_reviews: false

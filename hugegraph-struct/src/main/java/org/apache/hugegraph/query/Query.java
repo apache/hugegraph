@@ -542,10 +542,9 @@ public class Query implements Cloneable {
 
     @Override
     public boolean equals(Object object) {
-        if (!(object instanceof Query)) {
+        if (!(object instanceof Query other)) {
             return false;
         }
-        Query other = (Query) object;
         return this.resultType.equals(other.resultType) &&
                this.orders().equals(other.orders()) &&
                this.offset == other.offset &&

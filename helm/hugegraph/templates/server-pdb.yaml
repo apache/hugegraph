@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{ include "hugegraph.resolveValues" . }}
 {{- $pdb := get .Values.server "pdb" | default dict }}
 {{- $replicaFloor := include "hugegraph.server.replicaFloor" . | int }}
 {{- if and (get $pdb "enabled" | default false) (gt $replicaFloor 1) }}

@@ -56,113 +56,89 @@ tests:
       - failedTemplate:
           errorPattern: "must not set the chart-managed variable JAVA_OPTIONS"
 
-  - it: rejects a PD NodePort under NetworkPolicy without pd extraIngress
+  - it: accepts a PD NodePort under NetworkPolicy without pd extraIngress
     set:
       networkPolicy.enabled: true
       pd.service.type: NodePort
       pd.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the pd exposure"
-
-  - it: rejects a PD LoadBalancer under NetworkPolicy without pd extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a PD LoadBalancer under NetworkPolicy without pd extraIngress
     set:
       networkPolicy.enabled: true
       pd.service.type: LoadBalancer
       pd.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the pd exposure"
-
-  - it: rejects a Server NodePort under NetworkPolicy without server extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Server NodePort under NetworkPolicy without server extraIngress
     set:
       networkPolicy.enabled: true
       server.service.type: NodePort
       server.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the server exposure"
-
-  - it: rejects a Server LoadBalancer under NetworkPolicy without server extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Server LoadBalancer under NetworkPolicy without server extraIngress
     set:
       networkPolicy.enabled: true
       server.service.type: LoadBalancer
       server.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the server exposure"
-
-  - it: rejects a Server Ingress under NetworkPolicy without server extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Server Ingress under NetworkPolicy without server extraIngress
     set:
       networkPolicy.enabled: true
       server.ingress.enabled: true
       server.ingress.allowPlainHttp: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the server exposure"
-
-  - it: rejects a Server advertiseUrl under NetworkPolicy without server extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Server advertiseUrl under NetworkPolicy without server extraIngress
     set:
       networkPolicy.enabled: true
       server.advertiseUrl: http://hg.example.com:8080
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the server exposure"
-
-  - it: rejects a Hubble NodePort under NetworkPolicy without hubble extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Hubble NodePort under NetworkPolicy without hubble extraIngress
     set:
       networkPolicy.enabled: true
       hubble.enabled: true
       hubble.service.type: NodePort
       hubble.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the hubble exposure"
-
-  - it: rejects a Hubble LoadBalancer under NetworkPolicy without hubble extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Hubble LoadBalancer under NetworkPolicy without hubble extraIngress
     set:
       networkPolicy.enabled: true
       hubble.enabled: true
       hubble.service.type: LoadBalancer
       hubble.service.allowInsecureExposure: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the hubble exposure"
-
-  - it: rejects a Hubble Ingress under NetworkPolicy without hubble extraIngress
+      - notFailedTemplate: {}
+  - it: accepts a Hubble Ingress under NetworkPolicy without hubble extraIngress
     set:
       networkPolicy.enabled: true
       hubble.enabled: true
       hubble.ingress.enabled: true
       hubble.ingress.allowPlainHttp: true
     asserts:
-      - failedTemplate:
-          errorPattern: "admits nothing from outside the release, so the hubble exposure"
-
-  - it: names advertiseUrl in the Server exposure message only
+      - notFailedTemplate: {}
+  - it: accepts an advertised Server URL under explicit NetworkPolicy
     set:
       networkPolicy.enabled: true
       server.advertiseUrl: http://hg.example.com:8080
     asserts:
-      - failedTemplate:
-          errorPattern: "server exposure \\(NodePort/LoadBalancer Service, Ingress, server.advertiseUrl\\)"
-
-  - it: reports the Server acknowledgement before the NetworkPolicy exposure check
+      - notFailedTemplate: {}
+  - it: accepts Server exposure without an acknowledgement or source confirmation
     set:
       networkPolicy.enabled: true
       server.service.type: NodePort
     asserts:
-      - failedTemplate:
-          errorPattern: "server.service.allowInsecureExposure=true"
-
-  - it: reports the PD acknowledgement before the NetworkPolicy exposure check
+      - notFailedTemplate: {}
+  - it: accepts PD exposure without an acknowledgement or source confirmation
     set:
       networkPolicy.enabled: true
       pd.service.type: NodePort
     asserts:
-      - failedTemplate:
-          errorPattern: "pd.service.allowInsecureExposure=true"
-
+      - notFailedTemplate: {}
   - it: leaves exposure alone while NetworkPolicy is off
     set:
       server.service.type: LoadBalancer
@@ -188,14 +164,12 @@ tests:
       - failedTemplate:
           errorPattern: "hubble.enabled requires server.auth"
 
-  - it: rejects a plain-HTTP Hubble Ingress
+  - it: accepts a plain-HTTP Hubble Ingress
     set:
       hubble.ingress.enabled: true
       hubble.enabled: true
     asserts:
-      - failedTemplate:
-          errorPattern: "publishes the plain-HTTP, unauthenticated Hubble UI"
-
+      - notFailedTemplate: {}
   - it: rejects an empty Hubble image tag
     set:
       hubble.image.tag: ""
@@ -219,20 +193,16 @@ tests:
       - failedTemplate:
           errorPattern: "store.podLabels must not set app.kubernetes.io/component"
 
-  - it: rejects a TLS-less Server Ingress without the plain-HTTP opt-in
+  - it: accepts a TLS-less Server Ingress without the plain-HTTP opt-in
     set:
       server.ingress.enabled: true
     asserts:
-      - failedTemplate:
-          errorPattern: "server.ingress.enabled without tls"
-
-  - it: rejects a non-ClusterIP PD Service without the exposure acknowledgement
+      - notFailedTemplate: {}
+  - it: accepts a non-ClusterIP PD Service without the exposure acknowledgement
     set:
       pd.service.type: NodePort
     asserts:
-      - failedTemplate:
-          errorPattern: "pd.service.type NodePort or LoadBalancer exposes"
-
+      - notFailedTemplate: {}
   - it: rejects a read-only root filesystem on Hubble
     set:
       hubble.enabled: true
@@ -264,7 +234,7 @@ tests:
       - failedTemplate:
           errorPattern: "pd.podAnnotations must not set checksum/pd-auth"
 
-  - it: rejects an advertised Server URL that Hubble's egress policy would block
+  - it: accepts an advertised Server URL that Hubble's egress policy would block
     set:
       networkPolicy.enabled: true
       hubble.enabled: true
@@ -274,9 +244,7 @@ tests:
             - ipBlock:
                 cidr: 10.0.0.0/8
     asserts:
-      - failedTemplate:
-          errorPattern: "networkPolicy.hubble.extraEgress"
-
+      - notFailedTemplate: {}
   - it: accepts an advertised Server URL once Hubble egress names it
     set:
       networkPolicy.enabled: true

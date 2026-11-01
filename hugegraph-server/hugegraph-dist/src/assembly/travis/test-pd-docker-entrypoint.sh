@@ -147,18 +147,57 @@ for wildcard in '*' 'health,*'; do
     fi
 done
 
-# The secret is required, and must never be echoed to the log
-if (cd "${TMP_DIR}" && env \
+# The secret is required, and failure must explain its purpose and injection
+# path before the launcher is called. Remove the earlier stub output so that
+# a silent startup cannot pass this check.
+rm -f "${TMP_DIR}/spring.json"
+if missing_out=$(cd "${TMP_DIR}" && env -u HG_PD_AUTH_SECRET_KEY \
         HG_PD_GRPC_HOST=pd0 HG_PD_RAFT_ADDRESS=pd0:8610 \
         HG_PD_RAFT_PEERS_LIST=pd0:8610 HG_PD_INITIAL_STORE_LIST=store0:8500 \
-        ./docker-entrypoint.sh >/dev/null 2>&1); then
+        ./docker-entrypoint.sh 2>&1); then
     echo "  FAIL missing secret: entrypoint started without HG_PD_AUTH_SECRET_KEY"
     FAIL=$((FAIL + 1))
 else
-    echo "  PASS missing secret is refused"
-    PASS=$((PASS + 1))
+    missing_rc=$?
+    missing_valid=true
+    [[ "${missing_rc}" -eq 2 && ! -f "${TMP_DIR}/spring.json" ]] || missing_valid=false
+    for hint in "ERROR: missing required env 'HG_PD_AUTH_SECRET_KEY'" \
+                'PD REST Basic authentication (auth.secret-key)' \
+                'pd.auth.autoGenerate=true' 'env.valueFrom.secretKeyRef' \
+                'pd.auth.existingSecret and pd.auth.key' \
+                'release namespace' 'same value on every PD' 'PD_AUTH_PASSWORD'; do
+        [[ "${missing_out}" == *"${hint}"* ]] || missing_valid=false
+    done
+    if [[ "${missing_valid}" == true ]]; then
+        echo "  PASS missing secret is refused with actionable guidance"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL missing secret guidance or exit status"
+        printf '%s\n' "${missing_out}"
+        FAIL=$((FAIL + 1))
+    fi
 fi
 
+# Missing unrelated required variables retain the concise existing error.
+if missing_out=$(cd "${TMP_DIR}" && env -u HG_PD_GRPC_HOST -u GRPC_HOST \
+        HG_PD_RAFT_ADDRESS=pd0:8610 HG_PD_RAFT_PEERS_LIST=pd0:8610 \
+        HG_PD_INITIAL_STORE_LIST=store0:8500 HG_PD_AUTH_SECRET_KEY=not-logged \
+        ./docker-entrypoint.sh 2>&1); then
+    echo "  FAIL missing gRPC host was accepted"
+    FAIL=$((FAIL + 1))
+else
+    missing_rc=$?
+    if [[ "${missing_rc}" -eq 2 && \
+          "${missing_out}" == "ERROR: missing required env 'HG_PD_GRPC_HOST'" ]]; then
+        echo "  PASS unrelated missing env retains its existing error"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL unrelated missing env error changed"
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
+# The configured secret must never be echoed to the log.
 log_out=$(cd "${TMP_DIR}" && env \
     HG_PD_GRPC_HOST=pd0 HG_PD_RAFT_ADDRESS=pd0:8610 \
     HG_PD_RAFT_PEERS_LIST=pd0:8610 HG_PD_INITIAL_STORE_LIST=store0:8500 \

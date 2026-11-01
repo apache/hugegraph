@@ -33,7 +33,7 @@ Use Docker to quickly start a standalone HugeGraph Server with RocksDB.
 
 To preload sample data on startup, set `PRELOAD=true`.
 
-To customize the preload, mount your own Groovy script.
+To customize the preload, mount your own Groovy script. Images built from this version run as UID `10001`, so the script must be readable by that user; see [Container user](../../../docker/README.md#container-user).
 
 1. Using `docker run`
 
@@ -132,6 +132,22 @@ HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml 
 
 See [docker/README.md](../../../docker/README.md) for the full setup guide,
 environment variable reference, and troubleshooting.
+
+With `usePD=true` (`HG_SERVER_USE_PD`), a Server registers its REST address in
+PD. By default that is `restserver.url` (`HG_SERVER_REST_URL`). To register a different list instead, for example the
+addresses clients reach through a Kubernetes Service, set both of these on the
+Server container:
+
+| Variable | Property in `rest-server.properties` |
+|---|---|
+| `HG_SERVER_URLS_TO_PD` | `server.urls_to_pd`, a comma-separated list such as `http://hg-0.hg:8080,http://hg-1.hg:8080` |
+| `HG_SERVER_DEPLOY_IN_K8S` | `server.deploy_in_k8s`; `true` makes the Server register `server.urls_to_pd` |
+
+`HG_SERVER_DEPLOY_IN_K8S` accepts the boolean spellings HugeConfig accepts
+(`true`/`false`, `yes`/`no`, `on`/`off`, `y`/`n`, `t`/`f`, any case). Any other
+value, `1` and `0` included, stops the container before either conf file is
+changed. Give each URL its own `http://` prefix; whitespace in the list is
+removed. Unset variables leave the properties as they are.
 
 ## 6. Process Supervision & Health Checks
 

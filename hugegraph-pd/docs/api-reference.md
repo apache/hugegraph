@@ -90,6 +90,26 @@ enum ShardRole {
 
 Represents a Store node in the cluster.
 
+An `Exiting` Store continues renewing its heartbeat lease while draining, but is excluded from
+new replica allocation and migration destinations. Expiry of an old heartbeat does not complete
+retirement. PD keeps the Store `Exiting` until its latest heartbeat reports no local partition
+engines and PD has no shard group referencing its ID. Before deleting its Pod or volume, also
+verify the remaining groups' actual Raft membership, full replicas and fresh heartbeats; a
+management state or a successful state-update response alone is not a complete maintenance check.
+Replica allocation still enforces the configured minimum Store count using eligible destinations.
+If the remaining eligible Stores do not satisfy that minimum, draining remains blocked; expiry of
+the source lease must not be used to force retirement or reduce the configured replica policy.
+If a drain request fails this capacity check, add enough eligible capacity and repeat the same
+`Exiting` management request to resume planning for groups that still reference the source in PD.
+The persisted intent stays `Exiting`; there is no need to toggle it to `Up`. This retry does not
+establish that an already dispatched migration has completed or recover a lost Store-side task.
+`Tombstone` is permanent for that Store identity: management updates cannot return it to an active
+state, just as registration and heartbeat already reject a retired identity.
+Heartbeats, registration and management state changes serialize their Store-state updates.
+Re-registering an `Exiting` Store preserves that state even when its address is in the initial
+Store list. This preserves the drain intent, but does not replace checking restored engines and
+actual Raft configuration after a process restart.
+
 ```protobuf
 message Store {
     uint64 id = 1;
@@ -809,8 +829,12 @@ Two unauthenticated endpoints are meant for probes and startup gates:
 
 | Endpoint | Meaning | Status |
 |----------|---------|--------|
-| `GET /v1/health` | Liveness: the REST listener is up. Does not consult raft. | always `200` |
+| `GET /v1/health` | Liveness: the REST listener is up and Raft has no terminal error. Empty text body. | `503` for `STATE_ERROR` or `STATE_SHUTDOWN`, `200` otherwise |
 | `GET /v1/ready` | Readiness: the raft node is active and sees a leader, so this PD is inside a quorum. | `200` when ready, `503` otherwise |
+
+The health probe reads Raft state only; it does not verify metadata-store initialization.
+If the metadata store cannot be opened, PD startup fails; while its RocksDB `LOCK` is still
+held, PD first retries for up to 30 seconds (see [PD Core Settings](configuration.md#pd-core-settings)).
 
 ```bash
 curl -i http://localhost:8620/v1/ready
@@ -828,6 +852,11 @@ curl -i http://localhost:8620/v1/ready
 A follower reports `"state": "STATE_FOLLOWER"` with `"isLeader": false`. When the quorum is lost the PD keeps answering `/v1/health` with `200` but `/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the body carries no cluster addresses; the leader's address stays on `/v1/members`.
 
 The answer is served from state the raft callbacks maintain rather than from the raft node, so it stays prompt while an election is running and never waits on the node lock. `state` is therefore the last change raft announced. A PD reports `STATE_UNINITIALIZED` with `"ready": false` from process start until its first raft callback, which is the ordinary startup window before a quorum first forms, and jraft emits no callback for candidacy or leadership transfer, so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
+
+After a fatal snapshot error, `/v1/ready` retains `STATE_ERROR` even after the leader
+steps down, and `/v1/health` returns `503`. Fix the underlying disk or storage
+problem and restart the affected PD: freeing disk space alone does not restart
+JRaft's terminal state machine.
 
 Point Kubernetes readiness probes, `depends_on` healthchecks and any "wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health` so a PD that merely lost its leader is not restarted.
 
@@ -870,6 +899,19 @@ Exported on `/actuator/prometheus` for alerting on quorum loss:
 A cluster has lost its quorum when `sum(hg_raft_leader) == 0` or when `hg_raft_has_leader == 0` on every member. Both are briefly true during a normal election, so alert on them with a `for:` clause longer than the election timeout rather than on the instantaneous value.
 
 Do not aggregate `hg_raft_alive_peers` across instances: it is `NaN` on every node but the leader, and one `NaN` sample turns the result of `sum()` or `avg()` into `NaN` as well. Select the leader's series instead, for example `hg_raft_alive_peers and on(instance) (hg_raft_leader == 1)`.
+
+#### Store state gauges
+
+Exported on `/actuator/prometheus` for each store registered in PD, from the store and shard group metadata PD keeps:
+
+| Gauge | Value |
+|-------|-------|
+| `hg_store_state{store="<id>",state="<state>"}` | `1` for the store's current state, `0` for the others. `state` is one of `Unknown`, `Pending`, `Up`, `Offline`, `Exiting`, `Tombstone` |
+| `hg_store_leader_count{store="<id>"}` | Number of shard groups whose leader is on the store |
+
+A new store's series can take one extra scrape to appear, and they disappear once the store is removed from PD. Every PD member reads the same replicated metadata, so select one instance, such as the leader, before aggregating: `hg_store_leader_count and on(instance) (hg_raft_leader == 1)`.
+
+`hg_store_leader_count` shows where leadership sits during and after a Store recovery: a rebuilt store reports `0` until leaders move back to it, either through `/v1/task/balanceLeaders` or by raft elections.
 
 ### Partition API
 

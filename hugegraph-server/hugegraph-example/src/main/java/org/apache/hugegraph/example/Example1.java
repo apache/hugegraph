@@ -479,10 +479,10 @@ public class Example1 {
                                      .has("city", "Hangzhou").toList();
         assert vertices.isEmpty();
         // set breakpoint here to see secondary_indexes and range_indexes table
-        vertices = graph.traversal().V().has("age", 28).toList();
+        vertices = graph.traversal().V().hasLabel("person").has("age", 28).toList();
         assert vertices.isEmpty();
         // set breakpoint here to see secondary_indexes and range_indexes table
-        vertices = graph.traversal().V().has("city", "Hangzhou").toList();
+        vertices = graph.traversal().V().hasLabel("person").has("city", "Hangzhou").toList();
         assert vertices.isEmpty();
     }
 }

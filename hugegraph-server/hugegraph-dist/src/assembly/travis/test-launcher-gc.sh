@@ -51,7 +51,6 @@ for component in server pd store; do
         server)
             source_bin="$SOURCE_ROOT/hugegraph-server/hugegraph-dist/src/assembly/static/bin"
             launcher=hugegraph-server.sh
-            cp "$source_bin/jvm-module.options" "$FIXTURE/bin/"
             ;;
         pd)
             source_bin="$SOURCE_ROOT/hugegraph-pd/hg-pd-dist/src/assembly/static/bin"
@@ -65,7 +64,7 @@ for component in server pd store; do
             touch "$FIXTURE/lib/hg-store-node-test.jar"
             ;;
     esac
-    cp "$source_bin/$launcher" "$source_bin/util.sh" "$FIXTURE/bin/"
+    cp "$source_bin/$launcher" "$source_bin/util.sh" "$source_bin/jvm-module.options" "$FIXTURE/bin/"
     # Keep the computed-heap/-j path deterministic without probing host memory.
     printf '\nfree_memory() { echo 2048; }\n' >> "$FIXTURE/bin/util.sh"
     cp "$SOURCE_ROOT/hugegraph-server/hugegraph-dist/src/assembly/static/bin/preload-topling.sh" "$FIXTURE/bin/"

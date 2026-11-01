@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.pd.rest;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -49,6 +48,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.alipay.sofa.jraft.core.State;
 import com.google.protobuf.util.JsonFormat;
 
 import lombok.Data;
@@ -388,22 +388,21 @@ public class StoreAPI extends API {
      * This interface is used to check the health status of the service by accessing the /health
      * path via a GET request.
      * <p>
-     * This is a liveness signal only: it answers 200 as soon as the REST listener is up and
-     * does not consult the raft state. Use {@link #checkReady()} to find out whether this PD
-     * can actually serve.
+     * This liveness signal answers 503 for a fatal raft error or a stopped state machine.
+     * Elections and temporary quorum loss remain healthy. Use {@link #checkReady()} to find
+     * out whether this PD can actually serve.
      *
      * @return Returns a string indicating the service's health status. Typically, an empty
      * string indicates the service is healthy.
      */
-    // TODO: answer non-200 when the raft state machine is in STATE_ERROR (a failed snapshot) or
-    // the KV store never opened (a held RocksDB LOCK): both leave this PD unable to recover while
-    // /health stays 200 forever. The Helm chart (helm/hugegraph) derives a single PD's startup
-    // and liveness probes to /v1/ready for this reason; drop that derivation once this reports it.
-    // https://github.com/apache/hugegraph/issues/3222
-    // https://github.com/apache/hugegraph/issues/3226
+    // This probe reads only Raft state; metadata-store open failures fail PD startup instead.
     @GetMapping(value = "/health", produces = MediaType.TEXT_PLAIN_VALUE)
-    public Serializable checkHealthy() {
-        return "";
+    public ResponseEntity<String> checkHealthy() {
+        String state = RaftEngine.getInstance().getRaftStatus().getState();
+        boolean failed = State.STATE_ERROR.name().equals(state) ||
+                         State.STATE_SHUTDOWN.name().equals(state);
+        return ResponseEntity.status(failed ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.OK)
+                             .body("");
     }
 
     /**

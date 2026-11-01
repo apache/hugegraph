@@ -24,6 +24,11 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        BlockingUnaryCallTest.class,
+        KvClientLockTest.class,
+        PDClientLeaderTest.class,
+        PDClientWatchDispatchTest.class,
+        PDConnectionManagerTest.class,
         PDClientTest.class,
         KvClientTest.class,
         DiscoveryClientTest.class

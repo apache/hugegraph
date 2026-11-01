@@ -34,12 +34,13 @@ import lombok.extern.slf4j.Slf4j;
 public class IpUtil {
 
     /**
-     * Get all IPv4 addresses
+     * Get local IPv4 addresses.
      *
-     * @return all ipv4 addr
+     * @param forFallback whether link-local and loopback addresses are excluded
+     * @return ipv4 addr
      * @throws SocketException io error or no network interface
      */
-    private static List<String> getIpAddress() throws SocketException {
+    private static List<String> getIpAddress(boolean forFallback) throws SocketException {
         List<String> list = new LinkedList<>();
         Enumeration enumeration = NetworkInterface.getNetworkInterfaces();
         while (enumeration.hasMoreElements()) {
@@ -47,9 +48,14 @@ public class IpUtil {
             Enumeration addresses = network.getInetAddresses();
             while (addresses.hasMoreElements()) {
                 InetAddress address = (InetAddress) addresses.nextElement();
-                if (address != null && (address instanceof Inet4Address)) {
-                    list.add(address.getHostAddress());
+                if (!(address instanceof Inet4Address)) {
+                    continue;
                 }
+                if (forFallback && (address.isLoopbackAddress() ||
+                                    address.isLinkLocalAddress())) {
+                    continue;
+                }
+                list.add(address.getHostAddress());
             }
         }
         return list;
@@ -63,8 +69,21 @@ public class IpUtil {
      */
     public static String getNearestAddress(String raftAddress) {
         try {
-            List<String> ipv4s = getIpAddress();
             String[] tmp = raftAddress.split(":");
+            if (!isDottedIpv4(tmp[0])) {
+                return raftAddress;
+            }
+
+            // A configured literal that is bound locally stays, including
+            // loopback. The default raft address is 127.0.0.1 and the
+            // partition engine uses that same value as its PeerId.
+            // Link-local and loopback are dropped only from fallback
+            // candidates, when the configured IPv4 is not local.
+            if (getIpAddress(false).contains(tmp[0])) {
+                return raftAddress;
+            }
+
+            List<String> ipv4s = getIpAddress(true);
             if (ipv4s.size() == 0) {
                 throw new Exception("no available ipv4");
             }
@@ -94,8 +113,35 @@ public class IpUtil {
         } catch (SocketException e) {
             log.error("getIpAddress, get ip failed, {}", e.getMessage());
         } catch (Exception e) {
-            log.error("getRaftAddress, got exception, {}", e.getMessage());
+            log.error("getNearestAddress, got exception, {}", e.getMessage());
         }
         return raftAddress;
+    }
+
+    /**
+     * A dotted IPv4 literal is four numeric octets. Hostnames must not be
+     * parsed as addresses; {@code Integer.parseInt} on a DNS label is not a
+     * signal to log or to replace the configured host.
+     */
+    private static boolean isDottedIpv4(String host) {
+        String[] parts = host.split("\\.", -1);
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 3) {
+                return false;
+            }
+            for (int i = 0; i < part.length(); i++) {
+                char c = part.charAt(i);
+                if (c < '0' || c > '9') {
+                    return false;
+                }
+            }
+            if (Integer.parseInt(part) > 255) {
+                return false;
+            }
+        }
+        return true;
     }
 }

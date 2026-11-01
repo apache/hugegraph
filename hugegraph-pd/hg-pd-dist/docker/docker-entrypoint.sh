@@ -22,7 +22,17 @@ log() { echo "[hugegraph-pd-entrypoint] $*"; }
 require_env() {
     local name="$1"
     if [[ -z "${!name:-}" ]]; then
-        echo "ERROR: missing required env '${name}'" >&2; exit 2
+        echo "ERROR: missing required env '${name}'" >&2
+        if [[ "${name}" == "HG_PD_AUTH_SECRET_KEY" ]]; then
+            echo "This shared credential configures PD REST Basic authentication (auth.secret-key)." >&2
+            echo "Helm normally creates a shared Secret through pd.auth.autoGenerate=true and injects it" >&2
+            echo "into HG_PD_AUTH_SECRET_KEY via the PD StatefulSet env.valueFrom.secretKeyRef." >&2
+            echo "Check pd.auth.value or pd.auth.existingSecret and pd.auth.key, then verify the" >&2
+            echo "rendered StatefulSet env and the referenced Secret name/key in the release namespace." >&2
+            echo "For standalone containers, set HG_PD_AUTH_SECRET_KEY to the same value on every PD" >&2
+            echo "and use that value for Server PD_AUTH_PASSWORD. Do not generate a separate value per node." >&2
+        fi
+        exit 2
     fi
 }
 

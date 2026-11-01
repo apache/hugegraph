@@ -1,0 +1,179 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
+suite: easy and strict defaults and explicit overrides
+templates:
+  - server-service.yaml
+  - hubble-service.yaml
+  - pd-service-client.yaml
+  - networkpolicy.yaml
+  - store-statefulset.yaml
+  - server-deployment.yaml
+  - tests/test-connection.yaml
+tests:
+  - it: defaults to NodePort API and UI with internal PD
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+        template: server-service.yaml
+      - equal:
+          path: spec.type
+          value: NodePort
+        template: hubble-service.yaml
+      - equal:
+          path: spec.type
+          value: ClusterIP
+        template: pd-service-client.yaml
+      - hasDocuments:
+          count: 0
+        template: networkpolicy.yaml
+  - it: strict defaults are internal and isolated
+    set:
+      mode: strict
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+        template: server-service.yaml
+      - equal:
+          path: spec.type
+          value: ClusterIP
+        template: hubble-service.yaml
+      - hasDocuments:
+          count: 4
+        template: networkpolicy.yaml
+  - it: explicit false and NodePort override strict mode without acknowledgement
+    set:
+      mode: strict
+      networkPolicy.enabled: false
+      server.service.type: NodePort
+      hubble.enabled: false
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+        template: server-service.yaml
+      - hasDocuments:
+          count: 0
+        template: networkpolicy.yaml
+      - hasDocuments:
+          count: 0
+        template: hubble-service.yaml
+  - it: supports cluster-specific fixed ports and zero automatic allocation
+    set:
+      server.service.nodePort: 8802
+      hubble.service.nodePort: 8808
+      pd.service.type: NodePort
+      pd.service.restNodePort: 0
+    asserts:
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 8802
+        template: server-service.yaml
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 8808
+        template: hubble-service.yaml
+  - it: reuses existing business images for tool containers by default
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: hugegraph/store:latest
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.containers[0].image
+          value: hugegraph/server:latest
+        template: tests/test-connection.yaml
+      - equal:
+          path: spec.template.spec.initContainers[0].command[0]
+          value: sh
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.containers[0].command[0]
+          value: sh
+        template: tests/test-connection.yaml
+  - it: mirrors component and inherited tool images without changing digest pins
+    set:
+      global.imageRegistry: registry.internal/project
+      store.image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.internal/project/hugegraph/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.internal/project/hugegraph/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.containers[0].image
+          value: registry.internal/project/hugegraph/server:latest
+        template: tests/test-connection.yaml
+  - it: qualified individual images override the mirror
+    set:
+      global.imageRegistry: registry.internal
+      store.image.repository: other.internal/store
+      server.waitImage: tools.internal/http-check:1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: other.internal/store:latest
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: other.internal/store:latest
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.containers[0].image
+          value: tools.internal/http-check:1
+        template: tests/test-connection.yaml
+  - it: adapts unspecified startup probes to the configured storage wait
+    set:
+      server.storageWaitTimeoutSeconds: 600
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.failureThreshold
+          value: 151
+        template: server-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WAIT_STORAGE_TIMEOUT_S
+            value: "600"
+        template: server-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_STARTUP_TIMEOUT_S
+            value: "150"
+        template: server-deployment.yaml
+
+  - it: reuses the component pull policy for offline tool containers
+    set:
+      store.image.pullPolicy: Never
+      server.image.pullPolicy: IfNotPresent
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: Never
+        template: store-statefulset.yaml
+      - equal:
+          path: spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+        template: tests/test-connection.yaml

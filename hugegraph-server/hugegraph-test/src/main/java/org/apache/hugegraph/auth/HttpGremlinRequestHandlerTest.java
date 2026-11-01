@@ -139,7 +139,7 @@ public class HttpGremlinRequestHandlerTest {
                     } finally {
                         response.release();
                     }
-                    channel.runPendingTasks();
+                    awaitClose(channel);
                     Assert.assertFalse(channel.isActive());
                     Assert.assertEquals(0, request.refCnt());
                     Assert.assertNull(channel.readOutbound());
@@ -280,5 +280,17 @@ public class HttpGremlinRequestHandlerTest {
             Thread.sleep(5L);
         }
         throw new AssertionError("Gremlin HTTP response did not arrive");
+    }
+
+    private static void awaitClose(EmbeddedChannel channel)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!channel.closeFuture().isDone() && System.nanoTime() < deadline) {
+            channel.runPendingTasks();
+            Thread.sleep(5L);
+        }
+        Assert.assertTrue("Gremlin HTTP channel did not close: active=" + channel.isActive() +
+                          ", pendingTasks=" + channel.hasPendingTasks(),
+                          channel.closeFuture().isDone());
     }
 }

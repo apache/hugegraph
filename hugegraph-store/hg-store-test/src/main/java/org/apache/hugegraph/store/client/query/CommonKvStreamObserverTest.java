@@ -339,8 +339,8 @@ public class CommonKvStreamObserverTest {
         CommonKvStreamObserver<List<Integer>, Integer> observer = new CommonKvStreamObserver<>(values -> {
             parsing.countDown();
             await(release);
-            if (failure instanceof Error) {
-                throw (Error) failure;
+            if (failure instanceof Error error) {
+                throw error;
             }
             throw (RuntimeException) failure;
         }, ignored -> ResultState.FINISHED);

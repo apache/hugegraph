@@ -25,5 +25,9 @@ public interface RpcServiceConfig4Server {
 
     void removeService(String serviceId);
 
+    default boolean removeService(String serviceId, Object serviceImpl) {
+        throw new UnsupportedOperationException("Removing an RPC service by implementation is not supported");
+    }
+
     void removeAllService();
 }

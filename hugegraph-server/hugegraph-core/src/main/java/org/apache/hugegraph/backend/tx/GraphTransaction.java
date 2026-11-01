@@ -1093,7 +1093,7 @@ public class GraphTransaction extends IndexableTransaction {
             List<ConditionQuery> flattened = ConditionQueryFlatten.flatten(
                     (ConditionQuery) query, supportIn);
             Function<ConditionQuery, QueryResults<HugeEdge>> fetcher = cq -> {
-                Id label = cq.condition(HugeKeys.LABEL);
+                Id label = cq.singleConditionValueOrNull(HugeKeys.LABEL);
                 if (this.storeFeatures().supportsFatherAndSubEdgeLabel() &&
                     label != null && graph().edgeLabel(label).isFather() &&
                     cq.condition(HugeKeys.SUB_LABEL) == null &&
@@ -1414,7 +1414,7 @@ public class GraphTransaction extends IndexableTransaction {
                                              boolean matchAll,
                                              HugeGraph graph) {
         assert query.resultType().isEdge();
-        Id label = query.condition(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (label == null) {
             return false;
         }
@@ -1523,23 +1523,35 @@ public class GraphTransaction extends IndexableTransaction {
             return queries;
         }
 
-        boolean supportIn = this.storeFeatures().supportsQueryWithInCondition();
-        for (ConditionQuery cq : ConditionQueryFlatten.flatten(
-                (ConditionQuery) query, supportIn)) {
-            // Optimize by sysprop
-            Query q = this.optimizeQuery(cq);
-            /*
-             * NOTE: There are two possibilities for the returned q:
-             * 1.sysprop-query, which would not be empty.
-             * 2.index-query result(ids after optimization), which may be empty.
-             */
-            if (q == null) {
-                queries.add(this.indexQuery(cq), this.batchSize);
-            } else if (!q.empty()) {
-                queries.add(q);
+        try {
+            boolean supportIn = this.storeFeatures().supportsQueryWithInCondition();
+            for (ConditionQuery cq : ConditionQueryFlatten.flatten(
+                    (ConditionQuery) query, supportIn)) {
+                // Optimize by sysprop
+                Query q = this.optimizeQuery(cq);
+                /*
+                 * NOTE: There are two possibilities for the returned q:
+                 * 1.sysprop-query, which would not be empty.
+                 * 2.index-query result(ids after optimization), which may be empty.
+                 */
+                if (q == null) {
+                    queries.add(this.indexQuery(cq), this.batchSize);
+                } else if (!q.empty()) {
+                    queries.add(q);
+                }
             }
+            return queries;
+        } catch (Throwable failure) {
+            // Earlier flattened branches may already own backend cursors.
+            try {
+                queries.close();
+            } catch (Throwable closing) {
+                if (closing != failure) {
+                    failure.addSuppressed(closing);
+                }
+            }
+            throw QueryBatch.propagate(failure);
         }
-        return queries;
     }
 
     private Query optimizeQuery(ConditionQuery query) {
@@ -1547,7 +1559,7 @@ public class GraphTransaction extends IndexableTransaction {
             throw new HugeException("Not supported querying by id and conditions: %s", query);
         }
 
-        Id label = query.condition(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
 
         // Optimize vertex query
         if (label != null && query.resultType().isVertex()) {
@@ -1937,7 +1949,8 @@ public class GraphTransaction extends IndexableTransaction {
         if (cq == null || cq.resultType().isVertex() != elem.type().isVertex()) {
             return true;
         }
-        if (cq.condition(HugeKeys.LABEL) != null && cq.resultType().isEdge()) {
+        if (cq.singleConditionValueOrNull(HugeKeys.LABEL) != null &&
+            cq.resultType().isEdge()) {
             if (cq.conditions().size() == 1) {
                 // g.E().hasLabel(xxx)
                 return true;

@@ -89,7 +89,7 @@ cd ${SVN_DIR} || exit
 
 ##### 4.3 check status & add files
 svn status
-svn add --parents "${RELEASE_VERSION}"/apache-${REPO}-*
+svn add --parents "${RELEASE_VERSION}"/apache-${REPO}-"${RELEASE_VERSION}"*
 ## check status again
 svn status
 

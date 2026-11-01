@@ -25,10 +25,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
@@ -116,7 +116,8 @@ public abstract class OltpTraverser extends HugeTraverser
         }
 
         Consumers<K> consumers = new Consumers<>(executors.getExecutor(),
-                                                 consumer, null);
+                                                 consumer,
+                                                 HugeFactory::closeCurrentThreadTransactions);
         consumers.start(taskName);
         long total = 0L;
         try {
@@ -229,7 +230,7 @@ public abstract class OltpTraverser extends HugeTraverser
                                                       ExecutorService executor) {
         return new Consumers<>(executor,
                                consumer,
-                               null,
+                               HugeFactory::closeCurrentThreadTransactions,
                                e -> done.set(true),
                                queueSizePerWorker);
     }
@@ -285,7 +286,7 @@ public abstract class OltpTraverser extends HugeTraverser
         private final Set<Id> excluded;
         private final Set<Id> neighbors;
         private final long limit;
-        private final AtomicInteger count;
+        private int count;
 
         public ConcurrentVerticesConsumer(Id sourceV, Set<Id> excluded, long limit,
                                           Set<Id> neighbors) {
@@ -293,12 +294,13 @@ public abstract class OltpTraverser extends HugeTraverser
             this.excluded = excluded;
             this.limit = limit;
             this.neighbors = neighbors;
-            this.count = new AtomicInteger(0);
+            this.count = 0;
         }
 
         @Override
-        public void accept(EdgeId edgeId) {
-            if (this.limit != NO_LIMIT && count.get() >= this.limit) {
+        public synchronized void accept(EdgeId edgeId) {
+            // Each BFS layer shares a non-thread-safe result set across workers.
+            if (this.limit != NO_LIMIT && this.count >= this.limit) {
                 throw new Consumers.StopExecution("reach limit");
             }
 
@@ -313,7 +315,7 @@ public abstract class OltpTraverser extends HugeTraverser
 
             if (this.neighbors.add(targetV)) {
                 if (this.limit != NO_LIMIT) {
-                    this.count.getAndIncrement();
+                    this.count++;
                 }
             }
         }
@@ -333,20 +335,32 @@ public abstract class OltpTraverser extends HugeTraverser
 
         @Override
         public void accept(Iterator<T> edgeIter) {
-            Iterator<E> ids = prepare(edgeIter);
-            long counter = 0;
-            while (ids.hasNext()) {
-                if (Thread.currentThread().isInterrupted()) {
-                    LOG.warn("Consumer is Interrupted");
-                    break;
+            Iterator<?> toClose = edgeIter;
+            Throwable failure = null;
+            try {
+                // Bind worker leases before a caller-created lazy query opens a session.
+                graph().tx().readWrite();
+                Iterator<E> ids = prepare(edgeIter);
+                toClose = ids != null ? ids : edgeIter;
+                long counter = 0;
+                while (ids.hasNext()) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        LOG.warn("Consumer is Interrupted");
+                        break;
+                    }
+                    counter++;
+                    this.consumer.accept(ids.next());
                 }
-                counter++;
-                this.consumer.accept(ids.next());
-            }
-            long total = edgeIterCounter.addAndGet(counter);
-            // traverse by batch & improve performance
-            if (this.capacity != NO_LIMIT && total >= this.capacity) {
-                throw new Consumers.StopExecution("reach capacity");
+                long total = edgeIterCounter.addAndGet(counter);
+                // traverse by batch & improve performance
+                if (this.capacity != NO_LIMIT && total >= this.capacity) {
+                    throw new Consumers.StopExecution("reach capacity");
+                }
+            } catch (RuntimeException | Error e) {
+                failure = e;
+                throw e;
+            } finally {
+                closeIterator(toClose, failure);
             }
         }
     }

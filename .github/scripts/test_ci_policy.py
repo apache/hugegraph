@@ -14,13 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Executable Git fixtures and fail-closed gate tests for CI selection."""
+"""Path/event selection, real PR snapshots, and coordinator scheduling contracts."""
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -28,551 +30,677 @@ spec = importlib.util.spec_from_file_location("policy", Path(__file__).with_name
 policy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(policy)
 
+
+class GitFixture:
+    def __init__(self, root):
+        self.root = root
+        self.git("init", "-q")
+        self.git("config", "user.email", "ci@example.invalid")
+        self.git("config", "user.name", "CI")
+
+    def git(self, *args):
+        return subprocess.check_output(["git", *args], cwd=self.root, text=True).strip()
+
+    def commit(self, path, content, message):
+        file = self.root / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content)
+        self.git("add", ".")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
+
+    def plan(self, event, fetch=None, event_name=None):
+        with patch.object(policy, "git", side_effect=self.git), patch.dict(
+                os.environ, {"GITHUB_SHA": self.git("rev-parse", "HEAD"), "GITHUB_EVENT_NAME": ""}):
+            old = os.getcwd()
+            try:
+                os.chdir(self.root)
+                return policy.create_plan("server", event, "apache/server", fetch=fetch, event_name=event_name)
+            finally:
+                os.chdir(old)
+
+
 class PolicyTest(unittest.TestCase):
-
-    def live_pr(self):
-        return {"state": "open", "head": {"sha": "head", "ref": "feature", "repo": {"full_name": "alice/server"}},
-                "base": {"sha": "base", "repo": {"full_name": "apache/server"}}}
-
-    def setUp(self):
-        event_sha = patch.dict(os.environ, {"GITHUB_SHA": "merge"})
-        self.addCleanup(event_sha.stop)
-        event_sha.start()
-        # All tests stay local; successful PR gates query only this current-PR fixture.
-        api_mock = patch.object(policy, "api", return_value=self.live_pr())
-        self.addCleanup(api_mock.stop)
-        self.api_mock = api_mock.start()
-
-    def test_dependency_expansion(self):
-        self.assertEqual({"client", "loader", "tools", "spark", "hubble"},
-                         policy.select("toolchain", ["hugegraph-client/src/A.java"]))
-        self.assertEqual({"loader", "hubble"}, policy.select("toolchain", ["hugegraph-loader/src/A.java"]))
-        self.assertEqual({"server", "pd", "store", "hstore", "cluster"}, policy.select("server", ["hugegraph-server/A.java"]))
-
-    def test_server_backend_and_startup_dependents(self):
-        selected = policy.select("server", ["hugegraph-server/hugegraph-hstore/src/test/HstoreTableTest.java"])
-        self.assertIn("hstore", selected)
-        self.assertIn("pd_store", policy.suites("server", selected))
-        selected = policy.select("server", ["hugegraph-server/hugegraph-dist/src/assembly/travis/test-start-hugegraph-pd.sh"])
-        self.assertIn("pd_store", policy.suites("server", selected))
-        self.assertIn("docker", selected)
-        for module in ["hugegraph-core", "hugegraph-api", "hugegraph-test"]:
-            selected = policy.select("server", [f"hugegraph-server/{module}/src/main/A.java"])
-            self.assertIn("hstore", selected)
-            self.assertIn("server", selected)
-        self.assertEqual(set(), policy.select("server", ["hugegraph-server/hugegraph-hstore/README.md"]))
-        self.assertIn("hstore", policy.select("server", ["hugegraph-server/hugegraph-rocksdb/src/main/A.java"]))
-
-    def test_audited_consumer_edges(self):
-        expected = {"server", "pd", "store", "hstore", "cluster"}
-        for path in ["hugegraph-server/hugegraph-hstore/src/A.java", "hugegraph-server/hugegraph-rocksdb/A.java"]:
-            self.assertTrue(expected.issubset(policy.select("server", [path])))
-            self.assertNotIn("helm", policy.select("server", [path]))
-        self.assertEqual(set(policy.MODULES["server"]), policy.select("server", [".github/workflows/server-ci.yml"]))
-        self.assertTrue({"commons", "docker"}.issubset(policy.select("server", [
-            "hugegraph-commons/hugegraph-common/src/main/resources/version.properties"])))
-        self.assertIn("go", policy.select("toolchain", ["hugegraph-client/assembly/travis/start-hugegraph-servers.sh"]))
-        self.assertNotIn("go", policy.select("toolchain", ["hugegraph-client/src/A.java"]))
-        self.assertNotIn("server", policy.select("server", ["hugegraph-pd/src/A.java"]))
-        self.assertTrue({"store", "docker"}.issubset(policy.select("server", [
-            "hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh"])))
-
-    def test_pd_store_distribution_inputs_include_docker_consumers(self):
-        for module, distribution, startup in [
-            ("pd", "hg-pd-dist", "start-hugegraph-pd.sh"),
-            ("store", "hg-store-dist", "start-hugegraph-store.sh"),
-        ]:
-            for relative in [f"src/assembly/static/bin/{startup}",
-                             "src/assembly/static/conf/application.yml",
-                             "src/assembly/descriptor/server-assembly.xml", "pom.xml"]:
-                path = f"hugegraph-{module}/{distribution}/{relative}"
-                with self.subTest(path=path):
-                    selected = policy.select("server", [path])
-                    self.assertTrue({module, "hstore", "cluster", "docker"}.issubset(selected))
-                    self.assertIn("pd_store", policy.suites("server", selected))
-                    self.assertNotIn("server", selected)
-                    self.assertNotIn("helm", selected)
-                    self.assertEqual(relative == "pom.xml", "dependency_license" in selected)
-            source = f"hugegraph-{module}/hg-{module}-core/src/main/java/Example.java"
-            with self.subTest(path=source):
-                selected = policy.select("server", [source])
-                self.assertTrue({module, "hstore", "cluster"}.issubset(selected))
-                self.assertNotIn("docker", selected)
-
-    def test_version_resource_follows_real_docker_consumer(self):
-        root = Path(__file__).resolve().parents[2]
-        consumer = root / ".github/scripts/check-docker-images.sh"
-        if not consumer.exists():
-            self.skipTest("Server Docker consumer is not in the Toolchain repository")
-        resource = next(line.strip().rstrip(")") for line in consumer.read_text().splitlines()
-                        if line.strip().startswith("hugegraph-commons/") and "version.properties" in line)
-        self.assertTrue((root / resource).is_file())
-        self.assertTrue({"commons", "docker"}.issubset(policy.select("server", [resource])))
-
-    def test_single_workflow_has_no_global_fanout(self):
-        self.assertEqual({"hubble"}, policy.select("toolchain", [".github/workflows/hubble-ci.yml"]))
-        self.assertEqual({"docker"}, policy.select("server", [".github/workflows/docker-build-ci.yml"]))
-
-    def test_known_maintenance_inputs_have_specific_owners(self):
-        for path in [".github/PULL_REQUEST_TEMPLATE.md", ".github/dependabot.yml",
-                     ".github/scripts/check-rerun.py", ".github/scripts/test_check_rerun.py"]:
-            with self.subTest(path=path):
-                self.assertEqual(set(), policy.select("server", [path]))
-        for path in [".github/scripts/check-docker-images.sh", ".github/scripts/docker-deployment.py",
-                     ".github/scripts/test_docker_deployment.py"]:
-            with self.subTest(path=path):
-                self.assertEqual({"docker"}, policy.select("server", [path]))
-                selected = policy.select("server", [path, "hugegraph-pd/hg-pd-core/src/A.java"])
-                self.assertTrue({"docker", "pd", "store", "hstore", "cluster"}.issubset(selected))
-        for path in [".github/scripts/ci-policy.py", ".github/scripts/test_ci_policy.py",
-                     ".github/workflows/rerun-ci.yml", ".github/dependabot-unknown.yml"]:
-            with self.subTest(path=path):
-                self.assertEqual(set(policy.MODULES["server"]), policy.select("server", [path]))
-
-    def test_unknown_and_proto_fail_conservative(self):
-        for path in ["pom.xml", ".github/scripts/new.py", "hugegraph-pd/api.proto", "mystery"]:
-            self.assertEqual(set(policy.MODULES["server"]), policy.select("server", [path]))
-
-    def test_strict_docs_allowlist(self):
-        self.assertEqual(set(), policy.select("server", ["README.md", "docs/guide.md"]))
-        for path in ["hugegraph-client/src/test/resources/README.md", "docs/type.ts", "docs/config.yml", "docs/example.java", "hugegraph-server/type.ts"]:
-            self.assertTrue(policy.select("server", [path]))
-
-    def test_real_git_modes_rename_and_cli(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            def git(*args):
-                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
-            git("init", "-q")
-            git("config", "user.email", "ci@example.invalid")
-            git("config", "user.name", "CI")
-            (root / "README.md").write_text("initial")
-            git("add", ".")
-            git("commit", "-qm", "base")
-            base = git("rev-parse", "HEAD")
-            (root / "README.md").write_text("docs change")
-            git("commit", "-qam", "docs")
-            head = git("rev-parse", "HEAD")
-            old = os.getcwd()
-            try:
-                os.chdir(root)
-                (root / "type.ts").write_text("type changed")
-                git("add", ".")
-                git("commit", "-qm", "types")
-                (root / "README.md").chmod(0o755)
-                git("add", "README.md")
-                git("commit", "-qm", "executable prose")
-                self.assertTrue(policy.unsafe_documentation("HEAD", ["README.md"]))
-                (root / "README.md").unlink()
-                (root / "README.md").symlink_to("type.ts")
-                git("add", "README.md")
-                git("commit", "-qm", "symlink prose")
-                self.assertTrue(policy.unsafe_documentation("HEAD", ["README.md"]))
-                (root / "hugegraph-server").mkdir()
-                (root / "hugegraph-server" / "A.java").write_text("source")
-                git("add", ".")
-                git("commit", "-qm", "source")
-                before_rename = git("rev-parse", "HEAD")
-                (root / "docs").mkdir()
-                git("mv", "hugegraph-server/A.java", "docs/renamed.md")
-                git("commit", "-qm", "rename code to prose")
-                changed = git("diff", "--no-renames", "--name-only", before_rename, "HEAD").splitlines()
-                self.assertIn("server", policy.select("server", changed))
-            finally:
-                os.chdir(old)
-            event = root / "event.json"
-            event.write_text(json.dumps({"before": base}))
-            output = root / "output"
-            subprocess.run(["python3", str(Path(policy.__file__).resolve()), "plan", "--project", "server",
-                            "--repository", "apache/server", "--event-path", str(event),
-                            "--output", str(root / "plan.json")], cwd=root, check=True,
-                           env={**os.environ, "GITHUB_OUTPUT": str(output)})
-            self.assertIn("server=true\n", output.read_text())
-            self.assertEqual(policy.suites("server", set(policy.MODULES["server"])),
-                             json.loads((root / "plan.json").read_text())["expected"])
-
-    def plan(self):
-        return {"schema": 1, "project": "server", "repository": "apache/server", "pr": 7,
-                "source": "alice/server", "branch": "feature", "base": "base", "head": "head",
-                "testedMergeSHA": "merge", "expected": ["server_memory", "server_rocksdb", "pd_store", "cluster"],
-                "selected": ["server", "pd", "store", "hstore", "cluster"]}
-
-    def test_memory_gate_ignores_advisory_cancellation(self):
-        plan = self.plan()
-        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"},
-                   "cluster": {"result": "cancelled"}, "server_rocksdb": {"result": "failure"}}
-        self.assertEqual(["server_memory"], policy.gate(plan, results, mode="memory")["executed"])
-        for state in ["failure", "cancelled", "skipped", None]:
-            results["server_memory"]["result"] = state
-            with self.assertRaisesRegex(ValueError, "server_memory"):
-                policy.gate(plan, results, mode="memory")
-        with self.assertRaises(policy.GateFailure) as failure:
-            policy.gate(plan, results, mode="advisory")
-        self.assertEqual("cancelled", failure.exception.report["results"]["cluster"])
-        self.assertNotIn("server_memory", failure.exception.report["results"])
-
-    def test_server_and_api_poms_are_docker_inputs(self):
-        for path in ["hugegraph-server/pom.xml", "hugegraph-server/hugegraph-api/pom.xml"]:
-            with self.subTest(path=path):
-                self.assertIn("docker", policy.select("server", [path]))
-        self.assertNotIn("docker", policy.select("server", ["hugegraph-server/hugegraph-api/src/main/A.java"]))
-
-    def test_codeql_and_smoke_follow_affected_inputs(self):
-        def plan_for(path):
-            def git(*args):
-                if args[0] == "diff":
-                    return path
-                return "base"
-            with patch.object(policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
-                return policy.create_plan("server", {"before": "base"}, "apache/server")
-        for path in ["README.md", "docs/guide.md", "helm/templates/service.yaml"]:
-            with self.subTest(path=path):
-                plan = plan_for(path)
-                self.assertFalse(plan["security"])
-                self.assertFalse(plan["smoke"])
-        plan = plan_for("docker/Dockerfile")
-        self.assertFalse(plan["security"])
-        self.assertTrue(plan["smoke"])
-        for path in [".mvn/maven.config", "pom.xml", "hugegraph-pd/src/main/A.java",
-                     ".github/workflows/codeql-analysis.yml"]:
-            with self.subTest(path=path):
-                self.assertTrue(plan_for(path)["security"])
-
-    def test_memory_result_survives_metadata_outage_and_base_movement(self):
-        plan = self.plan()
-        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"}}
-        def unavailable(_):
-            raise subprocess.CalledProcessError(1, "gh")
-        self.assertEqual(["server_memory"], policy.gate(plan, results, unavailable, mode="memory")["executed"])
-        advanced = self.live_pr()
-        advanced["base"]["sha"] = "advanced"
-        policy.gate(plan, results, lambda _: advanced, mode="memory")
-        advanced["head"]["sha"] = "new-head"
-        with self.assertRaises(policy.StaleInputError):
-            policy.gate(plan, results, lambda _: advanced, mode="memory")
-
-    def test_plan_explains_consumer_selection_and_docs_skip(self):
-        source = "hugegraph-server/hugegraph-api/pom.xml"
+    def plan_for(self, paths, event_name="pull_request", event=None):
+        # Identity checks have their own real-Git fixtures; isolate event selection here.
         def git(*args):
-            return source if args[0] == "diff" else "base"
-        with tempfile.TemporaryDirectory() as directory:
-            summary = Path(directory) / "summary.md"
-            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), patch.object(
-                    policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
-                plan = policy.create_plan("server", {"before": "base"}, "apache/server")
-                self.assertEqual([source], plan["selectionReasons"]["docker"])
-                self.assertEqual([source], plan["selectionReasons"]["server_memory"])
-                self.assertIn(source, summary.read_text())
-                self.assertIn("| server_memory | yes | required |", summary.read_text())
-                self.assertIn("| docker | yes | advisory |", summary.read_text())
-                source = "README.md"
-                docs = policy.create_plan("server", {"before": "base"}, "apache/server")
-                self.assertEqual([], docs["expected"])
-                self.assertEqual({}, docs["selectionReasons"])
-                self.assertIn("| server_memory | no | required | no affected inputs |", summary.read_text())
-
-    def test_memory_rejects_confirmed_source_and_malformed_metadata(self):
-        plan = self.plan()
-        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"}}
-        live = self.live_pr()
-        live["head"]["repo"]["full_name"] = "another/fork"
-        with self.assertRaises(policy.StaleInputError):
-            policy.gate(plan, results, lambda _: live, mode="memory")
-        for malformed in [{"state": "open"}, {"state": "open", "head": None}]:
-            with self.subTest(metadata=malformed), self.assertRaises((KeyError, TypeError)):
-                policy.gate(plan, results, lambda _: malformed, mode="memory")
-
-    def test_gate_rejects_missing_failed_cancelled_skipped(self):
-        plan = self.plan()
-        results = {suite: {"result": "success"} for suite in plan["expected"]}
-        results["plan"] = {"result": "success"}
-        # Even an old plan with claimed successes cannot exempt any current suite.
-        plan["reused"] = {suite: {"runID": 42, "testedMergeSHA": "forged"} for suite in plan["expected"]}
-        for suite in plan["expected"]:
-            for result in [None, "failure", "cancelled", "skipped"]:
-                with self.subTest(suite=suite, result=result), self.assertRaisesRegex(ValueError, suite):
-                    policy.gate(plan, dict(results, **{suite: {"result": result}}))
-        self.assertEqual(plan["expected"], policy.gate(plan, results)["executed"])
-
-    def test_third_party_failure_does_not_exempt_required_tests(self):
-        selected = policy.select("server", ["pom.xml"])
-        self.assertIn("dependency_license", selected)
-        expected = {"server_memory", "server_rocksdb", "commons", "pd_store", "cluster", "docker", "helm"}
-        self.assertEqual(expected, set(policy.suites("server", selected)))
-        plan = dict(self.plan(), selected=sorted(selected), expected=sorted(expected))
-        results = {suite: {"result": "success"} for suite in expected}
-        results["plan"] = {"result": "success"}
-        for result in ["failure", "cancelled", "skipped", None]:
-            results["dependency_license"] = {"result": result}
-            self.assertEqual(expected, set(policy.gate(plan, results)["executed"]))
-        results["cluster"] = {"result": "failure"}
-        with self.assertRaisesRegex(ValueError, "cluster"):
-            policy.gate(plan, results)
-
-    def test_incomplete_pr_event_never_becomes_a_push_plan(self):
-        event = {"pull_request": dict(self.live_pr(), number=7)}
-        cases = []
-        for change in ("null_repo", "missing_repo", "missing_number", "empty_ref"):
-            altered = json.loads(json.dumps(event))
-            pr = altered["pull_request"]
-            if change == "null_repo":
-                pr["head"]["repo"] = None
-            elif change == "missing_repo":
-                del pr["head"]["repo"]
-            elif change == "missing_number":
-                del pr["number"]
-            else:
-                pr["head"]["ref"] = ""
-            cases.append(altered)
-        cases.extend([{"pull_request": {}}, {"pull_request": None}])
-        with patch.object(policy, "git", return_value="merge"):
-            for altered in cases:
-                with self.subTest(event=altered), self.assertRaises(policy.StaleInputError):
-                    policy.create_plan('server', altered, 'apache/server',
-                                       lambda _: self.fail("Incomplete identity must fail before any API query"))
-
-    def test_gate_refuses_failed_planner_even_empty(self):
-        plan = dict(self.plan(), expected=[], selected=[])
-        for result in ["failure", "skipped", "cancelled", None]:
-            with self.subTest(result=result), self.assertRaises(ValueError):
-                policy.gate(plan, {"plan": {"result": result}})
-        report = policy.gate(plan, {"plan": {"result": "success"}})
-        self.assertEqual([], report["executed"])
-        self.assertNotIn("proofs", report)
-
-    def test_cumulative_source_and_docs_always_run_current_tests_without_historical_apis(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            def git(*args):
-                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
-            git("init", "-q")
-            git("config", "user.email", "ci@example.invalid")
-            git("config", "user.name", "CI")
-            (root / "README.md").write_text("base")
-            git("add", ".")
-            git("commit", "-qm", "base")
-            base = git("rev-parse", "HEAD")
-            git("checkout", "-qb", "feature")
-            (root / "hugegraph-server").mkdir()
-            source = root / "hugegraph-server/A.java"
-            source.write_text("source A")
-            git("add", ".")
-            git("commit", "-qm", "source")
-            for text in ["docs B after test failure", "docs C after claimed old success"]:
-                (root / "README.md").write_text(text)
-                git("commit", "-qam", "docs")
-                head = git("rev-parse", "HEAD")
-                # Synthetic PR merge; a different tree with the same parents also exists.
-                tree = git("rev-parse", "HEAD^{tree}")
-                merge = git("commit-tree", tree, "-p", base, "-p", head, "-m", "PR merge")
-                false_merge = git("commit-tree", git("rev-parse", base + "^{tree}"),
-                                  "-p", base, "-p", head, "-m", "unexecuted tree")
-                self.assertNotEqual(merge, false_merge)
-                git("checkout", "--detach", "-q", merge)
-                live = {"state": "open", "head": {"sha": head, "ref": "feature", "repo": {"full_name": "alice/server"}},
-                        "base": {"sha": base, "repo": {"full_name": "apache/server"}}}
-                event = {"pull_request": dict(live, number=7)}
-                calls = []
-                def fetch(path):
-                    calls.append(path)
-                    self.assertEqual("repos/apache/server/pulls/7", path)
-                    return live
-                old = os.getcwd()
-                try:
-                    os.chdir(root)
-                    os.environ["GITHUB_SHA"] = merge
-                    plan = policy.create_plan("server", event, "apache/server", fetch)
-                    git("checkout", "--detach", "-q", false_merge)
-                    with self.assertRaises(policy.StaleInputError):
-                        policy.create_plan("server", event, "apache/server", fetch)
-                    git("checkout", "--detach", "-q", merge)
-                finally:
-                    os.chdir(old)
-                self.assertEqual(["repos/apache/server/pulls/7"], calls)
-                self.assertTrue(plan["server"])
-                self.assertTrue(plan["pd_store"])
-                self.assertTrue(plan["cluster"])
-                self.assertTrue(plan["compatibility"])
-                self.assertTrue(plan["security"])
-                self.assertNotIn("reused", plan)
-                results = {suite: {"result": "success"} for suite in plan["expected"]}
-                results["plan"] = {"result": "success"}
-                results["server_memory"] = {"result": "skipped"}
-                with self.assertRaisesRegex(ValueError, "server_memory"):
-                    policy.gate(plan, results)
-                git("checkout", "-q", "feature")
-
-    def test_queued_pr_uses_actual_merge_base_and_rejects_changed_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            def git(*args):
-                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
-            git("init", "-q")
-            git("config", "user.email", "ci@example.invalid")
-            git("config", "user.name", "CI")
-            (root / "README.md").write_text("base")
-            git("add", ".")
-            git("commit", "-qm", "event base")
-            event_base = git("rev-parse", "HEAD")
-            git("checkout", "-qb", "feature")
-            (root / "hugegraph-server").mkdir()
-            (root / "hugegraph-server/A.java").write_text("PR source")
-            git("add", ".")
-            git("commit", "-qm", "PR head")
-            head = git("rev-parse", "HEAD")
-            event_live = self.live_pr()
-            event_live["head"]["sha"], event_live["base"]["sha"] = head, event_base
-            event = {"pull_request": dict(event_live, number=7)}
-            git("checkout", "--detach", "-q", event_base)
-            (root / "README.md").write_text("target advanced while run was queued")
-            git("commit", "-qam", "new target base")
-            tested_base = git("rev-parse", "HEAD")
-            git("merge", "--no-ff", "-qm", "current PR merge", "feature")
-            merge = git("rev-parse", "HEAD")
-            live = dict(event_live, base=dict(event_live["base"], sha=tested_base))
-            old = os.getcwd()
-            try:
-                os.chdir(root)
-                os.environ["GITHUB_SHA"] = merge
-                plan = policy.create_plan("server", event, "apache/server", lambda _: live)
-                self.assertEqual(tested_base, plan["base"])
-                self.assertNotEqual(event_base, plan["base"])
-                self.assertEqual(head, plan["head"])
-                self.assertEqual(merge, plan["testedMergeSHA"])
-                self.assertEqual(["hugegraph-server/A.java"], plan["changedPaths"])
-                self.assertIn("server_memory", plan["expected"])
-                results = {suite: {"result": "success"} for suite in plan["expected"]}
-                results["plan"] = {"result": "success"}
-                self.assertEqual(plan["expected"], policy.gate(plan, results, lambda _: live)["executed"])
-                changed = dict(live, head=dict(live["head"], sha=tested_base))
-                with self.assertRaises(policy.StaleInputError):
-                    policy.create_plan("server", event, "apache/server", lambda _: changed)
-                with self.assertRaises(policy.StaleInputError):
-                    policy.gate(plan, results, lambda _: changed)
-                wrong_merge = git("commit-tree", git("rev-parse", merge + "^{tree}"),
-                                  "-p", tested_base, "-p", event_base, "-m", "wrong PR head")
-                unrelated_base = git("commit-tree", git("rev-parse", tested_base + "^{tree}"),
-                                     "-m", "unrelated target history")
-                unrelated_merge = git("commit-tree", git("rev-parse", merge + "^{tree}"),
-                                      "-p", unrelated_base, "-p", head, "-m", "unrelated target merge")
-                for checkout in [wrong_merge, head, unrelated_merge]:
-                    git("checkout", "--detach", "-q", checkout)
-                    with self.subTest(checkout=checkout), self.assertRaises(policy.StaleInputError):
-                        policy.create_plan("server", event, "apache/server", lambda _: live)
-            finally:
-                os.chdir(old)
-
-    def test_pure_docs_pr_and_metadata_fail_closed(self):
-        live = self.live_pr()
-        event = {"pull_request": dict(live, number=7)}
-        def git(*args):
+            if args[0] == "diff":
+                return "\n".join(paths)
             if args[0] == "show":
                 return "base head"
-            if args[0] == "diff":
-                return "README.md\ndocs/ci.md"
             return "merge"
-        with patch.object(policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
-            plan = policy.create_plan("server", event, "apache/server", lambda p: live)
-            self.assertEqual([], plan["expected"])
+        event = event or {"before": "base"}
+        if event_name == "pull_request":
+            event = {"pull_request": {"number": 7, "head": {"sha": "head", "ref": "feature",
+                     "repo": {"full_name": "alice/server"}}, "base": {"sha": "base"}}}
+        with patch.object(policy, "git", side_effect=git), patch.object(
+                policy, "unsafe_documentation", return_value=False), patch.object(
+                policy, "require_current_pr"), patch.dict(os.environ, {"GITHUB_SHA": "merge"}):
+            return policy.create_plan("server", event, "apache/server", event_name=event_name)
+
+    def test_ordinary_server_changes_only_run_mainline_server_and_arm_smoke(self):
+        for path in ["hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/traversal/A.java",
+                     "hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/api/traversers/A.java",
+                     "hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/traversal/A.java"]:
+            with self.subTest(path=path):
+                plan = self.plan_for([path])
+                self.assertEqual({"server", "macos"}, set(plan["selected"]))
+                self.assertEqual({"server_memory", "server_rocksdb", "macos"}, set(plan["expected"]))
+                self.assertFalse(plan["macos_full"])
+                self.assertFalse(plan["pd_store"])
+
+    def test_distributed_server_contracts_keep_hstore_cluster_without_pd_store_units(self):
+        for path in [policy.SERVER_CORE + "backend/store/BackendStore.java",
+                     policy.SERVER_CORE + "meta/MetaManager.java", policy.SERVER_CORE + "StandardHugeGraph.java",
+                     policy.SERVER_CORE + "task/DistributedTaskScheduler.java", policy.SERVER_CORE + "task/TaskManager.java",
+                     policy.SERVER_CORE + "masterelection/GlobalMasterInfo.java",
+                     policy.SERVER_API + "core/GraphManager.java",
+                     "hugegraph-server/hugegraph-hstore/src/main/A.java"]:
+            with self.subTest(path=path):
+                plan = self.plan_for([path])
+                self.assertTrue({"server", "macos", "hstore", "cluster", "distributed_smoke"}.issubset(plan["selected"]))
+                self.assertTrue(plan["pd_store"])
+                self.assertFalse(plan["pd"])
+                self.assertFalse(plan["store"])
+                self.assertFalse(plan["hbase"])
+                self.assertFalse(plan["riscv64"])
+
+    def test_shared_runtime_consumers_and_protocols(self):
+        for module in ["commons", "struct"]:
+            selected = policy.select("server", [f"hugegraph-{module}/src/main/A.java"])
+            self.assertTrue({"server", "pd", "store", "hstore", "cluster", "macos"}.issubset(selected))
+            self.assertNotIn("hbase", selected)
+            self.assertNotIn("riscv64", selected)
+        for module in ["pd", "store"]:
+            plan = self.plan_for([f"hugegraph-{module}/src/main/A.java"])
+            self.assertTrue(plan["pd_store"])
+            self.assertTrue(plan["hstore"])
+            self.assertTrue(plan["cluster"])
             self.assertFalse(plan["server"])
-            self.assertFalse(plan["security"])
-            advanced = dict(live, base={"sha": "new-base", "repo": {"full_name": "apache/server"}})
-            self.assertFalse(policy.create_plan("server", event, "apache/server", lambda p: advanced)["server"])
-            with patch.object(policy, "git", side_effect=lambda *a: "wrong parents" if a[0] == "show" else git(*a)):
-                with self.assertRaises(policy.StaleInputError):
-                    policy.create_plan("server", event, "apache/server", lambda p: live)
+            self.assertFalse(plan["macos"])
+        self.assertTrue({"pd", "store", "hstore", "cluster"}.issubset(policy.select(
+            "server", ["hugegraph-pd/hg-pd-grpc/src/main/proto/common.proto"])))
 
-    def test_api_failure_runs_full_required_without_losing_pr_identity(self):
-        event = {"pull_request": dict(self.live_pr(), number=7)}
-        def git(*args):
-            return "base head" if args[0] == "show" else "merge"
-        def fail(path):
-            raise subprocess.CalledProcessError(1, "gh")
-        with patch.object(policy, "git", side_effect=git):
-            plan = policy.create_plan("server", event, "apache/server", fail)
-        self.assertEqual(set(policy.MODULES["server"]), set(plan["selected"]))
-        self.assertEqual(plan["reason"], policy.selection_reason(plan, "dependency_license"))
-        self.assertEqual((7, "alice/server", "feature", "base", "head"),
-                         tuple(plan[key] for key in ["pr", "source", "branch", "base", "head"]))
-        results = {suite: {"result": "success"} for suite in plan["expected"]}
-        results.update(plan={"result": "success"}, fixture={"result": "success"},
-                       **{"hubble-fixture": {"result": "success"}})
-        with self.assertRaises(subprocess.CalledProcessError):
-            policy.gate(plan, results, fail)
-        self.assertEqual(plan["expected"], policy.gate(plan, results)["executed"])
-        self.api_mock.assert_called_once_with("repos/apache/server/pulls/7")
+    def test_dependency_snapshot_inputs_do_not_fan_out_to_runtime_suites(self):
+        for path in [".github/scripts/dependency-snapshot.py", ".github/scripts/dependency-inventory.py",
+                     ".github/workflows/submit-dependencies.yml"]:
+            self.assertEqual({"dependency_license"}, set(self.plan_for([path])["selected"]))
+            self.assertEqual({"dependency_license"}, self.coordinator_jobs(self.plan_for([path])))
+        fixture = ".github/scripts/test_dependency_snapshot.py"
+        self.assertEqual([], self.plan_for([fixture])["expected"])
+        runtime = "hugegraph-server/hugegraph-core/src/main/A.java"
+        self.assertEqual(self.plan_for([runtime])["selected"], self.plan_for([runtime, fixture])["selected"])
+        # Classifier changes still receive conservative mainline validation.
+        self.assertEqual(policy.select("server", [".github/scripts/ci-policy.py"]),
+                         policy.select("server", [".github/scripts/ci-policy.py", fixture]))
 
-    def test_real_pr_git_snapshot_and_final_gate_freshness(self):
+    def test_noncore_platforms_only_follow_direct_inputs(self):
+        for path in ["hugegraph-server/hugegraph-hbase/src/main/A.java",
+                     "hugegraph-server/hugegraph-dist/src/assembly/travis/install-hbase.sh",
+                     "hugegraph-server/hugegraph-dist/src/assembly/travis/hbase-ci-site.xml"]:
+            self.assertEqual({"hbase"}, policy.select("server", [path]))
+        self.assertEqual({"riscv64"}, policy.select("server", [".github/workflows/riscv64-ci.yml"]))
+        self.assertTrue(self.plan_for([".github/workflows/server-compatibility-ci.yml"])["riscv64"])
+        self.assertTrue(self.plan_for([".github/workflows/server-tests.yml"])["hbase"])
+        self.assertTrue(self.plan_for(["hugegraph-server/hugegraph-rocksdb/pom.xml"])["riscv64"])
+        self.assertTrue(self.plan_for(["hugegraph-server/hugegraph-dist/pom.xml"])["riscv64"])
+        for path in ["hugegraph-server/hugegraph-rocksdb/src/main/A.java",
+                     "hugegraph-server/hugegraph-dist/src/assembly/static/bin/start-hugegraph.sh"]:
+            plan = self.plan_for([path])
+            self.assertTrue(plan["macos"])
+            self.assertTrue(plan["macos_full"])
+            self.assertFalse(plan["hbase"])
+            self.assertEqual(path.startswith("hugegraph-server/hugegraph-dist/src/assembly/static/bin/"),
+                             plan["riscv64"])
+        for path in ["docker/hbase/Dockerfile", "docker/hbase/entrypoint.sh", policy.TRAVIS + "install-backend.sh"]:
+            self.assertTrue(self.plan_for([path])["hbase"])
+        install = self.plan_for([policy.TRAVIS + "install-backend.sh"])
+        self.assertTrue(install["hstore"])
+        java = self.plan_for([".github/workflows/.java-version"])
+        self.assertTrue(java["macos_full"])
+        self.assertTrue(java["hbase"])
+        self.assertTrue(java["riscv64"])
+        for path in policy.PLATFORM_POMS:
+            self.assertTrue(self.plan_for([path])["riscv64"])
+            self.assertTrue(self.plan_for([path])["macos_full"])
+        for path in ["hugegraph-server/hugegraph-core/src/main/resources/proto/A.proto",
+                     "hugegraph-pd/hg-pd-grpc/src/main/proto/A.proto"]:
+            self.assertTrue(self.plan_for([path])["riscv64"])
+        self.assertFalse(self.plan_for(["hugegraph-store/hg-store-grpc/src/main/proto/A.proto"])["riscv64"])
+        self.assertFalse(self.plan_for(["hugegraph-pd/hg-pd-core/pom.xml"])["riscv64"])
+        native = self.plan_for(["hugegraph-server/hugegraph-dist/src/assembly/travis/run-native-runtime-smoke-test.sh"])
+        self.assertTrue(native["macos_full"])
+        self.assertTrue(native["riscv64"])
+        self.assertTrue(self.plan_for([policy.TRAVIS + "check-rocksdb-only-dist.sh"])["riscv64"])
+
+    def test_security_tracks_sensitive_inputs_and_dependencies(self):
+        paths = [policy.SERVER_CORE + "auth/AuthManager.java", policy.SERVER_CORE + "security/HugeSecurityManager.java",
+                 policy.SERVER_CORE + "config/AuthOptions.java",
+                 policy.SERVER_API + "api/filter/AuthenticationFilter.java", "hugegraph-pd/hg-pd-core/pom.xml",
+                 ".github/workflows/codeql-analysis.yml",
+                 policy.SERVER_CORE + "backend/cache/CachedSchemaTransaction.java",
+                 policy.SERVER_CORE + "backend/cache/CachedSchemaTransactionV2.java"]
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(self.plan_for([path])["security"])
+        for path in [policy.SERVER_CORE + "api/Author.java", "hugegraph-pd/hg-pd-core/src/main/A.java",
+                     "docker/Dockerfile", "helm/templates/service.yaml",
+                     policy.SERVER_CORE + "backend/cache/CacheManager.java",
+                     policy.SERVER_CORE + "backend/cache/CachedSchemaTransactionTest.java"]:
+            self.assertFalse(self.plan_for([path])["security"])
+
+    def test_documentation_and_nested_readmes_skip_every_test_lane(self):
+        paths = ["README.md", "CONTRIBUTING.md", "notes.txt", "LICENSE", "NOTICE", "docs/ci.md",
+                 ".github/outdated/APACHE_PROPOSAL.md", "hugegraph-pd/design.md",
+                 "hugegraph-pd/docs/raft.md", "hugegraph-store/docs/guide.txt", "hugegraph-server/hugegraph-hstore/README.md",
+                 "hugegraph-server/nested/component/README.md", "hugegraph-pd/hg-pd-core/AGENTS.md", "docker/README.md"]
+        for event_name, event in [("pull_request", {}), ("push", {"ref": "refs/heads/master"})]:
+            plan = self.plan_for(paths, event_name, event)
+            self.assertEqual([], plan["selected"])
+            self.assertEqual([], plan["expected"])
+            self.assertFalse(any(plan[module] for module in policy.MODULES["server"]))
+        for path in ["hugegraph-server/hugegraph-test/src/test/resources/README.md", "docs/example.java",
+                     "docs/config.yml", "hugegraph-pd/docs/fixtures/example.txt", "helm/templates/README.md",
+                     "hugegraph-store/hg-store-dist/src/assembly/static/conf/startup.txt"]:
+            with self.subTest(path=path):
+                self.assertTrue(policy.select("server", [path]))
+
+    def test_master_push_runs_smoke_without_repeated_full_suites(self):
+        event = {"before": "base", "ref": "refs/heads/master"}
+        generic = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"], "push", event)
+        self.assertEqual({"macos", "distributed_smoke"}, set(generic["selected"]))
+        pd = self.plan_for(["hugegraph-pd/hg-pd-core/src/main/A.java"], "push", event)
+        self.assertEqual({"distributed_smoke"}, set(pd["selected"]))
+        for path in ["hugegraph-server/hugegraph-hbase/src/main/A.java", ".github/workflows/riscv64-ci.yml",
+                     ".github/workflows/codeql-analysis.yml"]:
+            self.assertEqual([], self.plan_for([path], "push", event)["expected"])
+        native = self.plan_for(["hugegraph-server/hugegraph-rocksdb/src/main/A.java"], "push", event)
+        self.assertTrue(native["macos"])
+        self.assertFalse(native["macos_full"])
+        self.assertTrue(self.plan_for(["docker/Dockerfile"], "push", event)["docker"])
+
+    def test_manual_presets_weekly_and_release_branches(self):
+        for preset, selected in policy.PRESETS.items():
+            with self.subTest(preset=preset):
+                plan = self.plan_for([], "workflow_dispatch", {"inputs": {"test-set": preset}})
+                self.assertEqual(selected, set(plan["selected"]))
+        default = self.plan_for([], "workflow_dispatch")
+        self.assertEqual(policy.MAINLINE, set(default["selected"]))
+        self.assertFalse(default["macos_full"])
+        weekly = self.plan_for([], "schedule")
+        self.assertEqual(set(policy.MODULES["server"]), set(weekly["selected"]))
+        self.assertTrue(weekly["macos_full"])
+        for branch in ["release-1.7", "test-ci", "tinkerpop-3.8"]:
+            plan = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"], "push",
+                                 {"before": "base", "ref": "refs/heads/" + branch})
+            self.assertTrue(plan["server"])
+            self.assertFalse(plan["hbase"])
+            self.assertFalse(plan["riscv64"])
+
+    def test_unknown_inputs_fall_back_to_mainline_without_expensive_noncore(self):
+        for path in [".github/scripts/ci-policy.py", ".mvn/maven.config", "unknown"]:
+            self.assertEqual(policy.MAINLINE, policy.select("server", [path]))
+        with patch.object(policy, "git", side_effect=lambda *args: "merge" if args[0] == "rev-parse" else
+                          (_ for _ in ()).throw(subprocess.CalledProcessError(1, "git"))):
+            plan = policy.create_plan("server", {"before": "base"}, "apache/server", event_name="push")
+        self.assertEqual(policy.MAINLINE, set(plan["selected"]))
+        self.assertFalse(plan["macos_full"])
+        self.assertFalse(plan["hbase"])
+        self.assertFalse(plan["riscv64"])
+
+    def test_deployment_and_specific_workflows_keep_specific_owners(self):
+        for path in [".github/workflows/docker-build-ci.yml", ".github/scripts/check-docker-images.sh",
+                     ".github/scripts/docker-deployment.py", ".github/scripts/test_docker_deployment.py",
+                     "hugegraph-server/hugegraph-dist/docker/Dockerfile"]:
+            self.assertEqual({"docker"}, policy.select("server", [path]))
+        for path in [".asf.yaml", ".github/dependabot.yml", ".editorconfig"]:
+            self.assertEqual(set(), policy.select("server", [path]))
+        for module in ["pd", "store"]:
+            selected = policy.select("server", [f"hugegraph-{module}/hg-{module}-dist/src/assembly/static/bin/start.sh"])
+            self.assertTrue({module, "hstore", "cluster", "docker", "distributed_smoke"}.issubset(selected))
+            self.assertNotIn("server", selected)
+        version = "hugegraph-commons/hugegraph-common/src/main/resources/version.properties"
+        self.assertTrue({"commons", "docker"}.issubset(policy.select("server", [version])))
+
+    def test_toolchain_selection_and_fixture_gate_contract_remain_compatible(self):
+        quiet = patch("builtins.print")
+        quiet.start()
+        self.addCleanup(quiet.stop)
+        self.assertEqual({"client", "loader", "tools", "spark", "hubble"}, policy.select(
+            "toolchain", ["hugegraph-client/src/A.java"]))
+        self.assertEqual({"loader", "hubble"}, policy.select("toolchain", ["hugegraph-loader/src/A.java"]))
+        self.assertEqual(set(policy.MODULES["toolchain"]), policy.select("toolchain", ["hugegraph-client/api.proto"]))
+        self.assertIn("go", policy.select("toolchain", ["hugegraph-client/assembly/travis/start-hugegraph-servers.sh"]))
+        plan = {"schema": 1, "repository": "apache/toolchain", "project": "toolchain", "pr": 0,
+                "source": "apache/toolchain", "branch": "master", "base": "base", "head": "head",
+                "testedMergeSHA": "head", "selected": ["client"], "expected": ["client"]}
+        results = {"plan": {"result": "success"}, "client": {"result": "success"}, "fixture": {"result": "success"}}
+        self.assertEqual(["client"], policy.gate(plan, results, lambda _: self.fail("No post-run API query"))["executed"])
+        for state in ["failure", "cancelled", "skipped", None]:
+            for job in ["plan", "client", "fixture"]:
+                with self.subTest(state=state, job=job), self.assertRaises(policy.GateFailure):
+                    policy.gate(plan, dict(results, **{job: {"result": state}}))
+
+    def test_toolchain_gate_keeps_summary_current_pr_and_cli_all(self):
+        plan = {"schema": 1, "repository": "apache/toolchain", "project": "toolchain", "pr": 7,
+                "source": "alice/toolchain", "branch": "feature", "base": "base", "head": "head",
+                "testedMergeSHA": "merge", "selected": ["client"], "expected": ["client"]}
+        live = {"state": "open", "head": {"sha": "head", "ref": "feature", "repo": {"full_name": "alice/toolchain"}},
+                "base": {"repo": {"full_name": "apache/toolchain"}}}
+        results = {"plan": {"result": "success"}, "client": {"result": "success"}, "fixture": {"result": "success"}}
+        with tempfile.TemporaryDirectory() as directory, patch("builtins.print"):
+            root = Path(directory)
+            summary = root / "summary.md"
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
+                policy.gate(plan, results, lambda _: live)
+            self.assertIn("| client | yes | advisory | affected inputs | success |", summary.read_text())
+            with self.assertRaises(policy.StaleInputError):
+                policy.gate(plan, results, lambda _: dict(live, head=dict(live["head"], sha="new-head")))
+            (root / "plan.json").write_text(json.dumps(dict(plan, pr=0)))
+            (root / "results.json").write_text(json.dumps(results))
+            outcome = subprocess.run(["python3", str(Path(policy.__file__).resolve()), "gate", "--mode", "all",
+                                      "--plan", str(root / "plan.json"), "--results", str(root / "results.json"),
+                                      "--output", str(root / "report.json")], capture_output=True, text=True)
+            self.assertEqual(0, outcome.returncode, outcome.stderr)
+            self.assertEqual(["client"], json.loads((root / "report.json").read_text())["executed"])
+
+    def test_summary_has_only_advisory_checks(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"GITHUB_STEP_SUMMARY": str(Path(directory) / "summary.md")}):
+            plan = self.plan_for(["pom.xml"])
+            summary = (Path(directory) / "summary.md").read_text()
+            self.assertIn("| server_memory | yes | advisory |", summary)
+            self.assertNotIn("| required |", summary)
+            self.assertEqual([], plan["required"])
+            self.assertEqual(1, summary.count("| dependency_license |"))
+
+    def coordinator_jobs(self, plan, selection="success", java="success", result="success", cancelled=False):
+        workflow = Path(__file__).resolve().parents[1] / "workflows/server-ci.yml"
+        text = workflow.read_text().split("\njobs:\n", 1)[1]
+        jobs = {}
+        for match in re.finditer(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", text, re.M | re.S):
+            name, body = match.groups()
+            if name == "preflight":
+                continue
+            condition = re.search(r"^    if: \$\{\{ (.+) \}\}$", body, re.M)
+            self.assertIsNotNone(condition, "Caller needs an explicit cancellation/selection condition: " + name)
+            expression = condition.group(1)
+            # GitHub otherwise injects success(), which would hide tests after a license failure.
+            self.assertIn("cancelled()", expression)
+            outputs = {key: str(value).lower() for key, value in plan.items() if isinstance(value, bool)}
+            outputs.update(selection_result=selection, java_result=java)
+            expression = re.sub(r"needs\.preflight\.outputs\.([\w]+)",
+                                lambda match: repr(outputs.get(match.group(1), "")), expression)
+            expression = expression.replace("needs.preflight.result", repr(result))
+            expression = expression.replace("needs.dependency_license.result", repr(result))
+            expression = expression.replace("!cancelled()", "not cancelled")
+            expression = expression.replace("&&", "and").replace("||", "or")
+            jobs[name] = bool(eval(expression, {"__builtins__": {}}, {"cancelled": cancelled}))
+        return {job for job, run in jobs.items() if run}
+
+    def test_real_coordinator_keeps_selected_jobs_after_license_or_selftest_failure(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/server-ci.yml").read_text()
+        preflight = re.search(r"^  preflight:\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S).group(1)
+        self.assertEqual("check-license", re.search(r"^    name: (.+)$", preflight, re.M).group(1))
+        full = self.plan_for([], "workflow_dispatch", {"inputs": {"test-set": "full"}})
+        expected = {"build-server", "server-rocksdb", "commons", "pd_store", "cluster", "docker",
+                    "dependency_license", "compatibility", "codeql"}
+        self.assertEqual(expected, self.coordinator_jobs(full))
+        self.assertEqual(expected, self.coordinator_jobs(full, result="failure"))
+        docs = self.plan_for(["hugegraph-pd/docs/guide.txt", "docker/README.md"])
+        self.assertEqual(set(), self.coordinator_jobs(docs, result="failure"))
+        source = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"])
+        self.assertEqual({"build-server", "server-rocksdb", "compatibility"}, self.coordinator_jobs(source))
+        master = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"], "push",
+                               {"before": "base", "ref": "refs/heads/master"})
+        self.assertEqual({"docker", "compatibility"}, self.coordinator_jobs(master))
+
+    def test_real_coordinator_blocks_selection_runtime_failure_and_cancellation(self):
+        full = self.plan_for([], "schedule")
+        for state in ["failure", "cancelled", "skipped", ""]:
+            with self.subTest(selection=state):
+                self.assertEqual(set(), self.coordinator_jobs(full, selection=state, result="failure"))
+            with self.subTest(java=state):
+                self.assertEqual(set(), self.coordinator_jobs(full, java=state, result="failure"))
+        self.assertEqual(set(), self.coordinator_jobs(full, cancelled=True))
+
+    def test_contract_scripts_reach_their_actual_inner_jobs_and_steps(self):
+        workflows = Path(__file__).resolve().parents[1] / "workflows"
+        cases = [("test-stop-hugegraph-store.sh", {"struct"}),
+                 ("test-check-java-runtime-logs.sh", {"struct"}),
+                 ("test-check-jacoco-report.sh", {"struct"}),
+                 ("test-codecov-upload-config.sh", {"struct"}),
+                 ("test-riscv64-java-runtime.sh", {"server", "riscv64"}),
+                 ("test-store-docker-entrypoint.sh", {"store"}),
+                 ("test-start-hugegraph-store.sh", {"store"}),
+                 ("test-start-server.sh", {"server"})]
+        for name, suites in cases:
+            script = policy.TRAVIS + name
+            with self.subTest(script=script):
+                plan = self.plan_for([script])
+                self.assertEqual(suites, set(plan["selected"]))
+                callers = self.coordinator_jobs(plan)
+                if "struct" in suites or "store" in suites:
+                    self.assertEqual({"pd_store"}, callers)
+                    root = (workflows / "server-ci.yml").read_text()
+                    caller = re.search(r"^  pd_store:\n(.*?)(?=^  [\w-]+:|\Z)", root, re.M | re.S).group(1)
+                    inputs = {}
+                    for key in ["struct", "store"]:
+                        binding = re.search(r"^      run-" + key + r": \$\{\{ (.+) \}\}$", caller, re.M).group(1)
+                        binding = binding.replace("needs.preflight.outputs." + key, repr(str(plan[key]).lower()))
+                        inputs[key] = eval(binding, {"__builtins__": {}})
+                    workflow = (workflows / "pd-store-ci.yml").read_text()
+                    job = "struct" if "struct" in suites else "store"
+                    body = re.search(r"^  " + job + r":\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S).group(1)
+                    condition = re.search(r"^    if: (.+)$", body, re.M).group(1)
+                    condition = condition.replace("inputs.run-struct", str(inputs["struct"]))
+                    condition = condition.replace("inputs.run-store", str(inputs["store"]))
+                    self.assertTrue(eval(condition.replace("||", "or").replace("&&", "and").replace("!", "not "),
+                                         {"__builtins__": {}}))
+                    step = next(step for step in body.split("\n      - ") if Path(script).name in step)
+                    gate = re.search(r"(?m)^        if: (.+)$", step)
+                    if gate:
+                        # Only the job's own tool preflight may gate a contract step, and that
+                        # preflight step must itself always run
+                        self.assertEqual("steps.store-preflight.outputs.can_run == 'true'", gate.group(1))
+                        preflight = next(s for s in body.split("\n      - ") if "id: store-preflight" in s)
+                        self.assertNotRegex(preflight, r"(?m)^        if:")
+                else:
+                    self.assertIn("server-rocksdb", callers)
+                    workflow = (workflows / "server-ci.yml").read_text()
+                    # Read the backend from the actual caller rather than assuming a preset.
+                    caller = re.search(r"^  server-rocksdb:\n(.*?)(?=^  [\w-]+:|\Z)",
+                                       workflow, re.M | re.S).group(1)
+                    backend = re.search(r"^      backend: (\w+)$", caller, re.M).group(1)
+                    inner = (workflows / "server-tests.yml").read_text()
+                    step = next(step for step in inner.split("\n      - ") if Path(script).name in step)
+                    condition = re.search(r"^        if: (.+)$", step, re.M).group(1)
+                    self.assertTrue(eval(condition.replace("inputs.backend", repr(backend)),
+                                         {"__builtins__": {}}))
+        mixed = self.plan_for([policy.TRAVIS + "test-stop-hugegraph-store.sh", "hugegraph-pd/src/A.java"])
+        self.assertTrue({"struct", "pd", "store", "hstore", "cluster"}.issubset(mixed["selected"]))
+        checker = self.plan_for([policy.TRAVIS + "check-java-runtime-logs.sh"])
+        self.assertEqual({"build-server", "server-rocksdb", "commons", "pd_store", "cluster", "compatibility"},
+                         self.coordinator_jobs(checker))
+        self.assertTrue(checker["hbase"] and checker["riscv64"] and checker["macos_full"])
+        master = {"ref": "refs/heads/master"}
+        for script in policy.CONTRACT_SUITES:
+            self.assertEqual([], self.plan_for([script], "push", master)["expected"])
+        runtime = "hugegraph-server/hugegraph-core/src/main/A.java"
+        self.assertEqual(self.plan_for([runtime], "push", master)["selected"],
+                         self.plan_for([runtime, policy.TRAVIS + "check-java-runtime-logs.sh"],
+                                       "push", master)["selected"])
+
+    @staticmethod
+    def workflow_expression(expression, values):
+        expression = expression.strip().removeprefix("${{").removesuffix("}}").strip()
+        expression = re.sub(r"\b(?:github|inputs|needs|steps)\.[\w.-]+",
+                            lambda match: repr(values.get(match.group(), "")), expression)
+        expression = expression.replace("&&", "and").replace("||", "or")
+        expression = re.sub(r"!(?!=)", "not ", expression)
+        return eval(expression, {"__builtins__": {}}, {"true": True, "false": False,
+                    "cancelled": lambda: False, "format": lambda pattern, value: pattern.format(value)})
+
+    def test_shared_dependency_install_preserves_inventory_build_arguments(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/check-dependencies.yml").read_text()
+        step = next(step for step in workflow.split("\n      - ") if step.startswith("name: mvn install\n"))
+        code = textwrap.dedent(step.split("        run: |\n", 1)[1])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            def git(*args):
-                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
-            git("init", "-q")
-            git("config", "user.email", "ci@example.invalid")
-            git("config", "user.name", "CI")
-            (root / "README.md").write_text("base")
-            git("add", ".")
-            git("commit", "-qm", "base")
-            base = git("rev-parse", "HEAD")
-            git("checkout", "-qb", "feature")
-            (root / "hugegraph-client").mkdir()
-            (root / "hugegraph-client/A.java").write_text("source")
-            git("add", ".")
-            git("commit", "-qm", "source")
-            head = git("rev-parse", "HEAD")
-            tree = git("rev-parse", "HEAD^{tree}")
-            merge = git("commit-tree", tree, "-p", base, "-p", head, "-m", "PR merge")
-            advanced_head = git("commit-tree", tree, "-p", head, "-m", "new source head")
-            advanced_base = git("commit-tree", git("rev-parse", base + "^{tree}"),
-                                "-p", base, "-m", "new target base")
-            git("checkout", "--detach", "-q", merge)
-            live = self.live_pr()
-            live["head"]["sha"], live["base"]["sha"] = head, base
-            event = {"pull_request": dict(live, number=7)}
-            old = os.getcwd()
-            try:
-                os.chdir(root)
-                os.environ["GITHUB_SHA"] = merge
-                plan = policy.create_plan("server", event, "apache/server", lambda _: live)
-                results = {suite: {"result": "success"} for suite in plan["expected"]}
-                results.update(plan={"result": "success"}, fixture={"result": "success"},
-                               **{"hubble-fixture": {"result": "success"}})
-                self.assertEqual(plan["expected"], policy.gate(plan, results, lambda _: live)["executed"])
-                for section, field, value in [("head", "sha", advanced_head),
-                                              ("head", "ref", "other-branch"),
-                                              ("head", "repo", {"full_name": "other/fork"}),
-                                              ("base", "repo", {"full_name": "other/target"})]:
-                    changed = dict(live, **{section: dict(live[section], **{field: value})})
-                    with self.subTest(section=section, field=field):
-                        with self.assertRaises(policy.StaleInputError):
-                            policy.create_plan("server", event, "apache/server", lambda _: changed)
-                        with self.assertRaises(policy.StaleInputError):
-                            policy.gate(plan, results, lambda _: changed)
-                advanced_merge = git("commit-tree", tree, "-p", advanced_base, "-p", head,
-                                     "-m", "PR merge after master advanced")
-                git("checkout", "--detach", "-q", advanced_merge)
-                os.environ["GITHUB_SHA"] = advanced_merge
-                advanced_plan = policy.create_plan("server", event, "apache/server", lambda _: live)
-                self.assertEqual(base, event["pull_request"]["base"]["sha"])
-                self.assertEqual(advanced_base, advanced_plan["base"])
-                self.assertEqual(advanced_merge, advanced_plan["testedMergeSHA"])
-                self.assertEqual(plan["changedPaths"], advanced_plan["changedPaths"])
-                policy.gate(advanced_plan, results, lambda _: live)
-                with patch.dict(os.environ, {"GITHUB_SHA": ""}):
-                    with self.assertRaises(policy.StaleInputError):
-                        policy.create_plan("server", event, "apache/server", lambda _: live)
-                with self.assertRaises(policy.StaleInputError):
-                    policy.gate(plan, results, lambda _: dict(live, state="closed"))
-                git("checkout", "--detach", "-q", head)
-                with self.assertRaises(policy.StaleInputError):
-                    policy.create_plan("server", event, "apache/server", lambda _: live)
-            finally:
-                os.chdir(old)
+            recorded = root / "arguments.jsonl"
+            maven = root / "mvn"
+            maven.write_text("#!/usr/bin/env python3\nimport json, os, sys\n"
+                             "with open(os.environ['RECORDED_ARGS'], 'a') as output:\n"
+                             "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n")
+            maven.chmod(0o755)
+            for inventory in [True, False]:
+                recorded.unlink(missing_ok=True)
+                subprocess.run(["bash", "-e", "-c", code], check=True, env={**os.environ,
+                    "PATH": str(root) + os.pathsep + os.environ["PATH"], "RECORDED_ARGS": str(recorded),
+                    "CHECK_INVENTORY": str(inventory).lower()})
+                commands = [json.loads(line) for line in recorded.read_text().splitlines()]
+                with self.subTest(inventory=inventory):
+                    self.assertEqual(1, len(commands))
+                    self.assertEqual("install", commands[0][0])
+                    self.assertIn("-Dmaven.test.skip=true", commands[0])
+                    self.assertEqual(not inventory, "-Dmaven.javadoc.skip=true" in commands[0])
 
-    def test_push_gate_does_not_query_pr(self):
-        plan = dict(self.plan(), pr=0, expected=[], selected=[])
-        policy.gate(plan, {"plan": {"result": "success"}},
-                    lambda _: self.fail("push gate must not query a PR"))
+    def test_master_baseline_requires_push_or_explicit_dependency_run(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/server-ci.yml").read_text()
+        expression = re.search(r"^          ENABLED: (.+)$", workflow, re.M).group(1)
+        values = {"github.repository": "apache/hugegraph", "github.event.repository.fork": False,
+                  "github.ref": "refs/heads/master", "github.event_name": "push", "inputs.test-set": "mainline"}
+        self.assertTrue(self.workflow_expression(expression, values))
+        for field, value in [("github.event_name", "schedule"), ("github.event_name", "pull_request"),
+                             ("github.event_name", "pull_request_target"),
+                             ("github.ref", "refs/heads/release-1.7"), ("github.repository", "unknown/fork"),
+                             ("github.event.repository.fork", True)]:
+            with self.subTest(field=field, value=value):
+                self.assertFalse(self.workflow_expression(expression, dict(values, **{field: value})))
+        for preset in ["mainline", "full", "distributed", "codeql", "macos-arm", "hbase", "riscv64"]:
+            self.assertFalse(self.workflow_expression(expression, dict(values, **{
+                "github.event_name": "workflow_dispatch", "inputs.test-set": preset})))
+        for preset in ["mainline", "full"]:
+            plan = self.plan_for([], "workflow_dispatch", {"inputs": {"test-set": preset}})
+            self.assertIn("dependency_license", self.coordinator_jobs(plan))
+            self.assertNotIn("dependency_baseline", self.coordinator_jobs(plan))
+        self.assertTrue(self.workflow_expression(expression, dict(values, **{
+            "github.repository": "hugegraph/hugegraph", "github.event.repository.fork": True})))
+        dependencies = self.plan_for([], "workflow_dispatch", {"inputs": {"test-set": "dependencies"}})
+        self.assertEqual({"dependency_license"}, set(dependencies["selected"]))
+        self.assertTrue(self.workflow_expression(expression, dict(values, **{
+            "github.event_name": "workflow_dispatch", "inputs.test-set": "dependencies"})))
+        plan = self.plan_for(["README.md"], "push", {"ref": "refs/heads/master"})
+        plan["dependency_baseline"] = True
+        self.assertEqual({"dependency_license", "dependency_baseline"}, self.coordinator_jobs(plan))
+        self.assertEqual(set(), self.coordinator_jobs(plan, result="failure"))
+
+    def test_new_master_push_replaces_queued_work_without_cancelling_manual_or_weekly_runs(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/server-ci.yml").read_text()
+        template = re.search(r"^  group: (.+)$", workflow, re.M).group(1)
+        cancellation = re.search(r"^  cancel-in-progress: (.+)$", workflow, re.M).group(1)
+
+        def context(event, run, ref="refs/heads/master"):
+            return {"github.workflow": "HugeGraph-Server CI", "github.event_name": event,
+                    "github.ref": ref, "github.run_id": run, "github.run_attempt": 1,
+                    "github.event.pull_request.number": 42 if event == "pull_request" else ""}
+
+        def group(values):
+            return re.sub(r"\$\{\{(.*?)\}\}",
+                          lambda match: str(self.workflow_expression(match.group(1), values)), template)
+
+        for event in ["push", "pull_request"]:
+            first, second = context(event, 100), context(event, 101)
+            self.assertEqual(group(first), group(second))
+            self.assertTrue(self.workflow_expression(cancellation, first))
+        for event in ["workflow_dispatch", "schedule"]:
+            first, second = context(event, 100), context(event, 101)
+            self.assertNotEqual(group(first), group(second))
+            self.assertFalse(self.workflow_expression(cancellation, first))
+        release = context("push", 100, "refs/heads/release-1.7")
+        self.assertFalse(self.workflow_expression(cancellation, release))
+        self.assertNotEqual(group(release), group(context("push", 101, "refs/heads/release-1.7")))
+
+    def test_distributed_checks_keep_exactly_one_host_and_preserve_struct_fallback(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/pd-store-ci.yml").read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+                               workflow.split("\njobs:\n", 1)[1], re.M | re.S))
+        for mask in range(16):
+            values = {"inputs.run-" + name: bool(mask & (1 << index))
+                      for index, name in enumerate(["struct", "pd", "store", "hstore"])}
+            active = {name: body for name, body in jobs.items() if self.workflow_expression(
+                re.search(r"^    if: (.+)$", body, re.M).group(1), values)}
+            hosts = []
+            for name, body in active.items():
+                for step in body.split("\n      - "):
+                    if "uses: ./.github/actions/rocksdb-compatibility" in step:
+                        condition = re.search(r"^        if: (.+)$", step, re.M).group(1)
+                        if self.workflow_expression(condition, values):
+                            hosts.append(name)
+            with self.subTest(inputs=values):
+                expected = [name for name in ["pd", "store", "hstore"] if values["inputs.run-" + name]][:1]
+                self.assertEqual(expected, hosts)
+                self.assertEqual(values["inputs.run-struct"] and not values["inputs.run-store"], "struct" in active)
+                if values["inputs.run-struct"] or values["inputs.run-store"]:
+                    host = active["store" if values["inputs.run-store"] else "struct"]
+                    for script in ["test-stop-hugegraph-store.sh", "test-check-java-runtime-logs.sh",
+                                   "test-check-jacoco-report.sh", "test-codecov-upload-config.sh",
+                                   "test-tinkerpop-reports.sh"]:
+                        self.assertIn(script, host)
+                        if values["inputs.run-store"]:
+                            step = next(step for step in host.split("\n      - ") if script in step)
+                            self.assertIn("if: ${{ !cancelled() }}", step)
+                    self.assertIn("Run hugegraph-struct test", host)
+
+    def test_store_upload_cannot_contaminate_later_maven_checks(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/pd-store-ci.yml").read_text()
+        store = workflow.split("\n  store:\n", 1)[1].split("\n  hstore:\n", 1)[0]
+        upload = store.index("      - name: Upload coverage to Codecov\n")
+        self.assertLess(store.index("      - name: Run hugegraph-struct test\n"), upload)
+        self.assertNotIn("mvn ", store[upload:])
+        self.assertIn("id: store-coverage", store)
+        condition = re.search(r"^        if: (.+)$", store[upload:], re.M).group(1)
+        self.assertIn("!cancelled()", condition)
+        for outcome in ["success", "failure", "skipped", ""]:
+            self.assertEqual(outcome == "success", self.workflow_expression(condition,
+                             {"steps.store-coverage.outcome": outcome}))
+
+    def test_rocksdb_created_ref_skips_comparison_but_rejects_invalid_revisions(self):
+        action = (Path(__file__).resolve().parents[1] / "actions/rocksdb-compatibility/action.yml").read_text()
+        steps = action.split("\n    - ")[1:]
+        code = textwrap.dedent(steps[0].split("      run: |\n", 1)[1])
+        zero, before, after = "0" * 40, "a" * 40, "b" * 40
+        cases = [("push", before, after, "true"), ("pull_request", before, after, "true"),
+                 ("push", zero, after, "false"), ("pull_request", zero, after, None),
+                 ("push", "0" * 39, after, None), ("push", "bad", after, None),
+                 ("push", zero, "bad", None), ("push", zero, zero, None),
+                 ("push", before, zero, None), ("push", before, "", None)]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            for event, base, head, compare in cases:
+                output.write_text("")
+                result = subprocess.run(["bash", "-e", "-c", code], capture_output=True, text=True,
+                                        env={**os.environ, "GITHUB_EVENT_NAME": event, "BEFORE_SHA": base,
+                                             "AFTER_SHA": head, "GITHUB_OUTPUT": str(output)})
+                with self.subTest(event=event, before=base, after=head):
+                    self.assertEqual(compare is not None, result.returncode == 0, result.stderr)
+                    self.assertEqual("" if compare is None else f"compare={compare}\n", output.read_text())
+                    self.assertEqual(compare == "false", "::notice::" in result.stdout)
+                    for step in steps[1:]:
+                        condition = re.search(r"^      if: (.+)$", step, re.M).group(1)
+                        enabled = self.workflow_expression(condition.replace("always()", "true"),
+                            {"steps.revisions.outputs.compare": compare or ""})
+                        self.assertEqual(compare == "true", enabled, step.splitlines()[0])
+
+    def test_coordinator_reads_and_validates_real_java_input(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/server-ci.yml").read_text()
+        code = workflow.split("python3 - <<'PYTHON'\n", 1)[1].split("\n          PYTHON", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            java = root / ".github/workflows/.java-version"
+            java.parent.mkdir(parents=True)
+            output = root / "outputs.txt"
+            for version in ["17", "17.0.20", "21.0.1", "", "bad", '17\n21']:
+                java.write_text(version)
+                result = subprocess.run(["python3", "-c", textwrap.dedent(code)], cwd=root,
+                                        env={**os.environ, "GITHUB_OUTPUT": str(output)}, capture_output=True, text=True)
+                with self.subTest(version=version):
+                    self.assertEqual(version in {"17", "17.0.20", "21.0.1"}, result.returncode == 0, result.stderr)
+            self.assertEqual(['versions=["17"]', 'versions=["17.0.20"]', 'versions=["21.0.1"]'],
+                             output.read_text().splitlines())
+
+    def test_real_git_document_modes_renames_and_cli_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = GitFixture(root)
+            base = fixture.commit("README.md", "base", "base")
+            fixture.commit("README.md", "docs", "docs")
+            self.assertEqual([], fixture.plan({"before": base, "ref": "refs/heads/master"})["expected"])
+            (root / "README.md").chmod(0o755)
+            fixture.git("add", ".")
+            fixture.git("commit", "-qm", "executable prose")
+            unsafe = fixture.plan({"before": base, "ref": "refs/heads/feature"})
+            self.assertEqual(policy.MAINLINE, set(unsafe["selected"]))
+            (root / "README.md").unlink()
+            (root / "README.md").symlink_to("target.txt")
+            fixture.git("add", ".")
+            fixture.git("commit", "-qm", "symlink prose")
+            self.assertEqual(policy.MAINLINE, set(fixture.plan({"before": base})["selected"]))
+            before = fixture.commit("hugegraph-server/A.java", "source", "source")
+            (root / "docs").mkdir()
+            fixture.git("mv", "hugegraph-server/A.java", "docs/renamed.md")
+            fixture.git("commit", "-qm", "rename source to prose")
+            self.assertTrue(fixture.plan({"before": before})["server"])
+            event = root / "event.json"
+            event.write_text("{}")
+            output = root / "outputs.txt"
+            subprocess.run(["python3", str(Path(policy.__file__).resolve()), "plan", "--project", "server",
+                            "--repository", "apache/server", "--event-path", str(event), "--event-name", "schedule",
+                            "--output", str(root / "plan.json")], cwd=root, check=True,
+                           env={**os.environ, "GITHUB_OUTPUT": str(output)})
+            self.assertIn("macos_full=true\n", output.read_text())
+            self.assertIn("pd_store=true\n", output.read_text())
+            self.assertNotIn("compatibility=", output.read_text())
+            self.assertEqual(set(policy.MODULES["server"]), set(json.loads((root / "plan.json").read_text())["selected"]))
+
+    def test_cumulative_pr_snapshot_keeps_source_after_document_commit_and_checks_current_head(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = GitFixture(Path(directory))
+            base = fixture.commit("README.md", "base", "base")
+            fixture.git("checkout", "-qb", "feature")
+            fixture.commit("hugegraph-server/A.java", "source", "source")
+            head = fixture.commit("README.md", "docs after source", "docs")
+            merge = fixture.git("commit-tree", fixture.git("rev-parse", "HEAD^{tree}"),
+                                "-p", base, "-p", head, "-m", "PR merge")
+            fixture.git("checkout", "--detach", "-q", merge)
+            live = {"number": 7, "state": "open", "head": {"sha": head, "ref": "feature",
+                    "repo": {"full_name": "alice/server"}}, "base": {"sha": base, "repo": {"full_name": "apache/server"}}}
+            calls = []
+            def fetch(path):
+                calls.append(path)
+                return live
+            plan = fixture.plan({"pull_request": live}, fetch)
+            self.assertEqual(["repos/apache/server/pulls/7"], calls)
+            self.assertTrue(plan["server"])
+            self.assertFalse(plan["pd_store"])
+            self.assertFalse(plan["security"])
+            self.assertIn("hugegraph-server/A.java", plan["changedPaths"])
+            for section, field, value in [("head", "sha", "new-head"), ("head", "ref", "other"),
+                                          ("head", "repo", {"full_name": "other/fork"}),
+                                          ("base", "repo", {"full_name": "other/target"})]:
+                changed = dict(live, **{section: dict(live[section], **{field: value})})
+                with self.subTest(section=section, field=field), self.assertRaises(policy.StaleInputError):
+                    fixture.plan({"pull_request": live}, lambda _: changed)
+            with self.assertRaises(policy.StaleInputError):
+                fixture.plan({"pull_request": live}, lambda _: dict(live, state="closed"))
+            fixture.git("checkout", "--detach", "-q", head)
+            with self.assertRaises(policy.StaleInputError):
+                fixture.plan({"pull_request": live}, fetch)
+
+    def test_queued_merge_uses_actual_target_parent_and_api_outage_keeps_pr_identity(self):
+        live = {"number": 7, "state": "open", "head": {"sha": "head", "ref": "feature",
+                "repo": {"full_name": "alice/server"}}, "base": {"sha": "event-base", "repo": {"full_name": "apache/server"}}}
+        def git(*args):
+            if args[0] == "show":
+                return "current-base head"
+            if args[0] == "diff":
+                return "README.md"
+            return "merge"
+        with patch.dict(os.environ, {"GITHUB_SHA": "merge", "GITHUB_EVENT_NAME": ""}), patch.object(
+                policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
+            plan = policy.create_plan("server", {"pull_request": live}, "apache/server", lambda _: live)
+            self.assertEqual("current-base", plan["base"])
+            self.assertEqual([], plan["expected"])
+            def unavailable(_):
+                raise subprocess.CalledProcessError(1, "gh")
+            fallback = policy.create_plan("server", {"pull_request": live}, "apache/server", unavailable)
+            self.assertEqual(policy.MAINLINE, set(fallback["selected"]))
+            self.assertEqual((7, "alice/server", "feature", "current-base", "head"),
+                             tuple(fallback[key] for key in ["pr", "source", "branch", "base", "head"]))
+            for malformed in [{"pull_request": None}, {"pull_request": {}},
+                              {"pull_request": dict(live, head=dict(live["head"], repo=None))}]:
+                with self.subTest(event=malformed), self.assertRaises(policy.StaleInputError):
+                    policy.create_plan("server", malformed, "apache/server", lambda _: self.fail("Invalid identity"))
 
 
 if __name__ == "__main__":

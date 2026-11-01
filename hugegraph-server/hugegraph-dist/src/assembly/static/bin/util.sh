@@ -16,6 +16,59 @@
 # limitations under the License.
 #
 
+function record_jvm_startup_diagnostics() {
+    JVM_STARTUP_TIME=$(date -u +'%Y-%m-%d %H:%M:%S.%N UTC')
+    JVM_STARTUP_LOG_OFFSET=$(stat -c %s ./logs/hugegraph-server.log 2>/dev/null || echo 0)
+    JVM_STARTUP_STDOUT_OFFSET=$(stat -c %s ./logs/hugegraph-server-stdout.log 2>/dev/null || echo 0)
+}
+
+function print_jvm_thread_hint() {
+    local kind
+    kind=$(awk '
+        /pthread_create.*\(EPERM\)|pthread_create.*Operation not permitted/ { denied = 1 }
+        /Cannot create worker GC thread|pthread_create.*\(EAGAIN\)|pthread_create.*Resource temporarily unavailable/ { resources = 1 }
+        END { if (denied) print "denied"; else if (resources) print "resources" }
+    ')
+    case "$kind" in
+        denied)
+            echo 'ERROR: JVM thread creation was denied (EPERM). Check the Docker host seccomp profile and security policy.' >&2
+            echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
+            ;;
+        resources)
+            echo 'ERROR: JVM could not create a thread. Possible causes include seccomp denial, insufficient memory, or process/thread limits.' >&2
+            echo 'Look for pthread_create errors (EPERM/EAGAIN) in the JVM output: the container log, or logs/hugegraph-server-stdout.log with STDOUT_MODE=false.' >&2
+            echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
+            echo 'If the process limit is too low, set --ulimit nproc=65535:65535.' >&2
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+function diagnose_jvm_startup_failure() {
+    local crash size offset
+    if [[ -r ./logs/hugegraph-server-stdout.log ]]; then
+        size=$(stat -c %s ./logs/hugegraph-server-stdout.log 2>/dev/null || echo 0)
+        offset=$JVM_STARTUP_STDOUT_OFFSET
+        [[ "$size" -ge "$offset" ]] || offset=0
+        if tail -c +$((offset + 1)) ./logs/hugegraph-server-stdout.log | print_jvm_thread_hint; then
+            return 0
+        fi
+    fi
+    while IFS= read -r -d '' crash; do
+        if [[ -r "$crash" ]] && print_jvm_thread_hint < "$crash"; then
+            return 0
+        fi
+    done < <(find -H . ./logs -maxdepth 1 -type f -name 'hs_err_pid*.log' \
+                 -newermt "$JVM_STARTUP_TIME" -print0 2>/dev/null)
+    if [[ -r ./logs/hugegraph-server.log ]]; then
+        size=$(stat -c %s ./logs/hugegraph-server.log 2>/dev/null || echo 0)
+        offset=$JVM_STARTUP_LOG_OFFSET
+        [[ "$size" -ge "$offset" ]] || offset=0
+        tail -c +$((offset + 1)) ./logs/hugegraph-server.log | print_jvm_thread_hint || true
+    fi
+    return 0
+}
+
 function command_available() {
     local cmd=$1
     if command -v "$cmd" >/dev/null 2>&1; then
@@ -25,6 +78,7 @@ function command_available() {
 }
 
 function configure_riscv64_libatomic() {
+    local error_handler="${1:-}"
     if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "riscv64" ]]; then
         return 0
     fi
@@ -56,7 +110,12 @@ function configure_riscv64_libatomic() {
     fi
 
     if [[ -z "$libatomic" ]]; then
-        echo "RISC-V RocksDB requires libatomic.so.1; install libatomic1" >&2
+        local message="RISC-V RocksDB requires libatomic.so.1; install libatomic1"
+        if [[ -n "$error_handler" ]]; then
+            "$error_handler" "$message"
+        else
+            echo "$message" >&2
+        fi
         return 1
     fi
 
@@ -407,6 +466,172 @@ function wait_for_startup() {
     return 1
 }
 
+# Return the remaining memory (MiB) under visible cgroup hard limits. Keep
+# missing/unlimited controllers empty so ordinary host sizing stays unchanged.
+function cgroup_free_memory() {
+    local root="${1:-/sys/fs/cgroup}"
+    local membership="${2:-/proc/self/cgroup}"
+    local mountinfo="${3:-/proc/self/mountinfo}"
+    local base="" path="" limit_file="" usage_file=""
+    local version=""
+    local id controllers member
+    if [[ -r "$membership" ]]; then
+        while IFS=: read -r id controllers member; do
+            if [[ ",$controllers," == *,memory,* ]]; then
+                base="$root/memory"
+                path="$member"
+                limit_file="memory.limit_in_bytes"
+                usage_file="memory.usage_in_bytes"
+                version="cgroup"
+                break
+            elif [[ "$id" == 0 && -z "$controllers" ]]; then
+                base="$root"
+                path="$member"
+                limit_file="memory.max"
+                usage_file="memory.current"
+                version="cgroup2"
+            fi
+        done < "$membership"
+    fi
+    [[ -n "$base" ]] || return 0
+
+    # Mount points and exposed roots need not use the conventional hierarchy.
+    # The kernel escapes whitespace/backslashes in mountinfo path fields.
+    local mount_root="" mountpoint="" mapped_path=""
+    local fallback_base="" selected_root="" selected_path=""
+    if [[ -r "$mountinfo" ]]; then
+        while read -r mount_root mountpoint; do
+            printf -v mountpoint '%b' "$mountpoint"
+            printf -v mount_root '%b' "$mount_root"
+            if [[ -z "$fallback_base" ]]; then
+                fallback_base="$mountpoint"
+            fi
+            if [[ "$mount_root" == / ]]; then
+                mapped_path="$path"
+            elif [[ "$path" == "$mount_root" ]]; then
+                mapped_path=/
+            elif [[ "$path" == "$mount_root/"* ]]; then
+                mapped_path="${path#"$mount_root"}"
+            else
+                continue
+            fi
+            [[ -d "$mountpoint$mapped_path" ]] || continue
+            # Prefer the widest visible hierarchy so a delegated bind mount
+            # cannot hide a tighter ancestor exposed by another matching mount.
+            [[ -z "$selected_root" || ${#mount_root} -lt ${#selected_root} ]] || continue
+            base="$mountpoint"
+            selected_root="$mount_root"
+            selected_path="$mapped_path"
+        done < <(awk -v version="$version" '
+            {
+                split($0, parts, " - ");
+                split(parts[2], tail, " ");
+                if (tail[1] == version && (version == "cgroup2" ||
+                    index("," tail[3] ",", ",memory,") > 0)) {
+                    print $4, $5;
+                }
+            }' "$mountinfo")
+        # Only use a namespace root after all membership mappings were tried.
+        if [[ -n "$selected_root" ]]; then
+            path="$selected_path"
+        elif [[ -n "$fallback_base" ]]; then
+            base="$fallback_base"
+            path=/
+        fi
+    fi
+
+    # A cgroup namespace can expose its own root while /proc still names a
+    # host-relative membership. Fall back to the visible mount root in that
+    # case; never follow a membership path out of the controller mount.
+    local dir="$base"
+    if [[ "$path" == /* && "$path" != *"/../"* && "$path" != */.. &&
+          -d "$base$path" ]]; then
+        dir="$base$path"
+        dir="${dir%/}"
+    fi
+    local limit usage inactive available smallest=""
+    local child child_min
+    local cache_key=inactive_file
+    local unlimited="" kernel_machine="" page_size=""
+    if [[ "$version" == cgroup ]]; then
+        cache_key=total_inactive_file
+        # v1 exposes PAGE_COUNTER_MAX * PAGE_SIZE instead of "max".
+        # LONG_BIT describes userspace, not the kernel. Personality can also
+        # mask uname as 32-bit, so infer unlimited only from known 64-bit names.
+        kernel_machine=$(uname -m 2>/dev/null) || true
+        page_size=$(getconf PAGESIZE 2>/dev/null) || true
+        if [[ "$page_size" =~ ^[1-9][0-9]*$ ]]; then
+            case "$kernel_machine" in
+                x86_64|aarch64|riscv64)
+                    unlimited=$((9223372036854775807 / page_size * page_size)) ;;
+            esac
+        fi
+    fi
+    while :; do
+        limit=""
+        usage=""
+        [[ ! -r "$dir/$limit_file" ]] || read -r limit < "$dir/$limit_file" || true
+        if [[ -n "$unlimited" && "$limit" =~ ^[0-9]+$ ]] &&
+                awk -v limit="$limit" -v unlimited="$unlimited" 'BEGIN {exit !(limit >= unlimited)}'; then
+            limit=""
+        fi
+        if [[ "$limit" =~ ^[0-9]+$ ]]; then
+            # Unknown usage under a known limit must not fall back to host memory.
+            if [[ ! -r "$dir/$usage_file" ]] || ! read -r usage < "$dir/$usage_file" ||
+                    [[ ! "$usage" =~ ^[0-9]+$ ]]; then
+                echo 0
+                return 0
+            fi
+            # Inactive file cache can be reclaimed on a warm restart. For v1,
+            # use the hierarchical total so ancestor budgets include children.
+            inactive=0
+            if [[ -r "$dir/memory.stat" ]]; then
+                inactive=$(awk -v key="$cache_key" '$1 == key {print $2; exit}' "$dir/memory.stat")
+            fi
+            [[ "$inactive" =~ ^[0-9]+$ ]] || inactive=0
+            if [[ "$version" == cgroup2 && "$inactive" != 0 ]]; then
+                # A child's protected cache cannot be reclaimed by this limit.
+                # The target's own memory.min does not protect against its own reclaim.
+                if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+                    # Known files can be readable while child enumeration is denied.
+                    inactive=0
+                else
+                    for child in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+                        [[ -d "$child" ]] || continue
+                        # An unsearchable directory can hide a protected cgroup.
+                        if [[ ! -x "$child" ]]; then
+                            inactive=0
+                            break
+                        fi
+                        [[ -e "$child/memory.current" && -e "$child/memory.max" ]] || continue
+                        child_min=""
+                        [[ ! -r "$child/memory.min" ]] || read -r child_min < "$child/memory.min" || true
+                        if [[ "$child_min" != 0 ]]; then
+                            inactive=0
+                            break
+                        fi
+                    done
+                fi
+            fi
+            # Inconsistent snapshots receive no cache credit. awk also avoids
+            # shell integer overflow for v1's unlimited sentinel.
+            available=$(awk -v limit="$limit" -v usage="$usage" -v inactive="$inactive" 'BEGIN {
+                if (inactive > usage) inactive = 0;
+                remaining = limit - (usage - inactive);
+                printf "%.0f\n", (remaining > 0 ? int(remaining / 1048576) : 0);
+            }')
+            if [[ -z "$smallest" ]] || awk -v a="$available" -v b="$smallest" \
+                    'BEGIN {exit !(a < b)}'; then
+                smallest="$available"
+            fi
+        fi
+        [[ "$dir" != "$base" && "$dir" == "$base/"* ]] || break
+        dir="${dir%/*}"
+    done
+    [[ -z "$smallest" ]] || echo "$smallest"
+    return 0
+}
+
 function free_memory() {
     local free=""
     local os=$(uname)
@@ -420,6 +645,11 @@ function free_memory() {
         fi
         free=$(expr "$mem_free" + "$mem_buffer" + "$mem_cached")
         free=$(expr "$free" / 1024)
+        local cgroup_free=$(cgroup_free_memory)
+        if [[ -n "$cgroup_free" ]] && awk -v a="$cgroup_free" -v b="$free" \
+                'BEGIN {exit !(a < b)}'; then
+            free="$cgroup_free"
+        fi
     elif [ "$os" == "Darwin" ]; then
         local pages_free=$(vm_stat | awk '/Pages free/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " ")
         local pages_inactive=$(vm_stat | awk '/Pages inactive/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " ")
@@ -473,13 +703,19 @@ function remove_with_prompt() {
 
 function ensure_path_writable() {
     local path=$1
+    local error_handler="${2:-}"
     # Ensure input path exist
     if [ ! -d "${path}" ]; then
         mkdir -p "${path}"
     fi
     # Check for write permission
     if [ ! -w "${path}" ]; then
-        echo "No write permission on directory ${path}"
+        local message="No write permission on directory ${path}"
+        if [ -n "${error_handler}" ]; then
+            "${error_handler}" "${message}"
+        else
+            echo "${message}"
+        fi
         exit 1
     fi
 }

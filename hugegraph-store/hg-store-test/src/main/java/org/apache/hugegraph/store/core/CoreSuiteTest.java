@@ -20,6 +20,19 @@ package org.apache.hugegraph.store.core;
 import org.apache.hugegraph.store.HeartbeatShutdownTest;
 import org.apache.hugegraph.store.StoreIdChangeTest;
 import org.apache.hugegraph.store.core.snapshot.HgSnapshotHandlerTest;
+import org.apache.hugegraph.store.core.store.meta.PartitionMetaCodecTest;
+import org.apache.hugegraph.store.node.AppConfigTuningTest;
+import org.apache.hugegraph.store.node.listener.PdConfigureListenerMemoryOverrideTest;
+import org.apache.hugegraph.store.options.CgroupMemoryLimitTest;
+import org.apache.hugegraph.store.options.RaftRocksdbOptionsTest;
+import org.apache.hugegraph.store.options.RocksdbMemoryBudgetTest;
+import org.apache.hugegraph.store.util.FileObjectIteratorTest;
+import org.apache.hugegraph.store.util.FilterIteratorCleanupTest;
+import org.apache.hugegraph.store.util.FilterIteratorColumnEqualityTest;
+import org.apache.hugegraph.store.util.SortShuffleSerializerTest;
+import org.apache.hugegraph.store.util.SortShuffleTest;
+import org.apache.hugegraph.store.util.TypeTransIteratorTest;
+import org.apache.hugegraph.store.util.UnionFilterIteratorTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -46,10 +59,23 @@ import lombok.extern.slf4j.Slf4j;
 //        HgBusinessImplTest.class
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        FileObjectIteratorTest.class,
+        FilterIteratorCleanupTest.class,
+        FilterIteratorColumnEqualityTest.class,
+        SortShuffleSerializerTest.class,
+        SortShuffleTest.class,
+        TypeTransIteratorTest.class,
+        UnionFilterIteratorTest.class,
         HeartbeatShutdownTest.class,
         MetricSessionTest.class,
         HgSnapshotHandlerTest.class,
-        StoreIdChangeTest.class
+        StoreIdChangeTest.class,
+        PartitionMetaCodecTest.class,
+        RocksdbMemoryBudgetTest.class,
+        CgroupMemoryLimitTest.class,
+        AppConfigTuningTest.class,
+        RaftRocksdbOptionsTest.class,
+        PdConfigureListenerMemoryOverrideTest.class
 })
 @Slf4j
 public class CoreSuiteTest {

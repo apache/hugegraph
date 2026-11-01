@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build-server:
-    name: server_${{ inputs.backend }} (Java ${{ matrix.JAVA_VERSION }})
+    name: Server ${{ inputs.backend }} tests (Java ${{ matrix.JAVA_VERSION }})
     runs-on: ubuntu-24.04
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
@@ -73,6 +73,14 @@ jobs:
         run: |
           mvn clean compile -pl hugegraph-server/hugegraph-test -am -U -Dmaven.javadoc.skip=true -ntp
 
+      - name: Check startup and native runtime contracts
+        if: inputs.backend == 'rocksdb'
+        run: |
+          "$TRAVIS_DIR/test-wait-storage.sh"
+          "$TRAVIS_DIR/test-start-server.sh"
+          "$TRAVIS_DIR/test-riscv64-java-runtime.sh"
+          bash "$TRAVIS_DIR/test-tinkerpop-reports.sh"
+
       - name: Validate Docker integration
         if: ${{ env.BACKEND == 'rocksdb' }}
         run: |
@@ -96,14 +104,24 @@ jobs:
           $TRAVIS_DIR/test-java-security-properties.sh \
             "$SERVER_DIR" "$GITHUB_WORKSPACE"
 
+      - name: Check bundled Arthas local CLI
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION
+          bash "$TRAVIS_DIR/test-arthas-cli.sh" "$SERVER_DIR"
+
       - name: Verify Surefire single-class routing
         if: ${{ env.BACKEND == 'rocksdb' }}
         run: |
           SUREFIRE_DIR=hugegraph-server/hugegraph-test/target/surefire-reports
           REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest.xml"
           rm -f "$REPORT"
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-server/hugegraph-test -am \
-            -P unit-test -Dtest=HugeGraphAuthProxyTest -ntp
+            -P unit-test -Dtest=HugeGraphAuthProxyTest -ntp 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
           test -s "$REPORT" || {
             echo "::error::Server single-class test produced no report"
             exit 1
@@ -150,6 +168,7 @@ jobs:
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           bash $TRAVIS_DIR/test-ci-service-utils.sh "$TRAVIS_DIR/ci-service-utils.sh"
           bash $TRAVIS_DIR/test-launcher-gc.sh "$GITHUB_WORKSPACE"
+          bash $TRAVIS_DIR/test-cgroup-memory.sh "$SERVER_DIR/bin/util.sh"
           bash $TRAVIS_DIR/test-start-hugegraph-signal.sh "$SERVER_DIR/bin/start-hugegraph.sh"
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
 
@@ -160,42 +179,65 @@ jobs:
 
       - name: Run unit test
         run: |
-          $TRAVIS_DIR/run-unit-test.sh $BACKEND
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-unit-test.sh $BACKEND 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Run core test
         run: |
-          $TRAVIS_DIR/run-core-test.sh $BACKEND
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-core-test.sh $BACKEND 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Run api test
         run: |
-          if [ "$BACKEND" = "rocksdb" ]; then
-            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
-          else
-            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
-          fi
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          {
+            if [ "$BACKEND" = "rocksdb" ]; then
+              $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
+            else
+              $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+            fi
+          } 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       # TODO: disable raft test in normal PR due to the always timeout problem
       - name: Run raft test
         if: ${{ env.RAFT_MODE == 'true' && env.BACKEND == 'rocksdb' }}
         timeout-minutes: 45
         run: |
-          $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Run TinkerPop structure test
         if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
         timeout-minutes: 60
-        run: $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND structure
+        run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND structure 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Run TinkerPop process test
         if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
         timeout-minutes: 180
-        run: $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process
+        run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ env.REPORT_DIR }}/*.xml
+          files: ${{ env.REPORT_DIR }}/*.xml,hugegraph-server/target/site/jacoco/jacoco.xml
+          flags: server_${{ inputs.backend }}
           disable_search: true
           fail_ci_if_error: false
 

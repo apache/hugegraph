@@ -85,6 +85,9 @@ For detailed architecture, Raft consensus mechanisms, and partition management, 
 
 ---
 
+For lightweight Raft dashboard counters and the detailed metrics contract, see
+[Store monitoring metrics](docs/monitoring.md).
+
 ## Quick Start
 
 ### Prerequisites
@@ -136,6 +139,7 @@ Extract the distribution package and edit `conf/application.yml`:
 | `grpc.port` | `8500` | gRPC server port for client connections |
 | `raft.address` | `127.0.0.1:8510` | Raft service address for this Store node |
 | `raft.snapshotInterval` | `1800` | Raft snapshot interval in seconds (30 minutes) |
+| `raft.maxSegmentFileSize` | `1073741824` | Maximum bytes per newly allocated segment log file when `raft.useRocksDBSegmentLogStorage=true`; nonempty files retain their size and incompatible blank allocations are isolated on restart |
 | `server.port` | `8520` | REST API port for management and metrics |
 | `app.data-path` | `./storage` | Directory for RocksDB data storage (supports multiple paths for multi-disk setups) |
 | `app.fake-pd` | `false` | Enable built-in PD mode for standalone testing (not for production) |
@@ -249,8 +253,18 @@ bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
   set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
   unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
   or `-j`; conflicting selections are rejected by the JVM.
-- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
+- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g -XX:MaxDirectMemorySize=2g"`). A `-j` heap replaces the
+  launcher's direct-memory cap, so pass one with it; otherwise the RocksDB budget counts a second heap
+  of direct memory (see the deployment guide's Store Configuration).
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
+
+The launcher always loads `bin/jvm-module.options`, including with custom `JAVA_OPTIONS` or `-j`.
+Keep this file in the distribution: it grants the Java 17 access required by Hessian Raft serialization;
+startup fails if the file is missing or unreadable. Direct Java launches must include `@bin/jvm-module.options`.
+
+On supported architectures, startup reuses a checksum-verified jemalloc library or tries to download it.
+The optional download allows 5 seconds to connect and 30 seconds for the complete transfer. If it fails
+or times out, Store continues without adding jemalloc to `LD_PRELOAD`; partial downloads are discarded.
 
 Default JVM memory settings (defined in `start-hugegraph-store.sh`):
 - Max heap: 32GB
@@ -369,6 +383,10 @@ docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ### Run Container
 
 ```bash
+# The image runs as UID 10001; a host data directory must be writable by it
+# (see docker/README.md, "Container user")
+mkdir -p /path/to/storage && sudo chown 10001:10001 /path/to/storage
+
 docker run -d \
   -p 8520:8520 \
   -p 8500:8500 \
@@ -380,6 +398,10 @@ docker run -d \
   --name hugegraph-store \
   hugegraph/store:latest
 ```
+
+Add `-e HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=<bytes>` to pin the off-heap RocksDB budget.
+Without it the Store sizes the budget from the container memory limit; see
+[Store Configuration](docs/deployment-guide.md#store-configuration) in the deployment guide.
 
 **Exposed Ports**:
 - `8520`: REST API (management, metrics)
@@ -406,6 +428,9 @@ See [Store-wide shutdown](../docs/storage-lifecycle.md#store-node-shutdown) for 
 timeout handling, diagnostics and resource drain behavior.
 
 ## Documentation
+
+For offline diagnosis of a running node without restarting it, see
+[Arthas diagnostics](../docs/server-runtime.md#arthas-diagnostics).
 
 See the [storage lifecycle guide](../docs/storage-lifecycle.md) for request ownership,
 shutdown, recovery and provider configuration.

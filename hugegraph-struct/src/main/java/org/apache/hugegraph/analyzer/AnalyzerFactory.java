@@ -33,31 +33,24 @@ public class AnalyzerFactory {
 
     public static Analyzer analyzer(String name, String mode) {
         name = name.toLowerCase();
-        switch (name) {
-            case "word":
+        return switch (name) {
+            case "word" -> {
                 try {
-                    return new WordAnalyzer(mode);
+                    yield new WordAnalyzer(mode);
                 } catch (NoClassDefFoundError e) {
                     throw new ConfigException("The word analyzer requires the optional " +
                                               "org.apdplat:word:1.3 dependency on the runtime classpath", e);
                 }
-            case "ansj":
-                return new AnsjAnalyzer(mode);
-            case "hanlp":
-                return new HanLPAnalyzer(mode);
-            case "smartcn":
-                return new SmartCNAnalyzer(mode);
-            case "jieba":
-                return new JiebaAnalyzer(mode);
-            case "jcseg":
-                return new JcsegAnalyzer(mode);
-            case "mmseg4j":
-                return new MMSeg4JAnalyzer(mode);
-            case "ikanalyzer":
-                return new IKAnalyzer(mode);
-            default:
-                return customizedAnalyzer(name, mode);
-        }
+            }
+            case "ansj" -> new AnsjAnalyzer(mode);
+            case "hanlp" -> new HanLPAnalyzer(mode);
+            case "smartcn" -> new SmartCNAnalyzer(mode);
+            case "jieba" -> new JiebaAnalyzer(mode);
+            case "jcseg" -> new JcsegAnalyzer(mode);
+            case "mmseg4j" -> new MMSeg4JAnalyzer(mode);
+            case "ikanalyzer" -> new IKAnalyzer(mode);
+            default -> customizedAnalyzer(name, mode);
+        };
     }
 
     private static Analyzer customizedAnalyzer(String name, String mode) {

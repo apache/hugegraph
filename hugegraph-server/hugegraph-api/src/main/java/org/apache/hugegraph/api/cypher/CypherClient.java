@@ -55,6 +55,10 @@ public final class CypherClient {
     private String password;
     private String token;
 
+    CypherClient(Supplier<Configuration> configurationSupplier) {
+        this.configurationSupplier = configurationSupplier;
+    }
+
     CypherClient(String userName, String password,
                  Supplier<Configuration> configurationSupplier) {
         this.userName = userName;
@@ -92,7 +96,8 @@ public final class CypherClient {
         } catch (Exception e) {
             LOG.error(String.format("Failed to submit cypher-query: [ %s ], caused by:",
                                     cypherQuery), e);
-            res = CypherModel.failOf(request.getRequestId().toString(), e.getMessage());
+            res = CypherModel.failOf(request.getRequestId().toString(),
+                                     e.getMessage(), CypherErrorMapper.map(e));
         } finally {
             try {
                 if (client != null) {
@@ -138,8 +143,8 @@ public final class CypherClient {
         if (value == null) {
             return null;
         }
-        if (value instanceof Id) {
-            return ((Id) value).asObject();
+        if (value instanceof Id matchedId) {
+            return matchedId.asObject();
         }
         boolean composite = value instanceof Map || value instanceof Path ||
                             value instanceof Iterable ||
@@ -151,14 +156,14 @@ public final class CypherClient {
             throw new IllegalArgumentException(
                       "Exceeded max normalization depth 32");
         }
-        if (value instanceof Map) {
+        if (value instanceof Map<?, ?> matchedMap) {
             if (seen.put(value, Boolean.TRUE) != null) {
                 throw new IllegalArgumentException(
                           "Detected cyclic Cypher result");
             }
             Map<Object, Object> normalized = new LinkedHashMap<>();
             try {
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                for (Map.Entry<?, ?> entry : matchedMap.entrySet()) {
                     normalized.put(normalize(entry.getKey(), depth + 1, seen),
                                    normalize(entry.getValue(), depth + 1, seen));
                 }
@@ -167,14 +172,14 @@ public final class CypherClient {
             }
             return normalized;
         }
-        if (value instanceof Path) {
+        if (value instanceof Path matchedPath) {
             if (seen.put(value, Boolean.TRUE) != null) {
                 throw new IllegalArgumentException(
                           "Detected cyclic Cypher result");
             }
             Map<String, Object> normalized = new LinkedHashMap<>();
             try {
-                Path path = (Path) value;
+                Path path = matchedPath;
                 normalized.put("labels",
                                normalize(path.labels(), depth + 1, seen));
                 normalized.put("objects",
@@ -184,14 +189,14 @@ public final class CypherClient {
             }
             return normalized;
         }
-        if (value instanceof Iterable) {
+        if (value instanceof Iterable<?> iterable) {
             if (seen.put(value, Boolean.TRUE) != null) {
                 throw new IllegalArgumentException(
                           "Detected cyclic Cypher result");
             }
             List<Object> normalized = new LinkedList<>();
             try {
-                for (Object item : (Iterable<?>) value) {
+                for (Object item : iterable) {
                     normalized.add(normalize(item, depth + 1, seen));
                 }
             } finally {
@@ -228,6 +233,12 @@ public final class CypherClient {
      */
     private Configuration getConfig() {
         Configuration conf = this.configurationSupplier.get();
+        if (this.userName == null && this.token == null) {
+            // Anonymous queries must not inherit a service identity from the YAML file.
+            conf.clearProperty("username");
+            conf.clearProperty("password");
+            return conf;
+        }
         conf.addProperty("username", this.token == null ? this.userName : this.token);
         conf.addProperty("password", this.token == null ? this.password : "");
 

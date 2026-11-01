@@ -174,44 +174,62 @@ public class ScanBatchResponse3 {
         OrderDeliverer deliverer;
         boolean cancelled;
 
-        synchronized void deal(OrderWorker worker, OrderDeliverer deliverer) {
+        void deal(OrderWorker worker, OrderDeliverer deliverer) {
             if (log.isDebugEnabled()) {
                 log.debug("Receiving query request.");
             }
-            if (!this.cancelled && this.state == OrderState.NEW) {
-                this.worker = worker;
-                this.deliverer = deliverer;
-                this.worker.hereWeGo();
-                this.state = OrderState.WORKING;
+            boolean accepted;
+            synchronized (this) {
+                accepted = !this.cancelled && this.state == OrderState.NEW;
+                if (accepted) {
+                    this.worker = worker;
+                    this.deliverer = deliverer;
+                    this.state = OrderState.WORKING;
+                }
+            }
+            if (accepted) {
+                worker.hereWeGo();
             } else {
                 worker.closeIterator();
             }
         }
 
-        synchronized void receipt(int receiptTimes) {
+        void receipt(int receiptTimes) {
             if (log.isDebugEnabled()) {
                 log.debug("Receiving receipt request.");
             }
-            if (this.worker != null) {
-                this.worker.setReceipt(receiptTimes);
+            OrderWorker current;
+            synchronized (this) {
+                current = this.worker;
+            }
+            if (current != null) {
+                current.setReceipt(receiptTimes);
             }
         }
 
-        synchronized boolean inputCompleted() {
-            if (this.cancelled) {
-                return false;
+        boolean inputCompleted() {
+            OrderWorker current;
+            synchronized (this) {
+                if (this.cancelled) {
+                    return false;
+                }
+                current = this.worker;
+                if (current == null) {
+                    return true;
+                }
             }
-            if (this.worker == null) {
-                return true;
-            }
-            this.worker.inputCompleted();
+            current.inputCompleted();
             return false;
         }
 
-        synchronized void breakdown() {
-            this.cancelled = true;
-            if (this.worker != null) {
-                this.worker.breakdown();
+        void breakdown() {
+            OrderWorker current;
+            synchronized (this) {
+                this.cancelled = true;
+                current = this.worker;
+            }
+            if (current != null) {
+                current.breakdown();
             }
         }
     }

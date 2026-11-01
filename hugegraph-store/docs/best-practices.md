@@ -85,7 +85,7 @@ app:
 
 **JVM Settings**:
 ```bash
-JAVA_OPTS="-Xms32g -Xmx32g -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:G1ReservePercent=20"
+JAVA_OPTS="-Xms32g -Xmx32g -XX:MaxDirectMemorySize=2g -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:G1ReservePercent=20"
 ```
 
 ### PD Node Recommendations
@@ -252,6 +252,7 @@ store.rpc_timeout=30000            # 30 seconds
 ```bash
 JAVA_OPTS="
   -Xms32g -Xmx32g                   # Fixed heap size
+  -XX:MaxDirectMemorySize=2g        # Direct-memory cap; RocksDB auto-sizing counts it
   -XX:+UseG1GC                      # G1 garbage collector
   -XX:MaxGCPauseMillis=200          # Target pause time
   -XX:G1ReservePercent=20           # Reserve for to-space
@@ -267,6 +268,7 @@ JAVA_OPTS="
 ```bash
 JAVA_OPTS="
   -Xms32g -Xmx32g
+  -XX:MaxDirectMemorySize=2g        # Direct-memory cap; RocksDB auto-sizing counts it
   -XX:+UseZGC                       # ZGC (sub-10ms pauses)
   -XX:ZCollectionInterval=120       # GC interval (seconds)
   -XX:+UnlockDiagnosticVMOptions

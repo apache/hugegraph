@@ -44,7 +44,6 @@ env:
 jobs:
   build-server-riscv64:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     timeout-minutes: 90
 
     steps:

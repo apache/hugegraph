@@ -93,6 +93,10 @@ public class RaftStateMachine extends StateMachineAdapter {
         taskHandlers.add(handler);
     }
 
+    public void removeTaskHandler(RaftTaskHandler handler) {
+        taskHandlers.remove(handler);
+    }
+
     public void addStateListener(RaftStateListener listener) {
         stateListeners.add(listener);
     }
@@ -102,12 +106,28 @@ public class RaftStateMachine extends StateMachineAdapter {
     }
 
     /**
+     * The term jraft last announced this node as the leader of, -1 while it is not the leader
+     */
+    long getLeaderTerm() {
+        return this.leaderTerm.get();
+    }
+
+    /**
      * The last state and leader visibility a raft callback announced, as one immutable
      * view. jraft emits no callback for candidacy or leadership transfer, so a candidate
      * reads as a follower that sees no leader.
      */
     ProbeView getProbeView() {
         return this.probeView;
+    }
+
+    // Called only before starting a new node, after the previous node has joined.
+    void resetForNewNode() {
+        synchronized (this.callbackMonitor) {
+            this.leaderTerm.set(-1);
+            this.probeView = new ProbeView(State.STATE_UNINITIALIZED, false);
+            this.stoppingCallbacks = false;
+        }
     }
 
     @Override
@@ -203,6 +223,9 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     @Override
     public void onLeaderStart(final long term) {
+        if (isTerminal()) {
+            return;
+        }
         this.leaderTerm.set(term);
         this.probeView = new ProbeView(State.STATE_LEADER, true);
         super.onLeaderStart(term);
@@ -214,22 +237,27 @@ public class RaftStateMachine extends StateMachineAdapter {
     @Override
     public void onLeaderStop(final Status status) {
         this.leaderTerm.set(-1);
-        // TODO: keep STATE_ERROR set by onError instead of overwriting it with STATE_FOLLOWER, so
-        // the probe view, and with it /v1/ready, reports a PD that stepped down for good after a
-        // snapshot failure. /v1/health does not read this view; making it report the state is the
-        // separate TODO at StoreAPI.checkHealthy. The Helm chart (helm/hugegraph) works around both
-        // by deriving a single PD's startup and liveness probes to /v1/ready.
-        // https://github.com/apache/hugegraph/issues/3222
-        this.probeView = new ProbeView(State.STATE_FOLLOWER, false);
+        // JRaft steps down after reporting a fatal error. That callback does not recover the node.
+        if (!isTerminal()) {
+            this.probeView = new ProbeView(State.STATE_FOLLOWER, false);
+        }
         super.onLeaderStop(status);
         log.info("Raft  lost leader ");
     }
 
     @Override
     public void onStartFollowing(final LeaderChangeContext ctx) {
+        if (isTerminal()) {
+            return;
+        }
         this.probeView = new ProbeView(State.STATE_FOLLOWER, true);
         super.onStartFollowing(ctx);
         notifyStateListeners();
+    }
+
+    private boolean isTerminal() {
+        State state = this.probeView.state;
+        return state == State.STATE_ERROR || state == State.STATE_SHUTDOWN;
     }
 
     @Override
@@ -244,45 +272,59 @@ public class RaftStateMachine extends StateMachineAdapter {
         log.info("Raft  onConfigurationCommitted {}", conf);
     }
 
+    /**
+     * jraft calls this on the state machine thread, with the snapshot index set to the last
+     * applied index. The RocksDB checkpoint is taken here, before the thread applies the next
+     * entry: a checkpoint taken later holds entries past the snapshot index, and a node that
+     * installs the snapshot applies them a second time. Only the compression runs on the job
+     * thread. The state machine thread waits for the checkpoint, which is taken under the
+     * store's write lock: RocksDB flushes the memtable for it, copies the metadata files and
+     * hard-links the SST files, or copies them across filesystems. How long that pause is has
+     * not been measured.
+     */
     @Override
     public void onSnapshotSave(final SnapshotWriter writer, final Closure done) {
+        String snapshotDir = writer.getPath() + File.separator + SNAPSHOT_DIR_NAME;
+        lock.lock();
+        try {
+            log.info("start snapshot save");
+            try {
+                FileUtils.deleteDirectory(new File(snapshotDir));
+                FileUtils.forceMkdir(new File(snapshotDir));
+            } catch (IOException e) {
+                log.error("Failed to create snapshot directory {}", snapshotDir, e);
+                done.run(new Status(RaftError.EIO, e.toString()));
+                return;
+            }
+            for (RaftTaskHandler taskHandler : taskHandlers) {
+                try {
+                    KVOperation op = KVOperation.createSaveSnapshot(snapshotDir);
+                    taskHandler.invoke(op, null);
+                    log.info("Raft onSnapshotSave success");
+                } catch (PDException e) {
+                    log.error("Raft onSnapshotSave failed", e);
+                    done.run(new Status(RaftError.EIO, e.toString()));
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            log.error("failed to save snapshot", e);
+            done.run(new Status(RaftError.EIO, e.toString()));
+            return;
+        } finally {
+            lock.unlock();
+        }
+
         MetadataService.getUninterruptibleJobs().submit(() -> {
             lock.lock();
             try {
-                log.info("start snapshot save");
-                String snapshotDir = writer.getPath() + File.separator + SNAPSHOT_DIR_NAME;
-                try {
-                    FileUtils.deleteDirectory(new File(snapshotDir));
-                    FileUtils.forceMkdir(new File(snapshotDir));
-                } catch (IOException e) {
-                    log.error("Failed to create snapshot directory {}", snapshotDir);
-                    done.run(new Status(RaftError.EIO, e.toString()));
-                    return;
-                }
-                for (RaftTaskHandler taskHandler : taskHandlers) {
-                    try {
-                        KVOperation op = KVOperation.createSaveSnapshot(snapshotDir);
-                        taskHandler.invoke(op, null);
-                        log.info("Raft onSnapshotSave success");
-                    } catch (PDException e) {
-                        log.error("Raft onSnapshotSave failed. {}", e.toString());
-                        done.run(new Status(RaftError.EIO, e.toString()));
-                    }
-                }
                 // compress
-                try {
-                    compressSnapshot(writer);
-                    FileUtils.deleteDirectory(new File(snapshotDir));
-                } catch (Exception e) {
-                    log.error("Failed to delete snapshot directory {}, {}", snapshotDir,
-                              e.toString());
-                    done.run(new Status(RaftError.EIO, e.toString()));
-                    return;
-                }
+                compressSnapshot(writer);
+                FileUtils.deleteDirectory(new File(snapshotDir));
                 done.run(Status.OK());
                 log.info("snapshot save done");
             } catch (Exception e) {
-                log.error("failed to save snapshot", e);
+                log.error("Failed to compress snapshot directory {}", snapshotDir, e);
                 done.run(new Status(RaftError.EIO, e.toString()));
             } finally {
                 lock.unlock();
@@ -304,8 +346,10 @@ public class RaftStateMachine extends StateMachineAdapter {
             try {
                 decompressSnapshot(reader);
             } catch (PDException e) {
-                log.error("Failed to decompress snapshot directory {}, {}", snapshotDir, e.toString());
-                return true;
+                // false makes jraft fail the load. true would report the snapshot as
+                // installed and move the applied index to it, with none of its data loaded
+                log.error("Failed to decompress snapshot directory {}", snapshotDir, e);
+                return false;
             }
 
             CountDownLatch latch = new CountDownLatch(taskHandlers.size());

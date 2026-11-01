@@ -1,0 +1,125 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Exercise lookup against existing Secrets: template-only renders cannot
+# establish that an online no-change upgrade retains its signing identity.
+suite: Vermeer authentication survives online upgrades
+templates:
+  - vermeer-auth-secret.yaml
+  - vermeer-statefulset.yaml
+  - hubble-deployment.yaml
+set:
+  vermeer.enabled: true
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: other-hugegraph-pd
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: other
+          app.kubernetes.io/component: pd
+      spec:
+        replicas: "1"
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-vermeer-auth
+        namespace: NAMESPACE
+        resourceVersion: "41"
+      data:
+        token-factor: c3RlYWR5LXZlcm1lZXItZmFjdG9y
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: external-vermeer
+        namespace: NAMESPACE
+        resourceVersion: "17"
+      data:
+        factor-key: b3BlcmF0b3ItbWFuYWdlZC1mYWN0b3I=
+tests:
+  - it: reuses a generated signing factor from the live Secret
+    template: vermeer-auth-secret.yaml
+    asserts:
+      - equal:
+          path: data["token-factor"]
+          value: c3RlYWR5LXZlcm1lZXItZmFjdG9y
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+
+  - it: hashes the reused factor by value so a no-change upgrade does not roll Master
+    template: vermeer-statefulset.yaml
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-auth"]
+          value: 5b204ecdd8e8b41e3e2a969363a783f90f93310fb3bef1852d4741a81a28cbf9
+
+  - it: shares the same signing identity checksum with Hubble
+    template: hubble-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-auth"]
+          value: 5b204ecdd8e8b41e3e2a969363a783f90f93310fb3bef1852d4741a81a28cbf9
+
+  - it: keeps the same checksum when explicitly pinning the reused factor
+    template: vermeer-statefulset.yaml
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    set:
+      vermeer.auth.value: steady-vermeer-factor
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-auth"]
+          value: 5b204ecdd8e8b41e3e2a969363a783f90f93310fb3bef1852d4741a81a28cbf9
+
+  - it: does not manage an operator-supplied Secret
+    template: vermeer-auth-secret.yaml
+    set:
+      vermeer.auth.existingSecret: external-vermeer
+      vermeer.auth.key: factor-key
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: tracks the external Secret revision and ignores an unused inline factor
+    template: hubble-deployment.yaml
+    set:
+      vermeer.auth.existingSecret: external-vermeer
+      vermeer.auth.key: factor-key
+      vermeer.auth.value: unused-inline-factor
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-auth"]
+          value: 363adfb0852476240f5701d50037622bfad246079a77e5e11886fa33fc045de0

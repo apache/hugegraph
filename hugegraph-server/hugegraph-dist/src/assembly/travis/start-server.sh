@@ -42,6 +42,15 @@ function sed_in_place() {
     esac
 }
 
+# run-api-test.sh starts the Server twice on the same configuration, and a
+# key appended twice is read back as a list, so append each line only once
+function append_once() {
+    local line=$1
+    local file=$2
+
+    grep -qxF "$line" "$file" || echo "$line" >> "$file"
+}
+
 case "$BACKEND" in
     memory)
         SERIALIZER=text
@@ -64,18 +73,18 @@ write_property "$CONF" "serializer" "$SERIALIZER"
 
 # Set timeout for hbase
 if [ "$BACKEND" == "hbase" ]; then
-    echo "restserver.request_timeout=200" >> $REST_CONF
-    echo "gremlinserver.timeout=200" >> $REST_CONF
+    append_once "restserver.request_timeout=200" "$REST_CONF"
+    append_once "gremlinserver.timeout=200" "$REST_CONF"
     sed_in_place 's/evaluationTimeout.*/evaluationTimeout: 200000/' "$GREMLIN_CONF"
 fi
 
 # Set usePD=true for hstore
 if [ "$BACKEND" == "hstore" ]; then
-    echo "usePD=true" >> $REST_CONF
+    append_once "usePD=true" "$REST_CONF"
 fi
 
 # Append schema.sync_deletion=true to config file
-echo "schema.sync_deletion=true" >> $CONF
+append_once "schema.sync_deletion=true" "$CONF"
 
 JACOCO_OPTION=""
 if [ -n "$JACOCO_PORT" ]; then

@@ -1,0 +1,133 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Practical access notes
+templates:
+  - NOTES.txt
+tests:
+  - it: watches one resource type per command and links current operations docs
+    asserts:
+      - matchRegexRaw:
+          pattern: "kubectl get pods -n NAMESPACE -l app.kubernetes.io/instance=RELEASE-NAME -w"
+      - matchRegexRaw:
+          pattern: "kubectl get pvc -n NAMESPACE -w"
+      - notMatchRegexRaw:
+          pattern: "kubectl get pods,pvc.*-w"
+      - notMatchRegexRaw:
+          pattern: "see README"
+      - matchRegexRaw:
+          pattern: "helm/hugegraph/docs/operations.md#credentials"
+  - it: reports automatic NodePort discovery and seven claims
+    asserts:
+      - matchRegexRaw:
+          pattern: "needs 7 persistent volume claim"
+      - matchRegexRaw:
+          pattern: "kubectl get nodes -o wide"
+      - matchRegexRaw:
+          pattern: "http://<reachable-node-ip>:<nodePort>"
+      - notMatchRegexRaw:
+          pattern: "never expose"
+  - it: explains ClusterIP for strict mode
+    set:
+      mode: strict
+    asserts:
+      - matchRegexRaw:
+          pattern: "ClusterIP is reachable inside the cluster"
+  - it: shows LoadBalancer status discovery
+    set:
+      server.service.type: LoadBalancer
+    asserts:
+      - matchRegexRaw:
+          pattern: "status.loadBalancer.ingress"
+  - it: reports zero Hubble persistence after disabling the UI
+    set:
+      hubble.enabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: "needs 6 persistent volume claim"
+      - notMatchRegexRaw:
+          pattern: "Hubble  1 replica"
+  - it: uses HTTP for an ingress without TLS
+    set:
+      server.ingress.enabled: true
+      server.ingress.hosts: [{host: internal.example, paths: [{path: /, pathType: Prefix}]}]
+    asserts:
+      - matchRegexRaw:
+          pattern: "http://internal.example/"
+      - notMatchRegexRaw:
+          pattern: "https://internal.example/"
+  - it: uses HTTPS for the configured TLS host
+    set:
+      server.ingress.enabled: true
+      server.ingress.hosts: [{host: internal.example, paths: [{path: /, pathType: Prefix}]}]
+      server.ingress.tls: [{hosts: [internal.example], secretName: example-tls}]
+    asserts:
+      - matchRegexRaw:
+          pattern: "https://internal.example/"
+  - it: names a strict NodePort entry lacking an external policy rule without failing
+    set:
+      mode: strict
+      server.service.type: NodePort
+    asserts:
+      - matchRegexRaw:
+          pattern: "Server has an external entry, but NetworkPolicy has no external ingress rule"
+      - matchRegexRaw:
+          pattern: "Add networkPolicy.server.extraIngress"
+
+  - it: names a strict hostless Ingress lacking an external policy rule
+    set:
+      mode: strict
+      server.ingress.enabled: true
+    asserts:
+      - matchRegexRaw:
+          pattern: "Server has an external entry, but NetworkPolicy has no external ingress rule"
+
+  - it: accepts native allow-all rules without the missing-rule hint
+    set:
+      mode: strict
+      server.service.type: NodePort
+      server.ingress.enabled: true
+      networkPolicy.server.extraIngress: [{}]
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Server has an external entry, but NetworkPolicy has no external ingress rule"
+
+  - it: does not show policy advice when an explicit override disables policies
+    set:
+      mode: strict
+      server.service.type: NodePort
+      networkPolicy.enabled: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "NetworkPolicy has no external ingress rule"
+
+  - it: names the outside discovery egress setting for strict Hubble
+    set:
+      mode: strict
+      server.advertiseUrl: http://external.example:8080
+    asserts:
+      - matchRegexRaw:
+          pattern: "also add networkPolicy.hubble.extraEgress"
+  - it: names a strict ClusterIP with externalIPs lacking an external policy rule
+    set:
+      mode: strict
+      server.service.externalIPs: [192.0.2.10]
+    asserts:
+      - matchRegexRaw:
+          pattern: "Server has an external entry, but NetworkPolicy has no external ingress rule"
+      - matchRegexRaw:
+          pattern: "allows all sources and ports"

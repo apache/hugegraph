@@ -29,6 +29,12 @@ BIN=`abs_path`
 TOP="$(cd $BIN/../ && pwd)"
 CONF=$TOP/conf
 LIB=$TOP/lib
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
+
+if [[ ! -r "${JVM_MODULE_OPTIONS}" ]]; then
+    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >&2
+    exit 1
+fi
 
 . "${BIN}"/util.sh
 
@@ -52,5 +58,6 @@ echo "Dumping HugeGraph Store($conf)..."
 dump_store_ext_jar_path=$LIB/hugegraph-dist-*.jar
 for i in $LIB/*.jar; do dump_store_ext_jar_path=$dump_store_ext_jar_path:$i;  export dump_store_ext_jar_path; done
 source "$BIN/preload-topling.sh" || exit 1
-exec "$JAVA" -cp "${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}$dump_store_ext_jar_path" \
+exec "$JAVA" @"${JVM_MODULE_OPTIONS}" \
+-cp "${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}$dump_store_ext_jar_path" \
 org.apache.hugegraph.cmd.StoreDumper "$@"

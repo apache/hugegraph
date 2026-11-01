@@ -17,10 +17,12 @@
 
 package org.apache.hugegraph.pd.raft;
 
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.testutil.Whitebox;
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -50,32 +52,24 @@ public class RaftEngineReadinessTest {
 
     private static final PeerId LEADER = new PeerId("10.0.0.1", 8610);
 
-    private Node originalRaftNode;
-    private RaftStateMachine originalStateMachine;
-
+    private RaftEngine engine;
     private Node mockNode;
     private RaftStateMachine stateMachine;
 
     @Before
-    public void setUp() {
-        RaftEngine engine = RaftEngine.getInstance();
-        originalRaftNode = engine.getRaftNode();
-        originalStateMachine = Whitebox.getInternalState(engine, "stateMachine");
-
-        // A fresh machine so callbacks fired here reach no listeners other tests registered
+    public void setUp() throws Exception {
+        // Other suites leave scheduled tasks reading the shared engine. Keep this mock
+        // private to the test so their isLeader() calls cannot affect interaction checks.
+        engine = newEngine();
         mockNode = mock(Node.class);
-        stateMachine = new RaftStateMachine();
+        stateMachine = Whitebox.getInternalState(engine, "stateMachine");
         Whitebox.setInternalState(engine, "raftNode", mockNode);
-        Whitebox.setInternalState(engine, "stateMachine", stateMachine);
-        // The count is cached on the singleton, so clear what an earlier test published
-        engine.refreshAlivePeerCount();
     }
 
-    @After
-    public void tearDown() {
-        RaftEngine engine = RaftEngine.getInstance();
-        Whitebox.setInternalState(engine, "raftNode", originalRaftNode);
-        Whitebox.setInternalState(engine, "stateMachine", originalStateMachine);
+    private static RaftEngine newEngine() throws Exception {
+        Constructor<RaftEngine> constructor = RaftEngine.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
     }
 
     private static LeaderChangeContext ctx() {
@@ -84,8 +78,8 @@ public class RaftEngineReadinessTest {
 
     @Test
     public void testNotReadyBeforeRaftNodeStarts() {
-        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", null);
-        RaftEngine engine = RaftEngine.getInstance();
+        Whitebox.setInternalState(this.engine, "raftNode", null);
+        RaftEngine engine = this.engine;
         engine.refreshAlivePeerCount();
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
@@ -98,7 +92,7 @@ public class RaftEngineReadinessTest {
 
     @Test
     public void testStartedNodeWithoutAnyCallbackIsNotReady() {
-        RaftEngine.RaftStatus status = RaftEngine.getInstance().getRaftStatus();
+        RaftEngine.RaftStatus status = this.engine.getRaftStatus();
         Assert.assertFalse(status.isReady());
         Assert.assertEquals(State.STATE_UNINITIALIZED.name(), status.getState());
     }
@@ -108,7 +102,7 @@ public class RaftEngineReadinessTest {
         stateMachine.onLeaderStart(5);
         when(mockNode.listAlivePeers()).thenReturn(Arrays.asList(LEADER, new PeerId("b", 1),
                                                                  new PeerId("c", 1)));
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
         engine.refreshAlivePeerCount();
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
@@ -122,7 +116,7 @@ public class RaftEngineReadinessTest {
     @Test
     public void testFollowerWithLeaderIsReady() {
         stateMachine.onStartFollowing(ctx());
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
         engine.refreshAlivePeerCount();
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
@@ -139,7 +133,7 @@ public class RaftEngineReadinessTest {
         // The quorum-loss shape from the issue: heartbeats stop, jraft announces the loss
         stateMachine.onStartFollowing(ctx());
         stateMachine.onStopFollowing(ctx());
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
         Assert.assertFalse(status.isReady());
@@ -151,7 +145,7 @@ public class RaftEngineReadinessTest {
     public void testLeaderSteppingDownTurnsNotReady() {
         stateMachine.onLeaderStart(5);
         stateMachine.onLeaderStop(Status.OK());
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
         engine.refreshAlivePeerCount();
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
@@ -165,14 +159,14 @@ public class RaftEngineReadinessTest {
     public void testErrorAndShutdownAreNotReadyEvenAfterLeadership() {
         stateMachine.onLeaderStart(5);
         stateMachine.onError(mock(RaftException.class));
-        Assert.assertFalse(RaftEngine.getInstance().getRaftStatus().isReady());
+        Assert.assertFalse(this.engine.getRaftStatus().isReady());
         Assert.assertEquals(State.STATE_ERROR.name(),
-                            RaftEngine.getInstance().getRaftStatus().getState());
+                            this.engine.getRaftStatus().getState());
 
         stateMachine.onShutdown();
-        Assert.assertFalse(RaftEngine.getInstance().getRaftStatus().isReady());
+        Assert.assertFalse(this.engine.getRaftStatus().isReady());
         Assert.assertEquals(State.STATE_SHUTDOWN.name(),
-                            RaftEngine.getInstance().getRaftStatus().getState());
+                            this.engine.getRaftStatus().getState());
     }
 
     @Test
@@ -182,7 +176,7 @@ public class RaftEngineReadinessTest {
         // getAlivePeerCount() included: it reads what the refresher thread published
         stateMachine.onStartFollowing(ctx());
         stateMachine.onStopFollowing(ctx());
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
 
         engine.getRaftStatus();
         engine.hasLeader();
@@ -195,9 +189,9 @@ public class RaftEngineReadinessTest {
     public void testAlivePeerCountSurvivesLeadershipLossRace() {
         stateMachine.onLeaderStart(5);
         when(mockNode.listAlivePeers()).thenThrow(new IllegalStateException("Not leader"));
-        RaftEngine.getInstance().refreshAlivePeerCount();
+        this.engine.refreshAlivePeerCount();
 
-        Assert.assertEquals(-1, RaftEngine.getInstance().getAlivePeerCount());
+        Assert.assertEquals(-1, this.engine.getAlivePeerCount());
     }
 
     @Test
@@ -207,8 +201,8 @@ public class RaftEngineReadinessTest {
         // uninitialized, which would read as a PD that has not started yet
         stateMachine.onLeaderStart(5);
         stateMachine.onShutdown();
-        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", null);
-        RaftEngine engine = RaftEngine.getInstance();
+        Whitebox.setInternalState(this.engine, "raftNode", null);
+        RaftEngine engine = this.engine;
 
         RaftEngine.RaftStatus status = engine.getRaftStatus();
         Assert.assertFalse(status.isReady());
@@ -218,12 +212,28 @@ public class RaftEngineReadinessTest {
     }
 
     @Test
+    public void testNewNodeResetAllowsLeadershipAfterShutdown() throws Exception {
+        stateMachine.onLeaderStart(5);
+        stateMachine.onShutdown();
+        stateMachine.stopLeaderCallbacks();
+        CountDownLatch notified = new CountDownLatch(1);
+        stateMachine.addStateListener(notified::countDown);
+        stateMachine.resetForNewNode();
+        Assert.assertEquals(State.STATE_UNINITIALIZED.name(), engine.getRaftStatus().getState());
+        Assert.assertFalse(stateMachine.isLeader());
+        stateMachine.onLeaderStart(7);
+        Assert.assertEquals(State.STATE_LEADER.name(), engine.getRaftStatus().getState());
+        Assert.assertTrue(stateMachine.isLeader());
+        Assert.assertTrue(notified.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
     public void testAlivePeerCountStopsAfterALeaderErrorsOrShutsDown() {
         // The terminal callbacks clear the leader term, so the refresher stops reading the
         // count off a node that errored or shut down and the gauge falls back to NaN
         stateMachine.onLeaderStart(5);
         when(mockNode.listAlivePeers()).thenReturn(Arrays.asList(LEADER, new PeerId("b", 1)));
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
         engine.refreshAlivePeerCount();
         Assert.assertEquals(2, engine.getAlivePeerCount());
 
@@ -233,13 +243,13 @@ public class RaftEngineReadinessTest {
 
         stateMachine.onLeaderStart(6);
         engine.refreshAlivePeerCount();
-        Assert.assertEquals(2, engine.getAlivePeerCount());
+        Assert.assertEquals(-1, engine.getAlivePeerCount());
 
         stateMachine.onShutdown();
         engine.refreshAlivePeerCount();
         Assert.assertEquals(-1, engine.getAlivePeerCount());
-        // Twice, once per leader phase: the terminal states never reached the node
-        verify(mockNode, times(2)).listAlivePeers();
+        // Only the initial leader phase reads the node; queued starts cannot recover terminal state.
+        verify(mockNode, times(1)).listAlivePeers();
     }
 
     @Test
@@ -248,7 +258,7 @@ public class RaftEngineReadinessTest {
         // value: listAlivePeers takes the node read lock before it checks for leadership, so
         // a scrape that called it would wait out an election that holds the write lock
         stateMachine.onLeaderStart(5);
-        RaftEngine engine = RaftEngine.getInstance();
+        RaftEngine engine = this.engine;
 
         engine.getAlivePeerCount();
 

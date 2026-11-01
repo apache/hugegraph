@@ -18,3 +18,7 @@
 --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED
 --add-modules=jdk.unsupported
 --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+# HBasePlatformDependent reflects on java.nio.Bits.unaligned() during initialization.
+--add-opens=java.base/java.nio=ALL-UNNAMED
+# SOFA RPC ProviderInvoker reflects on Throwable.cause during initialization.
+--add-opens=java.base/java.lang=ALL-UNNAMED

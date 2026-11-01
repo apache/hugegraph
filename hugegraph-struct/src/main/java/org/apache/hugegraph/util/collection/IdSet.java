@@ -50,10 +50,9 @@ public class IdSet extends AbstractSet<Id> {
 
     @Override
     public boolean contains(Object object) {
-        if (!(object instanceof Id)) {
+        if (!(object instanceof Id id)) {
             return false;
         }
-        Id id = (Id) object;
         if (id.type() == Id.IdType.LONG) {
             return this.numberIds.contains(id.asLong());
         } else {

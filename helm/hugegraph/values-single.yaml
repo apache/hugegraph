@@ -44,3 +44,8 @@ server:
       autoGenerate: true
     token:
       autoGenerate: true
+
+# Optional computation follows this preset only when explicitly enabled.
+vermeer:
+  enabled: false
+  mode: standalone

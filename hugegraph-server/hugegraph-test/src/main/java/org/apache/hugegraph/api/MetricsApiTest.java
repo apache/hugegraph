@@ -18,7 +18,9 @@
 package org.apache.hugegraph.api;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.Test;
@@ -55,6 +57,14 @@ public class MetricsApiTest extends BaseApiTest {
                               result);
         Assert.assertContains(GREMLIN_CHANNEL_METRICS_PREFIX +
                               "write_pauses", result);
+
+        Set<String> typed = new HashSet<>();
+        for (String line : result.split("\n")) {
+            if (line.startsWith("# TYPE ")) {
+                String name = line.substring(7).split(" ")[0];
+                Assert.assertTrue(line, typed.add(name));
+            }
+        }
     }
 
     @Test
@@ -68,7 +78,12 @@ public class MetricsApiTest extends BaseApiTest {
     @Test
     public void testStatisticsMetricsPromAll() {
         Response r = client().get(STATISTICS_PATH);
-        assertResponseStatus(200, r);
+        String result = assertResponseStatus(200, r);
+        for (String line : result.split("\n")) {
+            if (!line.startsWith("#") && line.contains("{")) {
+                Assert.assertTrue(line, line.matches("\\S+\\{\\w+=\"[^\"]*\",} \\S+"));
+            }
+        }
     }
 
     @Test

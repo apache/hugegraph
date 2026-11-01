@@ -136,9 +136,9 @@ public class PropertyKey extends SchemaElement implements Propfiable {
         // runtime type expected by this property key's data type. Idempotent
         // for values already of the expected type.
         Object raw = value;
-        if (this.cardinality == Cardinality.SET && value instanceof Collection &&
+        if (this.cardinality == Cardinality.SET && value instanceof Collection<?> values &&
             !(value instanceof Set)) {
-            raw = new LinkedHashSet<>((Collection<?>) value);
+            raw = new LinkedHashSet<>(values);
         }
 
         return this.validValueOrThrow(raw);
@@ -154,40 +154,27 @@ public class PropertyKey extends SchemaElement implements Propfiable {
 
     public String clazz() {
         String dataType = this.dataType().clazz().getSimpleName();
-        switch (this.cardinality) {
-            case SINGLE:
-                return dataType;
+        return switch (this.cardinality) {
+            case SINGLE -> dataType;
             // A set of values: Set<DataType>
-            case SET:
-                return String.format("Set<%s>", dataType);
+            case SET -> String.format("Set<%s>", dataType);
             // A list of values: List<DataType>
-            case LIST:
-                return String.format("List<%s>", dataType);
-            default:
-                throw new AssertionError(String.format(
-                        "Unsupported cardinality: '%s'", this.cardinality));
-        }
+            case LIST -> String.format("List<%s>", dataType);
+            default -> throw new AssertionError(String.format(
+                    "Unsupported cardinality: '%s'", this.cardinality));
+        };
     }
 
     public Class<?> implementClazz() {
-        Class<?> cls;
-        switch (this.cardinality) {
-            case SINGLE:
-                cls = this.dataType().clazz();
-                break;
+        return switch (this.cardinality) {
+            case SINGLE -> this.dataType().clazz();
             // A set of values: Set<DataType>
-            case SET:
-                cls = LinkedHashSet.class;
-                break;
+            case SET -> LinkedHashSet.class;
             // A list of values: List<DataType>
-            case LIST:
-                cls = ArrayList.class;
-                break;
-            default:
-                throw new AssertionError(String.format(
+            case LIST -> ArrayList.class;
+            default -> throw new AssertionError(String.format(
                         "Unsupported cardinality: '%s'", this.cardinality));
-        }
-        return cls;
+        };
     }
 
     @SuppressWarnings("unchecked")
@@ -219,25 +206,13 @@ public class PropertyKey extends SchemaElement implements Propfiable {
      * otherwise false
      */
     public <V> boolean checkValueType(V value) {
-        boolean valid;
-
-        switch (this.cardinality) {
-            case SINGLE:
-                valid = this.checkDataType(value);
-                break;
-            case SET:
-                valid = value instanceof Set;
-                valid = valid && this.checkDataType((Set<?>) value);
-                break;
-            case LIST:
-                valid = value instanceof List;
-                valid = valid && this.checkDataType((List<?>) value);
-                break;
-            default:
-                throw new AssertionError(String.format(
+        return switch (this.cardinality) {
+            case SINGLE -> this.checkDataType(value);
+            case SET -> value instanceof Set<?> values && this.checkDataType(values);
+            case LIST -> value instanceof List<?> values && this.checkDataType(values);
+            default -> throw new AssertionError(String.format(
                         "Unsupported cardinality: '%s'", this.cardinality));
-        }
-        return valid;
+        };
     }
 
     /**

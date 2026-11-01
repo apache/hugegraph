@@ -120,14 +120,13 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
             throws OpProcessorException {
         Object query = message.getArgs().get(Tokens.ARGS_GREMLIN);
         String error = null;
-        if (!(query instanceof String) || ((String) query).isBlank()) {
+        if (!(query instanceof String text) || text.isBlank()) {
             error = "The Cypher query must be a nonblank string";
         } else if (message.getArgs().containsKey(Tokens.ARGS_BINDINGS)) {
             Object supplied = message.getArgs().get(Tokens.ARGS_BINDINGS);
-            if (!(supplied instanceof Map)) {
+            if (!(supplied instanceof Map<?, ?> bindings)) {
                 error = "Cypher bindings must be a map";
             } else {
-                Map<?, ?> bindings = (Map<?, ?>) supplied;
                 if (bindings.size() > this.maxParameters) {
                     error = "Cypher bindings exceed the maximum parameter count " + this.maxParameters;
                 } else {
@@ -165,10 +164,10 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
             if (RESERVED_NULL_VALUE.equals(value)) {
                 return true;
             }
-            if (value instanceof Map) {
-                pending.push(((Map<?, ?>) value).values().iterator());
-            } else if (value instanceof Collection) {
-                pending.push(((Collection<?>) value).iterator());
+            if (value instanceof Map<?, ?> matchedMap) {
+                pending.push(matchedMap.values().iterator());
+            } else if (value instanceof Collection<?> matchedCollection) {
+                pending.push(matchedCollection.iterator());
             }
         }
         return false;
@@ -200,6 +199,9 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         ProcedureContext procedureContext = ProcedureContext.global();
         CypherAst ast = CypherAst.parse(cypher, parameters, procedureContext.getSignatures());
         validateParameters(ast, parameters);
+        // The translator has no temporal functions; fold the supported
+        // constructors into bound values before it rejects them.
+        parameters = CypherTemporalFunctions.fold(ast, parameters);
 
         String translatorDefinition = getTranslatorDefinition(context);
 
@@ -216,7 +218,9 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         Seq<GremlinStep> ir = ast.translate(strTranslator.flavor(),
                                             strTranslator.features(), procedureContext);
 
-        String gremlin = TranslationWriter.write(ir, strTranslator, parameters);
+        Map<String, Object> explainParameters =
+                CypherTemporalFunctions.explainParameters(parameters);
+        String gremlin = TranslationWriter.write(ir, strTranslator, explainParameters);
         logger.trace("Gremlin: {}", gremlin);
 
         if (ast.getOptions().contains(EXPLAIN)) {
@@ -238,18 +242,18 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         pending.push(ast.statement());
         while (!pending.isEmpty()) {
             Object node = pending.pop();
-            if (node instanceof Parameter) {
-                String name = ((Parameter) node).name();
+            if (node instanceof Parameter matchedParameter) {
+                String name = matchedParameter.name();
                 if (!parameters.containsKey(name)) {
                     throw new IllegalArgumentException("Missing Cypher parameter: " + name);
                 }
                 continue;
             }
             scala.collection.Iterator<?> children;
-            if (node instanceof scala.collection.Iterable) {
-                children = ((scala.collection.Iterable<?>) node).iterator();
-            } else if (node instanceof Product) {
-                children = ((Product) node).productIterator();
+            if (node instanceof scala.collection.Iterable<?> iterable) {
+                children = iterable.iterator();
+            } else if (node instanceof Product product) {
+                children = product.productIterator();
             } else {
                 continue;
             }
@@ -286,8 +290,8 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         }
 
         TraversalSource traversalSource = graphManager.getTraversalSource(gAlias);
-        if (traversalSource instanceof GraphTraversalSource) {
-            return (GraphTraversalSource) traversalSource;
+        if (traversalSource instanceof GraphTraversalSource graphTraversalSource) {
+            return graphTraversalSource;
         }
 
         throw opProcessorException(msg, "Traversable alias '" + gAlias + "' not found");

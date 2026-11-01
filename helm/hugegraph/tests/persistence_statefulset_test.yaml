@@ -1,0 +1,116 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: PD and Store persistence inheritance
+templates:
+  - pd-statefulset.yaml
+  - store-statefulset.yaml
+tests:
+  - it: defaults to three persistent replicas per stateful component
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 1
+      - notExists:
+          path: spec.template.spec.volumes
+
+  - it: global temporary storage mounts emptyDir without PVC retention settings
+    set:
+      persistence.enabled: false
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - notExists:
+          path: spec.persistentVolumeClaimRetentionPolicy
+      - equal:
+          path: spec.template.spec.volumes[0].emptyDir
+          value: {}
+
+  - it: explicit component persistence wins over global temporary storage
+    set:
+      persistence.enabled: false
+      pd.storage.enabled: true
+      store.storage.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 1
+      - notExists:
+          path: spec.template.spec.volumes
+
+  - it: explicit component temporary storage wins over global persistence
+    set:
+      persistence.enabled: true
+      pd.storage.enabled: false
+      store.storage.enabled: false
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - equal:
+          path: spec.template.spec.volumes[0].emptyDir
+          value: {}
+
+  - it: empty storageClass inherits the Kubernetes default
+    set:
+      pd.storage.storageClassName: ""
+      store.storage.storageClassName: ""
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+
+  - it: dash storageClass explicitly disables the Kubernetes default
+    set:
+      pd.storage.storageClassName: "-"
+      store.storage.storageClassName: "-"
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: ""
+
+  - it: named storageClass is preserved
+    set:
+      pd.storage.storageClassName: internal-local
+      store.storage.storageClassName: internal-local
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: internal-local
+
+  - it: PD override leaves Store persistence inherited independently
+    template: store-statefulset.yaml
+    set:
+      persistence.enabled: true
+      pd.storage.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 1
+
+  - it: Store override leaves PD persistence inherited independently
+    template: pd-statefulset.yaml
+    set:
+      persistence.enabled: false
+      store.storage.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[0].emptyDir
+          value: {}
+      - notExists:
+          path: spec.volumeClaimTemplates

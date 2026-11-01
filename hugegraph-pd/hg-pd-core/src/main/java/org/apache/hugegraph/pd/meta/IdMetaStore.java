@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.store.KV;
 
 import com.caucho.hessian.io.Hessian2Input;
@@ -47,6 +48,8 @@ public class IdMetaStore extends MetadataRocksDBStore {
     private static final String SEPARATOR = "@";
     private static final ConcurrentHashMap<String, Object> SEQUENCES = new ConcurrentHashMap<>();
     public static long CID_DEL_TIMEOUT = 24 * 3600 * 1000;
+    // An allocation whose write was rejected for its term starts again this often at most
+    private static final int ALLOCATION_ATTEMPTS = 3;
     private final long clusterId;
 
     public IdMetaStore(PDConfig pdConfig) {
@@ -75,15 +78,48 @@ public class IdMetaStore extends MetadataRocksDBStore {
      * @throws PDException
      */
     public long getId(String key, int delta) throws PDException {
+        return inLeaderTerm(term -> allocateId(key, delta, term));
+    }
+
+    private long allocateId(String key, int delta, long term) throws PDException {
         Object probableLock = getLock(key);
         byte[] keyBs = (ID_PREFIX + key).getBytes(Charset.defaultCharset());
         synchronized (probableLock) {
             byte[] bs = getOne(keyBs);
             long current = bs != null ? bytesToLong(bs) : 0L;
             long next = current + delta;
-            put(keyBs, longToBytes(next));
+            getStore().put(keyBs, longToBytes(next), term);
             return current;
         }
+    }
+
+    /**
+     * Runs an allocation that reads local state and then writes through raft, as two steps
+     * and not one raft entry. The reads follow a ReadIndex wait: a leader elected a moment
+     * ago may not have applied its predecessor's last write yet, and would hand out the same
+     * id again. The writes carry the leader term of that wait: a request that pauses between
+     * its read and its write could otherwise write its stale result after this node lost the
+     * leadership and won it back, over what the leader in between allocated. jraft rejects
+     * such a write, and the allocation starts again from a fresh read.
+     */
+    private long inLeaderTerm(Allocation allocation) throws PDException {
+        for (int attempt = 1; ; attempt++) {
+            // Fails with NOT_LEADER when this node is not the leader, which ends the loop
+            long term = getStore().waitReadIndexInTerm();
+            try {
+                return allocation.run(term);
+            } catch (PDException e) {
+                if (e.getErrorCode() != Pdpb.ErrorType.NOT_LEADER_VALUE ||
+                    attempt >= ALLOCATION_ATTEMPTS) {
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private interface Allocation {
+
+        long run(long term) throws PDException;
     }
 
     private Object getLock(String key) {
@@ -119,6 +155,12 @@ public class IdMetaStore extends MetadataRocksDBStore {
      * @throws PDException
      */
     public long getCId(String key, String name, long max) throws PDException {
+        // The delayed-deletion slots are read locally like the counter in getId()
+        return inLeaderTerm(term -> allocateCId(key, name, max, term));
+    }
+
+    private long allocateCId(String key, String name, long max, long term)
+            throws PDException {
         // Check for expired cids to delete. The frequency of deleting graphs is relatively low,
         // so this has little performance impact.
         byte[] delKeyPrefix = new StringBuffer()
@@ -131,8 +173,8 @@ public class IdMetaStore extends MetadataRocksDBStore {
                 if (value.length >= 2) {
                     if (System.currentTimeMillis() - value[1] > CID_DEL_TIMEOUT) {
                         try {
-                            delCId(key, value[0]);
-                            remove(kv.getKey());
+                            getStore().remove(genCIDSlotKey(key, value[0]), term);
+                            getStore().remove(kv.getKey(), term);
                         } catch (Exception e) {
                             log.error("Exception ", e);
                         }
@@ -145,10 +187,11 @@ public class IdMetaStore extends MetadataRocksDBStore {
             byte[] value = getOne(cidDelayKey);
             if (value != null) {
                 // Remove from delayed deletion queue
-                remove(cidDelayKey);
+                getStore().remove(cidDelayKey, term);
                 return ((long[]) deserialize(value))[0];
             } else {
-                return getCId(key, max);
+                // In the term of the wait above, which covers the counter and slots too
+                return allocateCId(key, max, term);
             }
         }
     }
@@ -173,6 +216,11 @@ public class IdMetaStore extends MetadataRocksDBStore {
      * @throws PDException
      */
     public long getCId(String key, long max) throws PDException {
+        // Same two steps as getId(): read the counter and slots, then write through raft
+        return inLeaderTerm(term -> allocateCId(key, max, term));
+    }
+
+    private long allocateCId(String key, long max, long term) throws PDException {
         Object probableLock = getLock(key);
         byte[] keyBs = (CID_PREFIX + key).getBytes(Charset.defaultCharset());
         synchronized (probableLock) {
@@ -203,8 +251,8 @@ public class IdMetaStore extends MetadataRocksDBStore {
             if (current == last) {
                 return -1;
             }
-            put(genCIDSlotKey(key, current), longToBytes(current));
-            put(keyBs, longToBytes(current + 1));
+            getStore().put(genCIDSlotKey(key, current), longToBytes(current), term);
+            getStore().put(keyBs, longToBytes(current + 1), term);
             return current;
         }
     }
