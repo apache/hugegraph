@@ -291,6 +291,25 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
     }
 
     @Test
+    public void testMultiListProbesAdvancingSourceOncePerRow() {
+        MultiListIterator iterator = new MultiListIterator(List.of(
+                new AdvancingIterator(List.of(BackendColumn.of(new byte[]{1}, new byte[]{11}),
+                                              BackendColumn.of(new byte[]{2}, new byte[]{12}))),
+                new AdvancingIterator(List.of(BackendColumn.of(new byte[]{3}, new byte[]{13})))));
+
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.isValid());
+        assertEquals(1, (int) iterator.<BackendColumn>next().name[0]);
+        assertEquals(2, (int) iterator.<BackendColumn>next().name[0]);
+        assertTrue(iterator.hasNext());
+        assertEquals(3, (int) iterator.<BackendColumn>next().name[0]);
+        assertFalse(iterator.hasNext());
+        assertTrue(iterator.isValid());
+        assertThrows(NoSuchElementException.class, iterator::next);
+    }
+
+    @Test
     public void testMultiListCloseDuringIterationStopsProbingSources() {
         RowIterator first = singleRow(1);
         RowIterator second = singleRow(2);
@@ -512,6 +531,46 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
             if (this.closeError != null) {
                 throw this.closeError;
             }
+        }
+    }
+
+    /**
+     * models the dedup iterators before #3424: hasNext() pulls the next row and replaces
+     * the pending one, so a second hasNext() before next() skips a row
+     */
+    private static class AdvancingIterator implements ScanIterator {
+
+        private final Iterator<BackendColumn> rows;
+        private BackendColumn current;
+
+        private AdvancingIterator(List<BackendColumn> rows) {
+            this.rows = rows.iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            this.current = this.rows.hasNext() ? this.rows.next() : null;
+            return this.current != null;
+        }
+
+        @Override
+        public boolean isValid() {
+            return this.current != null;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public <T> T next() {
+            if (this.current == null) {
+                throw new NoSuchElementException();
+            }
+            BackendColumn row = this.current;
+            this.current = null;
+            return (T) row;
+        }
+
+        @Override
+        public void close() {
         }
     }
 }

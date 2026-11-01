@@ -50,6 +50,12 @@ public class MultiListIterator implements ScanIterator {
      */
     private boolean closed;
 
+    /**
+     * true when hasNext() found an element that next() has not returned yet, so the
+     * current sub-iterator is not probed again
+     */
+    private boolean prepared;
+
     public MultiListIterator() {
         this.iterators = new CopyOnWriteArrayList<>();
     }
@@ -106,8 +112,12 @@ public class MultiListIterator implements ScanIterator {
 
     @Override
     public boolean hasNext() {
+        if (this.prepared) {
+            return true;
+        }
         getInnerIterator();
-        return this.innerIterator != null;
+        this.prepared = this.innerIterator != null;
+        return this.prepared;
     }
 
     @Override
@@ -115,8 +125,7 @@ public class MultiListIterator implements ScanIterator {
         if (this.closed) {
             return false;
         }
-        getInnerIterator();
-        if (this.innerIterator != null) {
+        if (hasNext()) {
             return this.innerIterator.isValid();
         }
         return true;
@@ -131,6 +140,7 @@ public class MultiListIterator implements ScanIterator {
             return;
         }
         this.closed = true;
+        this.prepared = false;
         ScanIterator current = this.innerIterator;
         this.innerIterator = null;
         if (this.innerListIterator == null) {
@@ -174,6 +184,7 @@ public class MultiListIterator implements ScanIterator {
         if (!hasNext()) {
             throw new NoSuchElementException();
         }
+        this.prepared = false;
         return this.innerIterator.next();
     }
 
@@ -198,6 +209,7 @@ public class MultiListIterator implements ScanIterator {
             // range scan or prefix scan
             if (this.innerIterator instanceof MultiPartitionIterator) {
                 this.innerIterator.seek(position);
+                this.prepared = false;
             }
         }
     }
