@@ -509,10 +509,22 @@ or private compression plugins. Its 64 MiB cache and 16 MiB write buffers are
 individual native budgets, not a process memory limit. Budget for every database
 and column family and tune the profile for the deployment.
 
+With the tested community JNI, EasyMigrate applies these YAML values when the
+database opens, overriding the corresponding Java RocksDBOptions values.
+The observed settings are a 64 MiB block cache, 16 MiB write buffers and three
+write buffers; Java initializes the latter two to 128 MiB and six beforehand.
+Other JNI builds must be checked against their persisted OPTIONS files and
+`rocksdb.block-cache-capacity`; Java option getters before open do not establish
+the effective native settings.
+
 Custom profiles can require additional plugins in the chosen JNI. Preparation
 imports the selected profile to verify its plugins before installing the
 runtime. Existing data written with other table formats still requires those
 formats' readers; changing this default does not convert existing SST files.
+For existing CSPP installations, preserve the matching JNI and native options;
+`conf/toplingdb-legacy-cspp.yaml` retains the prior configuration and readers in
+Server, PD and Store distributions. Read the [Topling upgrade notes](upgrade-notes.md#topling-native-profiles)
+before applying the new profile or its smaller memory and compaction defaults.
 
 Use new, empty, service-writable data and WAL
 directories outside the distribution for this example.
@@ -584,6 +596,9 @@ probe validates the configuration entry point. A second native import validates
 `TOPLINGDB_EASY_MIGRATE_CONF` when set, otherwise the component's
 `conf/toplingdb.yaml`; unavailable plugins fail preparation before publication.
 It does not open databases using production WAL/log paths.
+Relative profile overrides are converted to absolute paths against the caller's
+working directory by both preparation and runtime selection, before the launcher
+changes directories. Use the same file for preparation and service startup.
 This is not an existing-data compatibility test or validation of every production
 column family. Keep an explicit profile override in the service environment too.
 The checksum receipt binds the capability probe to the

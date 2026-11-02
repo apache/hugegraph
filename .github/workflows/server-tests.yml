@@ -79,6 +79,8 @@ jobs:
           "$TRAVIS_DIR/test-wait-storage.sh"
           "$TRAVIS_DIR/test-start-server.sh"
           "$TRAVIS_DIR/test-riscv64-java-runtime.sh"
+          bash "$TRAVIS_DIR/test-topling-selection.sh"
+          bash "$TRAVIS_DIR/test-topling-prepare.sh"
           bash "$TRAVIS_DIR/test-tinkerpop-reports.sh"
 
       - name: Validate Docker integration

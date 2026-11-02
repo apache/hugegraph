@@ -28,7 +28,6 @@ import java.util.Set;
 import org.apache.hugegraph.api.BaseApiTest;
 import org.junit.Assert;
 import org.junit.Assume;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -53,8 +52,7 @@ public class ShardScanApiTest extends BaseApiTest {
         this.count = count;
     }
 
-    @Before
-    public void prepareData() {
+    private void prepareRocksDBData() {
         Assume.assumeTrue("Shard scan contract requires RocksDB",
                           "rocksdb".equals(System.getProperty("backend")));
         initPropertyKey();
@@ -90,6 +88,7 @@ public class ShardScanApiTest extends BaseApiTest {
 
     @Test
     public void testExplicitEmptyPageLimitsAndResumesScan() {
+        this.prepareRocksDBData();
         Map<String, Object> params = new HashMap<>();
         params.put("start", "");
         params.put("end", "");
@@ -115,6 +114,7 @@ public class ShardScanApiTest extends BaseApiTest {
 
     @Test
     public void testOmittedPageRetainsUnpagedContract() {
+        this.prepareRocksDBData();
         String content = assertResponseStatus(200, client().get(this.path,
                 ImmutableMap.of("start", "", "end", "", "page_limit", 2)));
         List<?> result = assertJsonContains(content, this.elements);

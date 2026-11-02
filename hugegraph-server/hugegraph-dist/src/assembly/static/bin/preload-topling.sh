@@ -83,9 +83,12 @@ topling_select_runtime() {
     conf="${TOPLINGDB_EASY_MIGRATE_CONF:-}"
     if [ -z "$conf" ]; then
         conf="$top/conf/toplingdb.yaml"
-        export TOPLING_AUTO_MIGRATE_CONF="$conf"
     fi
     [ -r "$conf" ] || { echo "Error: unreadable Easy Migrate configuration: $conf" >&2; return 1; }
+    conf="$(cd "$(dirname "$conf")" && pwd -P)/$(basename "$conf")" || return 1
+    if [ -z "${TOPLINGDB_EASY_MIGRATE_CONF:-}" ]; then
+        export TOPLING_AUTO_MIGRATE_CONF="$conf"
+    fi
     export TOPLINGDB_EASY_MIGRATE_CONF="$conf"
     export LD_LIBRARY_PATH="$top/topling${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     # The selected JNI must precede inherited preloads during native symbol lookup.

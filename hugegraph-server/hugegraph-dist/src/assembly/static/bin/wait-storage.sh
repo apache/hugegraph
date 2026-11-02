@@ -101,6 +101,14 @@ while IFS=' ' read -r envvar_key envvar_val; do
     fi
 done < <(env | sort -r | awk -F= '{ st = index($0, "="); print $1 " " substr($0, st+1) }')
 
+# A reused HStore configuration can retain pd.peers after switching to a local
+# backend. Only HStore depends on PD/Store registration for initialization.
+BACKEND=$(read_property "$GRAPH_CONF" backend | tr -d '[:space:]')
+if [[ "$BACKEND" != hstore ]]; then
+    log "Backend '$BACKEND' does not use PD/Store, skipping storage wait"
+    exit 0
+fi
+
 # wait for storage
 if env | grep '^hugegraph\.' > /dev/null; then
     if [ -n "${WAIT_STORAGE_TIMEOUT_S:-}" ]; then

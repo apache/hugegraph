@@ -116,8 +116,8 @@ public class VerticesAPI extends API {
         LOG.debug("Graph [{}] query vertices by shard(start: {}, end: {}, " +
                   "page: {}) ", graph, start, end, page);
 
-        E.checkArgument(start != null, "The start parameter is required (use an empty value for an open bound)");
-        E.checkArgument(end != null, "The end parameter is required (use an empty value for an open bound)");
+        E.checkArgument(start != null, "The start parameter is required (use a boundary returned by shards)");
+        E.checkArgument(end != null, "The end parameter is required (use a boundary returned by shards)");
 
         HugeGraph g = graph(manager, graphSpace, graph);
 

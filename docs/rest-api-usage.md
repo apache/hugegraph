@@ -37,9 +37,13 @@ before treating a `Could not rebind` response as a graph-registration failure.
 
 Both `GET .../traversers/vertices/scan` and `GET .../traversers/edges/scan`
 require `start` and `end`. Missing either parameter returns HTTP 400 with its
-name. An explicitly empty value is valid and represents an open bound. Use the
-boundaries returned by the corresponding `.../shards?split_size=1048576`
-request when exporting separate shards; their encoding depends on the backend.
+name on every backend. This also changes HStore and in-memory requests that
+previously interpreted missing bounds as zero; callers must now supply both.
+See the [upgrade notes](upgrade-notes.md#required-shard-scan-bounds).
+
+Empty strings represent open bounds in RocksDB and HBase. They do **not**
+represent a whole-graph range in HStore or the in-memory backend. The following
+example is for **RocksDB**:
 
 ```bash
 curl -G 'http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/traversers/vertices/scan' \
@@ -50,6 +54,14 @@ curl -G 'http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/traversers/v
 Pass `page=` explicitly for the first page, then URL-encode the returned `page`
 token on subsequent requests, keeping the same bounds. Stop when the returned
 token is null or empty. Edge scans use the same pagination contract.
+
+For HStore and in-memory exports, first request the corresponding
+`.../vertices/shards?split_size=1048576` or `.../edges/shards?split_size=1048576`.
+Iterate **every** returned shard, using its exact `start` and `end` and a fresh
+`page=` for each shard. Preserve the backend's boundary encoding; do not reuse
+vertex bounds for edges. An empty HStore range can stop after the partition
+containing hash zero, and an empty in-memory end can produce no results.
+A terminal page token finishes only that shard, not the entire graph.
 
 Omitting `page` retains the existing unpaged scan behavior: `page_limit` does
 not bound that response and the result has no continuation token. Exporters

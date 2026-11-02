@@ -310,7 +310,7 @@ CASE_OUTPUT=$(env \
     "${DIST_ROOT}/bin/wait-storage.sh" 2>&1)
 CASE_RC=$?
 assert_equal "no-PD topology rc" "0" "${CASE_RC}"
-assert_output "No pd.peers configured, skipping storage wait"
+assert_output "does not use PD/Store, skipping storage wait"
 [[ "${CASE_OUTPUT}" != *"PD_AUTH_PASSWORD is empty"* ]] || \
     fail "warned about an unused PD credential with no pd.peers configured"
 echo "  PASS no credential warning without pd.peers"
@@ -334,4 +334,23 @@ for storage_timeout in '' 0 -1 1.5 abc 86401 999999999999999999999; do
     echo "  PASS invalid timeout '${storage_timeout}'"
 done
 
-echo "20 passed, 0 failed"
+# A local backend override must ignore even the distributed image's active
+# pd.peers. A failed fix would reach curl or timeout before initialization.
+for backend in rocksdb memory hbase; do
+    cp "$SOURCE_BIN/../conf/graphs/hstore.properties.template" \
+       "$DIST_ROOT/conf/graphs/hugegraph.properties"
+    : > "$CALL_LOG"
+    : > "$TIMEOUT_LOG"
+    CASE_OUTPUT=$(env PATH="$MOCK_BIN:$PATH" \
+        MOCK_CALL_LOG="$CALL_LOG" MOCK_ARGS_LOG="$ARGS_LOG" \
+        MOCK_CONFIG_LOG="$CONFIG_LOG" MOCK_COUNT_FILE="$COUNT_FILE" \
+        MOCK_TIMEOUT_LOG="$TIMEOUT_LOG" MOCK_SCENARIO=auth-401 MOCK_ABORT_AFTER=1 \
+        WAIT_STORAGE_TIMEOUT_S=5 "hugegraph.backend=$backend" \
+        "$DIST_ROOT/bin/wait-storage.sh" 2>&1)
+    CASE_RC=$?
+    assert_equal "$backend ignores stale pd.peers" 0 "$CASE_RC"
+    [[ ! -s "$CALL_LOG" && ! -s "$TIMEOUT_LOG" ]] || fail "local backend contacted PD"
+    assert_output "does not use PD/Store, skipping storage wait"
+done
+
+echo "23 passed, 0 failed"

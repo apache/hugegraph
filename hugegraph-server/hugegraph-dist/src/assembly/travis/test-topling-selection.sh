@@ -106,6 +106,17 @@ for provider in unset rocksdb topling; do
         grep -q 'competing RocksDB JNI in LD_PRELOAD' "$TEST_ROOT/error"
     done
 done
+# Relative profile overrides must survive the launcher's later cd to TOP.
+PATH="$TEST_ROOT/fake-bin:$PATH" bash -ec '
+    unset TOPLING_ACTIVE_NATIVE TOPLING_RUNTIME_CLASSPATH TOPLING_AUTO_MIGRATE_CONF
+    export TOPLINGDB_ROCKSDB_PROVIDER=topling
+    cd "$1"
+    export TOPLINGDB_EASY_MIGRATE_CONF=server/conf/toplingdb.yaml
+    source "$1/server/bin/preload-topling.sh"
+    cd "$1/pd"
+    test "$TOPLINGDB_EASY_MIGRATE_CONF" = "$1/server/conf/toplingdb.yaml"
+    test -r "$TOPLINGDB_EASY_MIGRATE_CONF"
+' _ "$TEST_ROOT"
 # Older or modified preparations must be verified again before launch.
 for state in missing stale; do
     receipt="$TEST_ROOT/server/topling/easy-migrate.sha256"

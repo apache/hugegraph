@@ -32,6 +32,7 @@ TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 profile="${TOPLINGDB_EASY_MIGRATE_CONF:-$TOP/conf/toplingdb.yaml}"
 [ -r "$profile" ] || { echo 'Error: Topling configuration must be readable' >&2; exit 1; }
+profile="$(cd "$(dirname "$profile")" && pwd -P)/$(basename "$profile")"
 staging=$(mktemp -d "$TOP/.topling-prepare.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 cp "$TOPLING_JNI_JAR" "$staging/rocksdbjni.jar"
