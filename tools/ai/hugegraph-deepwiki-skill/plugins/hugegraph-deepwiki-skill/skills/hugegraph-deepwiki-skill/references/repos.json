@@ -1,0 +1,9 @@
+{
+  "hugegraph": {
+    "repoName": "apache/hugegraph",
+    "deepwiki": "https://deepwiki.com/apache/hugegraph",
+    "github": "https://github.com/apache/hugegraph",
+    "enabled": true,
+    "description": "Apache HugeGraph core graph database repository"
+  }
+}
