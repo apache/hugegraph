@@ -42,7 +42,11 @@ installation, set both `HG_SERVER_BACKEND=rocksdb` and
 `HG_SERVER_USE_PD=false`. Its template already uses `serializer=binary`.
 The entrypoint then configures local storage before the storage-wait step;
 non-HStore backends skip PD/Store polling even if the template retains
-`pd.peers`. Images containing this fix pre-create `rocksdb-data` owned by
+`pd.peers`. Backend selection accepts spaces around `=` as well as the ordinary
+colon/whitespace property separators, without requiring a backend environment
+override. Only recognized local backends bypass the wait; an unread or unknown
+backend cannot silently take that path.
+Images containing this fix pre-create `rocksdb-data` owned by
 10001:10001 so a fresh named volume inherits writable ownership.
 No graph configuration bind mount is needed. Older HStore images need a
 corrected writable graph configuration and data-directory ownership instead.

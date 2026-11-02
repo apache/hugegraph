@@ -61,7 +61,7 @@ TOPLING_JNI_SHA256=$(sha256sum "$TOPLING_JNI_JAR" | awk '{print $1}')
 export TOPLING_JNI_SHA256
 unset TOPLINGDB_EASY_MIGRATE_CONF
 
-for scenario in default invalid override relative; do
+for scenario in default invalid override relative cdpath symlink; do
     component="$test_root/$scenario"
     mkdir -p "$component/bin" "$component/conf"
     cp "$source_bin/prepare-topling.sh" "$component/bin/"
@@ -72,15 +72,29 @@ for scenario in default invalid override relative; do
     if [[ "$scenario" != default ]]; then
         printf '%s\n' 'missing-plugin' > "$component/conf/toplingdb.yaml"
     fi
-    if [[ "$scenario" == override || "$scenario" == relative ]]; then
+    if [[ "$scenario" == override || "$scenario" == relative ||
+          "$scenario" == cdpath || "$scenario" == symlink ]]; then
         printf '%s\n' 'http: {auto_start_http: false}' > "$component/custom.yaml"
         export TOPLINGDB_EASY_MIGRATE_CONF="$component/custom.yaml"
     fi
-    if [[ "$scenario" == relative ]]; then
+    if [[ "$scenario" == relative || "$scenario" == cdpath ]]; then
         export TOPLINGDB_EASY_MIGRATE_CONF="$scenario/custom.yaml"
     fi
+    if [[ "$scenario" == symlink ]]; then
+        mkdir -p "$component/physical/child"
+        ln -s "$component/physical/child" "$component/alias"
+        cp "$component/custom.yaml" "$component/physical/custom.yaml"
+        printf '%s\n' 'missing-plugin' > "$component/custom.yaml"
+        export TOPLINGDB_EASY_MIGRATE_CONF="$component/alias/../custom.yaml"
+    fi
+    script="$component/bin/prepare-topling.sh"
+    fixture_cdpath=""
+    if [[ "$scenario" == cdpath ]]; then
+        fixture_cdpath=.
+        script="$scenario/bin/prepare-topling.sh"
+    fi
     status=0
-    (cd "$test_root" && bash "$component/bin/prepare-topling.sh") > "$component/output" 2>&1 || status=$?
+    (cd "$test_root" && CDPATH="$fixture_cdpath" bash "$script") > "$component/output" 2>&1 || status=$?
     # Both the minimal capability and selected profile must be probed.
     [[ $(wc -l < "$PROBE_LOG") == 2 ]]
     capability=$(head -1 "$PROBE_LOG")
@@ -97,7 +111,10 @@ for scenario in default invalid override relative; do
         (cd "$component/topling" && sha256sum -c easy-migrate.sha256 >/dev/null)
         [[ ! -e "$component/topling/ToplingRuntimeProbe.java" ]]
         expected="${TOPLINGDB_EASY_MIGRATE_CONF:-$component/conf/toplingdb.yaml}"
-        [[ "$scenario" != relative ]] || expected="$component/custom.yaml"
+        case "$scenario" in
+            relative | cdpath) expected="$component/custom.yaml" ;;
+            symlink) expected="$component/physical/custom.yaml" ;;
+        esac
         [[ $(tail -1 "$PROBE_LOG") == "$expected" ]]
     fi
     [[ -z $(find "$component" -maxdepth 1 -name '.topling-prepare.*' -print -quit) ]]

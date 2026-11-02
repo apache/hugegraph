@@ -17,7 +17,7 @@
 #
 # Run only after stopping this component. Runtime preparation never changes data.
 set -Eeuo pipefail
-TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOP="$(CDPATH= cd -P -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ] || {
     echo 'Error: Topling requires Linux x86_64' >&2; exit 1;
 }
@@ -32,7 +32,7 @@ TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 profile="${TOPLINGDB_EASY_MIGRATE_CONF:-$TOP/conf/toplingdb.yaml}"
 [ -r "$profile" ] || { echo 'Error: Topling configuration must be readable' >&2; exit 1; }
-profile="$(cd "$(dirname "$profile")" && pwd -P)/$(basename "$profile")"
+profile="$(CDPATH= cd -P -- "$(dirname "$profile")" && pwd)/$(basename "$profile")"
 staging=$(mktemp -d "$TOP/.topling-prepare.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 cp "$TOPLING_JNI_JAR" "$staging/rocksdbjni.jar"

@@ -75,6 +75,7 @@ assert_contract() {
 run_case() {
     local scenario="$1" peers="$2" abort_after="$3" password="${4:-test-password}"
     local timeout_args=()
+    local backend_args=('hugegraph.backend=hstore')
     if [[ "$#" -ge 5 ]]; then
         timeout_args=("WAIT_STORAGE_TIMEOUT_S=$5")
     fi
@@ -83,9 +84,14 @@ run_case() {
     : > "${CONFIG_LOG}"
     : > "${COUNT_FILE}"
     : > "${TIMEOUT_LOG}"
-    : > "${DIST_ROOT}/conf/graphs/hugegraph.properties"
+    if [[ "$#" -ge 6 ]]; then
+        printf '%s\n' "$6" > "${DIST_ROOT}/conf/graphs/hugegraph.properties"
+        backend_args=()
+    else
+        : > "${DIST_ROOT}/conf/graphs/hugegraph.properties"
+    fi
 
-    CASE_OUTPUT=$(env -u WAIT_STORAGE_TIMEOUT_S \
+    CASE_OUTPUT=$(env -u WAIT_STORAGE_TIMEOUT_S -u hugegraph.backend \
         ${timeout_args[@]+"${timeout_args[@]}"} \
         PATH="${MOCK_BIN}:${PATH}" \
         MOCK_SCENARIO="${scenario}" \
@@ -98,7 +104,7 @@ run_case() {
         HG_SERVER_PD_REST_ENDPOINT="${peers}" \
         PD_AUTH_USER="test-user" \
         PD_AUTH_PASSWORD="${password}" \
-        'hugegraph.backend=hstore' \
+        ${backend_args[@]+"${backend_args[@]}"} \
         'hugegraph.pd.peers=config-only:8686' \
         "${DIST_ROOT}/bin/wait-storage.sh" 2>&1)
     CASE_RC=$?
@@ -334,11 +340,31 @@ for storage_timeout in '' 0 -1 1.5 abc 86401 999999999999999999999; do
     echo "  PASS invalid timeout '${storage_timeout}'"
 done
 
+# With only the PD-peer override, entrypoint leaves backend syntax untouched.
+# Exercise ready and unready stores without a backend override that could hide
+# the configured-property parsing bug.
+for property in 'backend = hstore' $' \tbackend\t=\thstore \t' \
+                'backend:hstore' 'backend hstore' \
+                $'# backend=memory\nbackend.other=rocksdb\nbackend=rocksdb\nbackend = hstore'; do
+    run_case "pd1-up" "pd0:8620,pd1:8620" 6 test-password 5 "$property"
+    assert_equal "configured HStore rc" 0 "$CASE_RC"
+    assert_equal "configured HStore polls both peers" "$TWO_CALLS" "$(cat "$CALL_LOG")"
+    assert_output "Store registration check PASSED via pd1:8620"
+    assert_contract 5
+
+    run_case "none" "pd0:8620,pd1:8620" 2 test-password 5 "$property"
+    [[ "$CASE_RC" -ne 0 ]] || fail "configured HStore proceeded before a Store was Up"
+    assert_output "ERROR: Timeout waiting for storage backend"
+    assert_contract 5
+done
+
 # A local backend override must ignore even the distributed image's active
 # pd.peers. A failed fix would reach curl or timeout before initialization.
 for backend in rocksdb memory hbase; do
     cp "$SOURCE_BIN/../conf/graphs/hstore.properties.template" \
-       "$DIST_ROOT/conf/graphs/hugegraph.properties"
+       "$DIST_ROOT/conf/graphs/hugegraph.properties" || fail "cannot copy the HStore graph template"
+    grep -Eq '^[[:blank:]]*pd[.]peers[[:blank:]]*=[[:blank:]]*[^[:space:]#]' \
+        "$DIST_ROOT/conf/graphs/hugegraph.properties" || fail "HStore fixture has no active pd.peers"
     : > "$CALL_LOG"
     : > "$TIMEOUT_LOG"
     CASE_OUTPUT=$(env PATH="$MOCK_BIN:$PATH" \
@@ -351,6 +377,10 @@ for backend in rocksdb memory hbase; do
     assert_equal "$backend ignores stale pd.peers" 0 "$CASE_RC"
     [[ ! -s "$CALL_LOG" && ! -s "$TIMEOUT_LOG" ]] || fail "local backend contacted PD"
     assert_output "does not use PD/Store, skipping storage wait"
+
+    run_case "auth-401" "pd0:8620,pd1:8620" 1 test-password 5 "backend = $backend"
+    assert_equal "configured $backend ignores PD" 0 "$CASE_RC"
+    [[ ! -s "$CALL_LOG" && ! -s "$TIMEOUT_LOG" ]] || fail "configured local backend contacted PD"
 done
 
-echo "23 passed, 0 failed"
+echo "36 passed, 0 failed"

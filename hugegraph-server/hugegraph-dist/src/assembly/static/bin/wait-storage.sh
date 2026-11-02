@@ -103,11 +103,26 @@ done < <(env | sort -r | awk -F= '{ st = index($0, "="); print $1 " " substr($0,
 
 # A reused HStore configuration can retain pd.peers after switching to a local
 # backend. Only HStore depends on PD/Store registration for initialization.
-BACKEND=$(read_property "$GRAPH_CONF" backend | tr -d '[:space:]')
-if [[ "$BACKEND" != hstore ]]; then
-    log "Backend '$BACKEND' does not use PD/Store, skipping storage wait"
-    exit 0
-fi
+# Accept the ordinary Java-properties separators (including whitespace before
+# '=') without relying on the backend environment override to normalize them.
+BACKEND=$(awk '
+    {
+        sub(/\r$/, "")
+        sub(/^[ \t\f]+/, "")
+        if ($0 !~ /^backend([ \t\f]*[:=]|[ \t\f]+|$)/) next
+        sub(/^backend[ \t\f]*([:=][ \t\f]*)?/, "")
+        sub(/[ \t\f]+$/, "")
+        backend = $0
+    }
+    END { print backend }
+' "$GRAPH_CONF")
+# Only a recognized local backend can bypass PD. An unrecognized property
+# must not silently turn a distributed deployment into a local-backend path.
+case "$BACKEND" in
+    rocksdb | memory | hbase)
+        log "Backend '$BACKEND' does not use PD/Store, skipping storage wait"
+        exit 0 ;;
+esac
 
 # wait for storage
 if env | grep '^hugegraph\.' > /dev/null; then

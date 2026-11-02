@@ -598,7 +598,9 @@ probe validates the configuration entry point. A second native import validates
 It does not open databases using production WAL/log paths.
 Relative profile overrides are converted to absolute paths against the caller's
 working directory by both preparation and runtime selection, before the launcher
-changes directories. Use the same file for preparation and service startup.
+changes directories. Resolution ignores `CDPATH` and follows physical directory
+semantics for symlinks combined with `..`, matching the file checked for readability.
+Use the same file for preparation and service startup.
 This is not an existing-data compatibility test or validation of every production
 column family. Keep an explicit profile override in the service environment too.
 The checksum receipt binds the capability probe to the
