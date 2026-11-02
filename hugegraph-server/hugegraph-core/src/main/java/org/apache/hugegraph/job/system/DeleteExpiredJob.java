@@ -59,8 +59,9 @@ public abstract class DeleteExpiredJob<T> extends EphemeralJob<T> {
                                       .schedule();
         } catch (Throwable e) {
             jobCounter.decrement();
-            if (e.getMessage().contains("Pending tasks size") &&
-                e.getMessage().contains("has exceeded the max limit")) {
+            String message = e.getMessage();
+            if (message != null && message.contains("Pending tasks size") &&
+                message.contains("has exceeded the max limit")) {
                 // Reach tasks limit, just ignore it
                 return;
             }

@@ -177,6 +177,9 @@ public class RaftKVStore implements HgKVStore, RaftTaskHandler {
 
     @Override
     public void close() {
+        // A store reopened after a failed start registers a new handler; this one must not
+        // keep receiving entries for a closed database
+        this.engine.removeTaskHandler(this);
         store.close();
     }
 
@@ -210,7 +213,7 @@ public class RaftKVStore implements HgKVStore, RaftTaskHandler {
             applyOperation(op, term).get();
         } catch (ExecutionException e) {
             // Keeps NOT_LEADER, which is how jraft's EPERM for another term arrives here
-            throw e.getCause() instanceof PDException ? (PDException) e.getCause() :
+            throw e.getCause() instanceof PDException failure ? failure :
                   new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

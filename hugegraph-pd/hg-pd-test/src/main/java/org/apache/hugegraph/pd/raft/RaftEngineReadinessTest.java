@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.raft;
 
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -56,13 +57,19 @@ public class RaftEngineReadinessTest {
     private RaftStateMachine stateMachine;
 
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         // Other suites leave scheduled tasks reading the shared engine. Keep this mock
         // private to the test so their isLeader() calls cannot affect interaction checks.
-        engine = new RaftEngine();
+        engine = newEngine();
         mockNode = mock(Node.class);
         stateMachine = Whitebox.getInternalState(engine, "stateMachine");
         Whitebox.setInternalState(engine, "raftNode", mockNode);
+    }
+
+    private static RaftEngine newEngine() throws Exception {
+        Constructor<RaftEngine> constructor = RaftEngine.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
     }
 
     private static LeaderChangeContext ctx() {

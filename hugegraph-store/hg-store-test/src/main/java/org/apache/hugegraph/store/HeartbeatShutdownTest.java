@@ -192,10 +192,10 @@ public class HeartbeatShutdownTest {
         options.setRaftPath(raft.toString());
         PdProvider provider = Mockito.mock(PdProvider.class);
         Metapb.Partition partition = Metapb.Partition.newBuilder().setId(1).setGraphName("graph").build();
-        Mockito.when(provider.getShardGroup(1)).thenReturn(Metapb.ShardGroup.newBuilder()
+        Mockito.when(provider.getShardGroupDirect(1)).thenReturn(Metapb.ShardGroup.newBuilder()
                 .setId(1).addShards(Metapb.Shard.newBuilder().setStoreId(2)
                                                        .setRole(Metapb.ShardRole.Leader)).build());
-        Mockito.when(provider.getPartitionByID("graph", 1)).thenReturn(new Partition(partition));
+        Mockito.when(provider.getPartitionByIDForRecovery("graph", 1)).thenReturn(new Partition(partition));
         Store remote = new Store();
         remote.setRaftAddress("127.0.0.1:8511");
         Mockito.when(provider.getStoreByID(2L)).thenReturn(remote);

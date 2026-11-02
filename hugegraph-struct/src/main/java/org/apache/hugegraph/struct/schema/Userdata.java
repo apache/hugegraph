@@ -70,10 +70,10 @@ public class Userdata extends HashMap<String, Object> {
      * fail before the eliminate path can apply its key-only semantics.
      */
     public static Object normalizeValue(String key, Object value) {
-        if (CREATE_TIME.equals(key) && value instanceof String &&
-            !((String) value).isEmpty()) {
+        if (CREATE_TIME.equals(key) && value instanceof String string &&
+            !string.isEmpty()) {
             try {
-                return DateUtil.parse((String) value);
+                return DateUtil.parse(string);
             } catch (RuntimeException e) {
                 throw new IllegalArgumentException(String.format(
                           "Invalid userdata '%s' value: '%s'",

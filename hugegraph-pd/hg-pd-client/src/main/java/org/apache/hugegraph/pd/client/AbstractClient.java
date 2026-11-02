@@ -275,8 +275,9 @@ public abstract class AbstractClient implements Closeable {
             } else {
                 log.error(method.getFullMethodName() + " exception, ", e);
             }
+            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                  "RPC blocking call failed: " + method.getFullMethodName(), e);
         }
-        return null;
     }
 
     // this.stubs = new ConcurrentHashMap<String,AbstractBlockingStub>(hosts.length);

@@ -63,7 +63,7 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object obj)
             throws Exception {
-        if (obj instanceof HttpMessage && !isWebSocket((HttpMessage) obj)) {
+        if (obj instanceof HttpMessage message && !isWebSocket(message)) {
             ChannelPipeline pipeline = ctx.pipeline();
             ChannelHandler authHandler = pipeline.get(HTTP_AUTH);
             if (authHandler != null) {
@@ -97,8 +97,7 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
-            if (msg instanceof FullHttpMessage) {
-                final FullHttpMessage request = (FullHttpMessage) msg;
+            if (msg instanceof final FullHttpMessage request) {
                 if (!request.headers().contains("Authorization")) {
                     sendError(ctx, msg);
                     return;

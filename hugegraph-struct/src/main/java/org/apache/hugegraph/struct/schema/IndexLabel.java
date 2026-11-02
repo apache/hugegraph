@@ -86,20 +86,16 @@ public class IndexLabel extends SchemaElement {
     }
 
     public HugeType queryType() {
-        switch (this.baseType) {
-            case VERTEX_LABEL:
-                return HugeType.VERTEX;
-            case EDGE_LABEL:
-                return HugeType.EDGE;
-            case SYS_SCHEMA:
-                return HugeType.SYS_SCHEMA;
-            default:
-                throw new AssertionError(String.format(
+        return switch (this.baseType) {
+            case VERTEX_LABEL -> HugeType.VERTEX;
+            case EDGE_LABEL -> HugeType.EDGE;
+            case SYS_SCHEMA -> HugeType.SYS_SCHEMA;
+            default -> throw new AssertionError(String.format(
                         "Query type of index label is either '%s' or '%s', " +
                         "but '%s' is used",
                         HugeType.VERTEX_LABEL, HugeType.EDGE_LABEL,
                         this.baseType));
-        }
+        };
     }
 
     public List<Id> indexFields() {
@@ -142,23 +138,16 @@ public class IndexLabel extends SchemaElement {
     }
 
     public Object validValue(Object value) {
-        if (!(value instanceof Number)) {
+        if (!(value instanceof Number number)) {
             return value;
         }
-
-        Number number = (Number) value;
-        switch (this.indexType()) {
-            case RANGE_INT:
-                return number.intValue();
-            case RANGE_LONG:
-                return number.longValue();
-            case RANGE_FLOAT:
-                return number.floatValue();
-            case RANGE_DOUBLE:
-                return number.doubleValue();
-            default:
-                return value;
-        }
+        return switch (this.indexType()) {
+            case RANGE_INT -> number.intValue();
+            case RANGE_LONG -> number.longValue();
+            case RANGE_FLOAT -> number.floatValue();
+            case RANGE_DOUBLE -> number.doubleValue();
+            default -> value;
+        };
     }
 
     // Label index
@@ -172,49 +161,31 @@ public class IndexLabel extends SchemaElement {
     private static final IndexLabel ILN_IL = new IndexLabel(ILN_IL_ID, "~ilni");
 
     public static IndexLabel label(HugeType type) {
-        switch (type) {
-            case TASK:
-            case SERVER:
-            case VERTEX:
-                return VL_IL;
-            case EDGE:
-            case EDGE_OUT:
-            case EDGE_IN:
-                return EL_IL;
-            case PROPERTY_KEY:
-                return PKN_IL;
-            case VERTEX_LABEL:
-                return VLN_IL;
-            case EDGE_LABEL:
-                return ELN_IL;
-            case INDEX_LABEL:
-                return ILN_IL;
-            default:
-                throw new AssertionError(String.format(
+        return switch (type) {
+            case TASK, SERVER, VERTEX -> VL_IL;
+            case EDGE, EDGE_OUT, EDGE_IN -> EL_IL;
+            case PROPERTY_KEY -> PKN_IL;
+            case VERTEX_LABEL -> VLN_IL;
+            case EDGE_LABEL -> ELN_IL;
+            case INDEX_LABEL -> ILN_IL;
+            default -> throw new AssertionError(String.format(
                         "No primitive index label for '%s'", type));
-        }
+        };
     }
 
     public static IndexLabel label(HugeGraphSupplier graph, Id id) {
         // Primitive IndexLabel first
         if (id.asLong() < 0 && id.asLong() > -NEXT_PRIMITIVE_SYS_ID) {
-            switch ((int) id.asLong()) {
-                case VL_IL_ID:
-                    return VL_IL;
-                case EL_IL_ID:
-                    return EL_IL;
-                case PKN_IL_ID:
-                    return PKN_IL;
-                case VLN_IL_ID:
-                    return VLN_IL;
-                case ELN_IL_ID:
-                    return ELN_IL;
-                case ILN_IL_ID:
-                    return ILN_IL;
-                default:
-                    throw new AssertionError(String.format(
+            return switch ((int) id.asLong()) {
+                case VL_IL_ID -> VL_IL;
+                case EL_IL_ID -> EL_IL;
+                case PKN_IL_ID -> PKN_IL;
+                case VLN_IL_ID -> VLN_IL;
+                case ELN_IL_ID -> ELN_IL;
+                case ILN_IL_ID -> ILN_IL;
+                default -> throw new AssertionError(String.format(
                             "No primitive index label for '%s'", id));
-            }
+            };
         }
         return graph.indexLabel(id);
     }

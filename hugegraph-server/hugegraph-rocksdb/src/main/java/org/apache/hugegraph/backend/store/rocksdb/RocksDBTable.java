@@ -135,8 +135,8 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         assert aggregate.func() == AggregateFunc.COUNT;
         assert query.noLimit();
         try (BackendColumnIterator results = this.queryBy(session, query)) {
-            if (results instanceof RocksDBSessions.Countable) {
-                return ((RocksDBSessions.Countable) results).count();
+            if (results instanceof RocksDBSessions.Countable countable) {
+                return countable.count();
             }
             return IteratorUtils.count(results);
         }
@@ -167,14 +167,12 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         }
 
         // Query by prefix
-        if (query instanceof IdPrefixQuery) {
-            IdPrefixQuery pq = (IdPrefixQuery) query;
+        if (query instanceof IdPrefixQuery pq) {
             return this.queryByPrefix(session, pq);
         }
 
         // Query by range
-        if (query instanceof IdRangeQuery) {
-            IdRangeQuery rq = (IdRangeQuery) query;
+        if (query instanceof IdRangeQuery rq) {
             return this.queryByRange(session, rq);
         }
 

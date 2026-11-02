@@ -162,11 +162,9 @@ public abstract class SchemaElement implements Namifiable, Typifiable,
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof SchemaElement)) {
+        if (!(obj instanceof SchemaElement other)) {
             return false;
         }
-
-        SchemaElement other = (SchemaElement) obj;
         return this.type() == other.type() && this.id.equals(other.id());
     }
 

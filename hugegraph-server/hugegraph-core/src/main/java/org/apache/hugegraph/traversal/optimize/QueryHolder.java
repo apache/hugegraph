@@ -35,8 +35,8 @@ public interface QueryHolder<S, E>
     @Override
     default Object metadata(String meta, Object... args) {
         Iterator<?> results = this.lastTimeResults();
-        if (results instanceof Metadatable) {
-            return ((Metadatable) results).metadata(meta, args);
+        if (results instanceof Metadatable metadatable) {
+            return metadatable.metadata(meta, args);
         }
         throw new IllegalStateException("Original results is not Metadatable");
     }

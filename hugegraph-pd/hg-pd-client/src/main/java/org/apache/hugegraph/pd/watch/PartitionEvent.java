@@ -79,16 +79,12 @@ public class PartitionEvent {
         DEL;
 
         public static ChangeType grpcTypeOf(WatchChangeType grpcType) {
-            switch (grpcType) {
-                case WATCH_CHANGE_TYPE_ADD:
-                    return ADD;
-                case WATCH_CHANGE_TYPE_ALTER:
-                    return ALTER;
-                case WATCH_CHANGE_TYPE_DEL:
-                    return DEL;
-                default:
-                    return UNKNOWN;
-            }
+            return switch (grpcType) {
+                case WATCH_CHANGE_TYPE_ADD -> ADD;
+                case WATCH_CHANGE_TYPE_ALTER -> ALTER;
+                case WATCH_CHANGE_TYPE_DEL -> DEL;
+                default -> UNKNOWN;
+            };
         }
     }
 }

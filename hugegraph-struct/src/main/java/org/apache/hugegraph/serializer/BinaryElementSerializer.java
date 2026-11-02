@@ -96,9 +96,9 @@ public class BinaryElementSerializer {
         Id elementId = index.elementId();
 
         Id ownerId = null;
-        if (elementId instanceof EdgeId) {
+        if (elementId instanceof EdgeId edgeId) {
             // Edge ID
-            ownerId = ((EdgeId) elementId).ownerVertexId();
+            ownerId = edgeId.ownerVertexId();
         } else {
             // OLAP index
             // Normal vertex index

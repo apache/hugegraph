@@ -104,11 +104,9 @@ public abstract class HugeProperty<V> implements Property<V>, GraphType {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof HugeProperty)) {
+        if (!(obj instanceof HugeProperty<?> other)) {
             return false;
         }
-
-        HugeProperty<?> other = (HugeProperty<?>) obj;
         return this.owner.equals(other.owner) && this.pkey.equals(other.pkey);
     }
 

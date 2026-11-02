@@ -39,10 +39,9 @@ public class TypeTransIterator<F, E> implements ScanIterator {
     private ScanIterator originalIterator;
     private Supplier<E> additionSupplier;
 
-    /**
-     * is used once. return supper. apply and set to true.
-     */
-    private boolean flag = false;
+    private boolean exhausted;
+    private boolean closed;
+    private Throwable closeFailure;
 
     private E data;
 
@@ -80,8 +79,14 @@ public class TypeTransIterator<F, E> implements ScanIterator {
 
     @Override
     public boolean hasNext() {
+        if (this.closed) {
+            return false;
+        }
         if (this.data != null) {
             return true;
+        }
+        if (this.exhausted) {
+            return false;
         }
 
         while (this.iterator.hasNext()) {
@@ -91,23 +96,22 @@ public class TypeTransIterator<F, E> implements ScanIterator {
             }
         }
 
-        // look up for the default supplier
-        if (this.additionSupplier != null && !this.flag) {
+        if (this.additionSupplier != null) {
             data = this.additionSupplier.get();
-            this.flag = true;
         }
+        this.exhausted = true;
 
         return data != null;
     }
 
     @Override
     public boolean isValid() {
-        return true;
+        return !this.closed;
     }
 
     @Override
     public <T> T next() {
-        if (this.data == null) {
+        if (!hasNext()) {
             throw new NoSuchElementException();
         }
         try {
@@ -120,8 +124,28 @@ public class TypeTransIterator<F, E> implements ScanIterator {
 
     @Override
     public void close() {
-        if (this.originalIterator != null) {
-            this.originalIterator.close();
+        if (!this.closed) {
+            this.closed = true;
+            this.data = null;
+            Object source = this.originalIterator == null ? this.iterator : this.originalIterator;
+            if (source instanceof AutoCloseable closeable) {
+                try {
+                    closeable.close();
+                } catch (RuntimeException | Error e) {
+                    this.closeFailure = e;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    this.closeFailure = new IllegalStateException("Interrupted while closing source iterator", e);
+                } catch (Exception e) {
+                    this.closeFailure = new IllegalStateException("Failed to close source iterator", e);
+                }
+            }
+        }
+        if (this.closeFailure instanceof RuntimeException failure) {
+            throw failure;
+        }
+        if (this.closeFailure instanceof Error failure) {
+            throw failure;
         }
     }
 
@@ -131,7 +155,7 @@ public class TypeTransIterator<F, E> implements ScanIterator {
                "name='" + name + '\'' +
                ", function=" + function +
                ", additionSupplier=" + additionSupplier +
-               ", flag=" + flag +
+               ", exhausted=" + exhausted +
                ", iterator=" + (originalIterator == null ? iterator : originalIterator) +
                '}';
     }
@@ -160,12 +184,12 @@ public class TypeTransIterator<F, E> implements ScanIterator {
 
         @Override
         public boolean isValid() {
-            return true;
+            return this.iterator.isValid();
         }
 
         @Override
         public void close() {
-
+            this.iterator.close();
         }
 
         @Override

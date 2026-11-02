@@ -81,7 +81,7 @@ partition:
   # The default total number of partitions
   default-total-count: 30
   # Default number of replicas per partition
-  default-shard-count: 3
+  default-shard-count: 1
 
 discovery:
   # After the client registers, the maximum number of heartbeats is not reached, and after that, the

@@ -633,9 +633,9 @@ public class BusinessHandlerImpl implements BusinessHandler {
                             var round2 = new MultiListIterator();
                             for (int i = 0; i < params.size(); i++) {
                                 var itr = sub.get(i);
-                                if (itr instanceof MapJoinIterator) {
+                                if (itr instanceof MapJoinIterator<?, ?> joinIterator) {
                                     // It's in memory, no need to recalculate
-                                    ((MapJoinIterator<?, ?>) itr).reset();
+                                    joinIterator.reset();
                                     round2.addIterator(itr);
                                 } else {
                                     round2.addIterator(

@@ -271,7 +271,8 @@ public final class Consumers<V> {
                     throw new StopExecution("Consumer stopped");
                 }
             } catch (InterruptedException e) {
-                LOG.warn("Interrupt while queuing QUEUE_END", e);
+                Thread.currentThread().interrupt();
+                throw e;
             }
         }
     }
@@ -284,6 +285,7 @@ public final class Consumers<V> {
                     // Stop wakes consumers through its state, without another END token.
                 }
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 LOG.warn("Interrupted while enqueue", e);
             }
         }
@@ -298,6 +300,7 @@ public final class Consumers<V> {
                 putQueueEnd();
                 this.latch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 String error = "Interrupted while waiting for consumers";
                 for (Future f : this.runningFutures) {
                     f.cancel(true);
@@ -372,11 +375,11 @@ public final class Consumers<V> {
     }
 
     public static RuntimeException wrapException(Throwable e) {
-        if (e instanceof RuntimeException) {
-            throw (RuntimeException) e;
+        if (e instanceof RuntimeException runtimeException) {
+            throw runtimeException;
         }
-        throw new HugeException("Error when running task: %s",
-                                HugeException.rootCause(e).getMessage(), e);
+        throw new HugeException("Error when running task: %s", e,
+                                HugeException.rootCause(e).getMessage());
     }
 
     public static class ExecutorPool {

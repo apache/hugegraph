@@ -229,9 +229,9 @@ public abstract class SchemaDefine {
 
         //FIXME: Unify the date format instead of using this method
         private Date parseFlexibleDate(Object value) throws ParseException {
-            if (value instanceof Date) {
+            if (value instanceof Date matchedDate) {
                 // If it's already a Date object, return it directly
-                return (Date) value;
+                return matchedDate;
             }
 
             String dateStr = value.toString();

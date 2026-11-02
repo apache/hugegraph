@@ -335,9 +335,9 @@ public class EdgeAPI extends BatchAPI {
         // Convert relational operator like P.gt()/P.lt()
         for (Map.Entry<String, Object> prop : props.entrySet()) {
             Object value = prop.getValue();
-            if (!keepStartP && value instanceof String &&
-                ((String) value).startsWith(TraversalUtil.P_CALL)) {
-                prop.setValue(TraversalUtil.parsePredicate((String) value));
+            if (!keepStartP && value instanceof String text &&
+                text.startsWith(TraversalUtil.P_CALL)) {
+                prop.setValue(TraversalUtil.parsePredicate(text));
             }
         }
 

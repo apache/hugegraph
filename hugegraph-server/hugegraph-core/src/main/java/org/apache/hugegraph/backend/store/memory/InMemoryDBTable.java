@@ -163,14 +163,12 @@ public class InMemoryDBTable extends BackendTable<BackendSession,
 
         Map<Id, BackendEntry> rs = this.store;
 
-        if (query instanceof IdPrefixQuery) {
-            IdPrefixQuery pq = (IdPrefixQuery) query;
+        if (query instanceof IdPrefixQuery pq) {
             rs = this.queryByIdPrefix(pq.start(), pq.inclusiveStart(),
                                       pq.prefix(), rs);
         }
 
-        if (query instanceof IdRangeQuery) {
-            IdRangeQuery rq = (IdRangeQuery) query;
+        if (query instanceof IdRangeQuery rq) {
             rs = this.queryByIdRange(rq.start(), rq.inclusiveStart(),
                                      rq.end(), rq.inclusiveEnd(), rs);
         }
@@ -313,11 +311,9 @@ public class InMemoryDBTable extends BackendTable<BackendSession,
         TextBackendEntry entry = (TextBackendEntry) item;
 
         // Not supported by memory
-        if (!(c instanceof Condition.Relation)) {
+        if (!(c instanceof Condition.Relation r)) {
             throw new BackendException("Unsupported condition: " + c);
         }
-
-        Condition.Relation r = (Condition.Relation) c;
         String key = r.serialKey().toString();
 
         // TODO: deal with others Relation like: <, >=, ...

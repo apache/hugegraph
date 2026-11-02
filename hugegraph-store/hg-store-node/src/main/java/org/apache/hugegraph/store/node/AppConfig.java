@@ -38,6 +38,7 @@ import org.apache.hugegraph.store.node.cloud.CloudUploadRetryQueue;
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.apache.hugegraph.store.cloud.CloudStorageProvider;
 import org.apache.hugegraph.store.options.JobOptions;
+import org.apache.hugegraph.store.options.RocksdbMemoryBudget;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -144,20 +145,15 @@ public class AppConfig {
         }
 
         Map<String, String> rocksdb = rocksdbConfig.rocksdb;
-        if (!rocksdb.containsKey("total_memory_size")
-            || "0".equals(rocksdb.get("total_memory_size"))) {
-            rocksdb.put("total_memory_size", Long.toString(rt.maxMemory()));
-        }
-        long totalMemory = Long.parseLong(rocksdbConfig.rocksdb.get("total_memory_size"));
+        long totalMemory = RocksdbMemoryBudget.resolve(rocksdb.get(RocksdbMemoryBudget.KEY));
+        rocksdb.put(RocksdbMemoryBudget.KEY, Long.toString(totalMemory));
         if (raft.getDisruptorBufferSize() == 0) {
-            int size = (int) (totalMemory / 1000 / 1000 / 1000);
-            size = (int) Math.pow(2, Math.round(Math.log(size) / Math.log(2))) * 32;
-            raft.setDisruptorBufferSize(size); // Increase one buffer every 32M
+            raft.setDisruptorBufferSize(disruptorBufferSize(totalMemory));
         }
 
         if (!rocksdb.containsKey("write_buffer_size") ||
             "0".equals(rocksdb.get("write_buffer_size"))) {
-            rocksdb.put("write_buffer_size", Long.toString(totalMemory / 1000));
+            rocksdb.put("write_buffer_size", Long.toString(writeBufferSize(totalMemory)));
         }
 
         // ---- Cloud storage initialization ----
@@ -454,6 +450,25 @@ public class AppConfig {
         }
     }
 
+    /**
+     * The raft disruptor buffer size when raft.disruptorBufferSize is 0: one buffer every
+     * 32M, from the RocksDB budget in GB, at least 1, rounded to a power of two.
+     */
+    static int disruptorBufferSize(long totalMemory) {
+        // A budget under 1 GB would otherwise give log(0) and a zero-sized buffer
+        int size = (int) Math.max(1, totalMemory / 1000 / 1000 / 1000);
+        return (int) Math.pow(2, Math.round(Math.log(size) / Math.log(2))) * 32;
+    }
+
+    /**
+     * The write_buffer_size when the key is unset or 0: a thousandth of the RocksDB budget,
+     * but never below the 1 MiB rocksdb.write_buffer_size accepts, which a budget under
+     * 1 GiB would otherwise fall under.
+     */
+    static long writeBufferSize(long totalMemory) {
+        return Math.max(totalMemory / 1000, 1024L * 1024L);
+    }
+
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
@@ -526,7 +541,7 @@ public class AppConfig {
         private double aveLogEntrySizeRation;
         @Value("${raft.useRocksDBSegmentLogStorage:true}")
         private boolean useRocksDBSegmentLogStorage;
-        @Value("${raft.maxSegmentFileSize:67108864}")
+        @Value("${raft.maxSegmentFileSize:${jraft.log_storage.segment.max.size.bytes:1073741824}}")
         private int maxSegmentFileSize;
         @Value("${raft.maxReplicatorInflightMsgs:256}")
         private int maxReplicatorInflightMsgs;

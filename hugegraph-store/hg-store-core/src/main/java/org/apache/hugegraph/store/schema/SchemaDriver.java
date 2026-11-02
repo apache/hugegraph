@@ -259,7 +259,7 @@ public class SchemaDriver {
         }
         try {
             Object graph = fromJson(payload, Map.class).get("graph");
-            return graph instanceof String && !((String) graph).isEmpty() ? (String) graph : null;
+            return graph instanceof String name && !name.isEmpty() ? name : null;
         } catch (HugeException e) {
             log.warn("Ignoring malformed schema cache clear event", e);
             return null;
@@ -812,25 +812,14 @@ public class SchemaDriver {
     }
 
     private String hugeType2MetaPath(HugeType type) {
-        String schemaType = null;
-        switch (type) {
-            case PROPERTY_KEY:
-                schemaType = META_PATH_PROPERTY_KEY;
-                break;
-            case VERTEX_LABEL:
-                schemaType = META_PATH_VERTEX_LABEL;
-                break;
-            case EDGE_LABEL:
-                schemaType = META_PATH_EDGE_LABEL;
-                break;
-            case INDEX_LABEL:
-                schemaType = META_PATH_INDEX_LABEL;
-                break;
-            default:
-                throw new AssertionError(String.format(
-                        "Invalid HugeType : %s", type));
-        }
-        return schemaType;
+        return switch (type) {
+            case PROPERTY_KEY -> META_PATH_PROPERTY_KEY;
+            case VERTEX_LABEL -> META_PATH_VERTEX_LABEL;
+            case EDGE_LABEL -> META_PATH_EDGE_LABEL;
+            case INDEX_LABEL -> META_PATH_INDEX_LABEL;
+            default -> throw new AssertionError(String.format(
+                    "Invalid HugeType : %s", type));
+        };
     }
 
     private static String stringJoin(String delimiter, String... parts) {

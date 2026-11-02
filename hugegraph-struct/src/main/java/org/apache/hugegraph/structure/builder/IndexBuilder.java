@@ -339,6 +339,6 @@ public class IndexBuilder {
     }
 
     public static String propertyValueToString(Object value) {
-        return value instanceof Collection ? StringUtils.join((Iterable<?>) value, " ") : value.toString();
+        return value instanceof Collection<?> values ? StringUtils.join(values, " ") : value.toString();
     }
 }

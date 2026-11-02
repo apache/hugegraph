@@ -334,6 +334,7 @@ raft:
   address: 192.168.1.20:8510            # Raft RPC address
   snapshotInterval: 1800                # Snapshot interval (seconds)
   disruptorBufferSize: 1024             # Raft log buffer
+  maxSegmentFileSize: 1073741824        # 1 GiB per new segment log file
   max-log-file-size: 10737418240        # Max log file: 10GB
 
 # Data Storage
@@ -342,12 +343,43 @@ app:
   fake-pd: false                        # Use real PD cluster
 ```
 
+With `raft.useRocksDBSegmentLogStorage=true` (the default),
+`raft.maxSegmentFileSize` controls newly allocated segment files. The default is
+1 GiB, preserving the effective size used before this setting was connected to
+the log storage factory. Previously declared 64 MiB defaults were ignored; an
+explicit 64 MiB value now takes effect. For a small development cluster,
+`16777216` selects 16 MiB. An explicit `raft.maxSegmentFileSize` takes priority;
+when it is unset, the existing `-Djraft.log_storage.segment.max.size.bytes`
+system property remains a fallback, followed by 1 GiB if neither is set. The
+distribution's default placeholder preserves this fallback too.
+Existing segments containing logs retain their original size and remain readable after
+this setting changes. On restart, an incompatible **blank preallocated** segment is
+atomically renamed to `<sequence>.s.blank-<old-size>-<unique-id>` before JRaft loads its
+allocation pool. JRaft then allocates blank segments at the configured size. This also
+avoids a write failure after increasing the size when an entry fits the new limit but
+does not fit an old blank segment. No nonempty segment is renamed or resized.
+
+Blank detection follows JRaft 1.3.x's segment header format and runs after RocksDB has
+acquired the log directory lock, before segment mapping and background allocation.
+Unknown or incomplete headers are retained and fail startup with a diagnostic when
+their size differs; the code does not guess that sparse or zero-filled files are empty.
+Recheck this compatibility handling when upgrading JRaft. Renamed files are retained
+for diagnosis and are outside JRaft's normal log retention. Renaming does not reclaim
+their allocated blocks; review them during offline maintenance before deleting them.
+Keep the configured size larger than the largest encoded Raft entry, including
+entries that a newly added Store must receive. Reading an existing large segment
+does not make a smaller segment large enough for new writes or replica catch-up.
+The limit is per segment, not a limit on total Raft log or database disk usage.
+Segment files may be sparse: compare allocated filesystem blocks with apparent
+file sizes when investigating disk consumption, and allow space for RocksDB WAL,
+snapshots, compaction and container images as well.
+
 File: `hugegraph-store/conf/application-pd.yml` (RocksDB tuning)
 
 ```yaml
 rocksdb:
   # Memory Configuration
-  total_memory_size: 32000000000        # Total memory for RocksDB (32GB)
+  total_memory_size: auto               # Off-heap RocksDB budget: auto or bytes
   write_buffer_size: 134217728          # Memtable size (128MB)
   max_write_buffer_number: 6            # Max memtables
   min_write_buffer_number_to_merge: 2   # Min memtables to merge
@@ -356,13 +388,86 @@ rocksdb:
   level0_file_num_compaction_trigger: 4
   max_background_jobs: 8                # Background compaction/flush threads
 
-  # Block Cache
-  block_cache_size: 16000000000         # Block cache (16GB)
+  # Budget split: this share goes to memtables, the rest to the block cache
+  write_buffer_ratio: 0.66
 
   # SST File Size
   target_file_size_base: 134217728      # Target SST size (128MB)
   max_bytes_for_level_base: 1073741824  # L1 size (1GB)
 ```
+
+`total_memory_size` bounds the memtables (`write_buffer_ratio` of it) and the block cache
+(the rest). Both live outside the Java heap, so `-Xmx` does not limit them. A fixed 1 GiB
+cache for the Raft log comes on top of this budget; the Raft log memtables of all partitions
+share a 256 MiB write buffer charged to that cache, so they don't add to it.
+
+With `total_memory_size: auto` (the shipped value; a missing, blank or `0` value means the same)
+the Store sizes the budget at startup as half of what is left after the heap, the maximum direct
+memory and a 1.5 GiB reserve (the 1 GiB Raft log cache plus 512 MiB for other native memory),
+clamped to 256 MiB–32 GB. Inside a container the starting point is the cgroup memory limit, including a
+limit set only on a parent cgroup when the Store can see that cgroup; inside a private cgroup
+namespace, or when only a subtree of the cgroup2 hierarchy is mounted, a limit above it is not
+visible, so pin the value there if only the pod or slice is limited. The Store uses the lowest
+limit it can see and logs a warning when it can't see the whole hierarchy; it doesn't guess at
+limits it can't read. A Store with a 4 GiB limit, `-Xmx1g` and `-XX:MaxDirectMemorySize=512m`
+gets 512 MiB. Without
+`-XX:MaxDirectMemorySize` the JVM allows as much direct memory as heap, and the budget counts
+it that way. `bin/start-hugegraph-store.sh` sets the flag to the heap it picks; when `-j` sets
+`-Xmx`, `-XX:MaxHeapSize` or `-XX:MaxDirectMemorySize` itself, or `JAVA_TOOL_OPTIONS` or
+`JDK_JAVA_OPTIONS` sets `-XX:MaxDirectMemorySize`, the launcher leaves the flag out and the JVM's
+default (that heap) or the given cap applies. Either way the budget counts a limit the JVM
+enforces. In small containers set a
+cap below the heap, or the budget falls to the 256 MiB floor.
+
+On a host without a container limit the starting point is physical memory. The default
+`bin/start-hugegraph-store.sh` caps the heap at 2 GiB and direct memory at the same 2 GiB, so a
+16 GiB host gets about 5.25 GiB. When you raise the heap, pass a direct-memory cap with it,
+for example `-j "-Xmx36g -XX:MaxDirectMemorySize=2g"`; otherwise direct memory counts as a
+second heap. With a 2 GiB cap a 16 GiB host with `-Xmx8g` gets 2.25 GiB and a 64 GiB host with
+`-Xmx36g` gets 12.25 GiB. Before this default every host got a fixed `32000000000`, so pin the
+value after upgrading if a large node relied on it.
+
+At startup the Store logs the budget and what it was computed from, for example:
+
+```text
+RocksDB memory budget: 512 MiB (536870912 bytes), mode=auto, physical-limit=4 GiB, source=cgroup-v2, heap=1 GiB, direct=512 MiB, reserve=1.5 GiB, cgroup-view=complete
+```
+
+It warns when the floor applies, or when an explicit value is under 256 MiB or exceeds the
+memory left after the heap, direct memory and the reserve. Set a number of bytes, at least
+1048576 (1 MiB), to pin the budget; a smaller value or a unit suffix such as `4GB` is rejected. Before this default existed the
+shipped value was `32000000000`, which can exceed a container limit and get the Store
+OOM-killed. Both caps are soft: RocksDB can briefly go over them under heavy writes, and a
+small budget with many partitions means frequent memtable flushes.
+
+**Upgrading an existing deployment.** Auto-sizing applies only when the loaded configuration
+has `total_memory_size: auto` (or `0`, or no value). A Store that mounts its own `conf/application-pd.yml`,
+or a tarball install that kept its `conf/` from an earlier release, still has `32000000000` and
+keeps that fixed budget; the Store logs a warning naming the old value at startup. Set the key
+to `auto`, or set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` in Docker.
+
+PD can also hold the old value. When PD has no shared copy yet, the first Store to start uploads
+its local `application-pd.yml` to PD (KV key `S:FS`). At startup a Store loads that copy over its
+local file only when it has no local file or the file is no newer than PD's `S:Timestamp`. The
+upload sets no timestamp and a missing one counts as 0, so changing `S:FS` alone changes nothing.
+The simplest upgrade is to set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=auto` (or
+`-Drocksdb.total_memory_size=auto`) on every Store and restart it; the Store keeps this value
+above both its local file and PD's copy. To change the shared copy instead, set
+`rocksdb.total_memory_size` to `0` or remove it in `S:FS`, then put the current time in
+milliseconds into `S:Timestamp` through PD's KV service (gRPC `KvService.put`). Use `auto` there
+only once every Store runs this release: an earlier release can't parse `auto` and fails to start,
+while it reads `0` as its old heap-sized default. This also applies to a copy that a Store of this
+release uploaded when PD had none, since the shipped file says `auto`. Every running Store watches
+`S:Timestamp`: it reloads PD's copy, writes it over its local file and runs
+`bin/restart-hugegraph-store.sh` within 60 seconds, so all Stores restart within the same minute.
+A stopped Store loads the copy at its next start. That self-restart passes no arguments, so `-j`
+and `-g` from the original start are dropped and the launcher's default heap applies; only JVM
+settings in an exported `JAVA_OPTIONS` carry over. A Docker Store doesn't restart at all: Java is
+the entrypoint's last process, so stopping it ends the container with exit code 143. The container
+stays down unless a restart policy (the bundled compose files use `restart: unless-stopped`) starts
+it again through the entrypoint. On Docker, set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` instead of
+publishing `S:Timestamp`. Elsewhere, prefer the per-Store override on Stores started with a custom
+heap.
 
 ### Server Configuration
 
@@ -592,6 +697,18 @@ tail -f logs/hugegraph-store.log
 curl http://localhost:8520/v1/health
 ```
 
+On Store versions that provide it, `GET /-/lifecycle` reports the process
+startup lifecycle as `{"status":0,"text":"STARTING"}`, `STARTED`,
+`STOPPING`, or `UNAVAILABLE`. `STARTED` means the application reached Spring
+Ready and the gRPC listener started and has not shut down. It does **not**
+establish PD registration, partition recovery, Raft catch-up, or graph read/write
+readiness. `STOPPING` takes precedence once context shutdown begins;
+`UNAVAILABLE` means the gRPC server has shut down before that point. An older
+Store may return 404, which means this signal is unavailable, not that the Store
+is down. The existing `/-/state` operator-controlled flag is unchanged and must
+not be inferred from this lifecycle value. Continue to assess data readiness
+separately; do not use this endpoint as a rolling-update safety gate.
+
 **Verify Store registration with PD**:
 
 ```bash
@@ -726,7 +843,21 @@ environment:
   HG_STORE_REST_PORT: "8520"                           # maps to server.port
   HG_STORE_RAFT_ADDRESS: store0:8510                   # maps to raft.address
   HG_STORE_DATA_PATH: /hugegraph-store/storage         # maps to app.data-path
+  # optional; maps to rocksdb.total_memory_size (auto or bytes); unset = config file
+  # HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE: "2147483648"
 ```
+
+`HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` must be `auto` or a plain number of bytes; the entrypoint
+refuses anything else. When set it outranks `rocksdb.total_memory_size` in a mounted
+`conf/application-pd.yml`, a `-Drocksdb.total_memory_size` in `JAVA_OPTS`, and an
+`application-pd.yml` that PD distributes to every Store. Leave it unset
+to let the Store size the budget from the container memory limit, provided the loaded config
+also has `total_memory_size: auto` (or `0`, or no value); a mounted `application-pd.yml` from an earlier
+release still has `32000000000` (see [Store Configuration](#store-configuration)). A container
+limit bounds only the RocksDB budget: the launcher still picks `-Xmx` from the host's free
+memory (up to 2 GiB) and sets direct memory to the same size, so size both for the limit through
+`JAVA_OPTS`, for example `JAVA_OPTS: "-Xmx1g -XX:MaxDirectMemorySize=512m"` for a 4 GiB limit.
+With the defaults, heap and direct memory plus the 1.5 GiB reserve already exceed a 2 GiB limit.
 
 **Server environment variables**:
 
@@ -826,6 +957,10 @@ spec:
           value: "$(POD_NAME).hugegraph-store"
         - name: HG_STORE_RAFT_ADDRESS
           value: "$(POD_NAME).hugegraph-store:8510"
+        # Optional: pin the off-heap RocksDB budget (bytes). Unset, it is sized
+        # from the container memory limit below.
+        # - name: HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE
+        #   value: "4294967296"
         volumeMounts:
         - name: data
           mountPath: /hugegraph-store/storage

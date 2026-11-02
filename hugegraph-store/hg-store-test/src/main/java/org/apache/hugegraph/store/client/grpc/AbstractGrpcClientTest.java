@@ -76,6 +76,72 @@ public class AbstractGrpcClientTest {
     }
 
     @Test
+    public void testChannelConstructionRetainsCallingThread() {
+        String target = uniqueTarget("calling-thread");
+        Thread caller = Thread.currentThread();
+        List<Thread> constructionThreads = new ArrayList<>();
+        AbstractGrpcClient client = new AbstractGrpcClient() {
+            @Override
+            protected ManagedChannel createChannel(String address) {
+                constructionThreads.add(Thread.currentThread());
+                return new FakeManagedChannel(address);
+            }
+
+            @Override
+            public AbstractBlockingStub getBlockingStub(ManagedChannel channel) {
+                return new FakeBlockingStub(channel, CallOptions.DEFAULT);
+            }
+        };
+        try {
+            ManagedChannel[] pool = client.getChannels(target);
+            assertEquals(pool.length, constructionThreads.size());
+            assertTrue(constructionThreads.stream().allMatch(thread -> thread == caller));
+        } finally {
+            AbstractGrpcClient.closeChannel(target);
+        }
+    }
+
+    @Test
+    public void testFailedConstructionClosesPartialPoolAndCanRetry() {
+        String target = uniqueTarget("construction-failure");
+        AtomicInteger count = new AtomicInteger();
+        List<ManagedChannel> created = new ArrayList<>();
+        IllegalStateException failure = new IllegalStateException("channel construction failed");
+        AbstractGrpcClient client = new AbstractGrpcClient() {
+            @Override
+            protected ManagedChannel createChannel(String address) {
+                if (count.getAndIncrement() == 2) {
+                    throw failure;
+                }
+                ManagedChannel channel = new FakeManagedChannel(address);
+                created.add(channel);
+                return channel;
+            }
+
+            @Override
+            public AbstractBlockingStub getBlockingStub(ManagedChannel channel) {
+                return new FakeBlockingStub(channel, CallOptions.DEFAULT);
+            }
+        };
+        try {
+            try {
+                client.getChannels(target);
+                fail("Channel construction failure must be reported");
+            } catch (RuntimeException e) {
+                assertSame(failure, e.getCause());
+            }
+            assertFalse(AbstractGrpcClient.channels.containsKey(target));
+            assertEquals(2, created.size());
+            assertTrue(created.stream().allMatch(ManagedChannel::isShutdown));
+            ManagedChannel[] retry = client.getChannels(target);
+            assertSame(retry, AbstractGrpcClient.channels.get(target));
+            assertTrue(Arrays.stream(retry).allMatch(channel -> channel != null && !channel.isShutdown()));
+        } finally {
+            AbstractGrpcClient.closeChannel(target);
+        }
+    }
+
+    @Test
     public void testBlockingStubPoolCoversEveryChannel() {
         String target = uniqueTarget("blocking");
         RecordingGrpcClient client = new RecordingGrpcClient();

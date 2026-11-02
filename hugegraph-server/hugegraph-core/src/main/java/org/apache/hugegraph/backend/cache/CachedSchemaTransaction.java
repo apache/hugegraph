@@ -410,18 +410,13 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
                 return null;
             }
             int key = (int) longId;
-            switch (type) {
-                case PROPERTY_KEY:
-                    return this.pks.get(key);
-                case VERTEX_LABEL:
-                    return this.vls.get(key);
-                case EDGE_LABEL:
-                    return this.els.get(key);
-                case INDEX_LABEL:
-                    return this.ils.get(key);
-                default:
-                    return null;
-            }
+            return switch (type) {
+                case PROPERTY_KEY -> this.pks.get(key);
+                case VERTEX_LABEL -> this.vls.get(key);
+                case EDGE_LABEL -> this.els.get(key);
+                case INDEX_LABEL -> this.ils.get(key);
+                default -> null;
+            };
         }
 
         public void set(HugeType type, Id id, V value) {

@@ -63,27 +63,18 @@ public enum IndexType implements SerialEnum {
     }
 
     public HugeType type() {
-        switch (this) {
-            case SECONDARY:
-                return HugeType.SECONDARY_INDEX;
-            case RANGE_INT:
-                return HugeType.RANGE_INT_INDEX;
-            case RANGE_FLOAT:
-                return HugeType.RANGE_FLOAT_INDEX;
-            case RANGE_LONG:
-                return HugeType.RANGE_LONG_INDEX;
-            case RANGE_DOUBLE:
-                return HugeType.RANGE_DOUBLE_INDEX;
-            case SEARCH:
-                return HugeType.SEARCH_INDEX;
-            case SHARD:
-                return HugeType.SHARD_INDEX;
-            case UNIQUE:
-                return HugeType.UNIQUE_INDEX;
-            default:
-                throw new AssertionError(String.format(
+        return switch (this) {
+            case SECONDARY -> HugeType.SECONDARY_INDEX;
+            case RANGE_INT -> HugeType.RANGE_INT_INDEX;
+            case RANGE_FLOAT -> HugeType.RANGE_FLOAT_INDEX;
+            case RANGE_LONG -> HugeType.RANGE_LONG_INDEX;
+            case RANGE_DOUBLE -> HugeType.RANGE_DOUBLE_INDEX;
+            case SEARCH -> HugeType.SEARCH_INDEX;
+            case SHARD -> HugeType.SHARD_INDEX;
+            case UNIQUE -> HugeType.UNIQUE_INDEX;
+            default -> throw new AssertionError(String.format(
                         "Unknown index type '%s'", this));
-        }
+        };
     }
 
     public boolean isString() {

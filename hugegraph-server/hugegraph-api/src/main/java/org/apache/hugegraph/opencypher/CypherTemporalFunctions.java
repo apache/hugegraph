@@ -227,14 +227,13 @@ public final class CypherTemporalFunctions {
                 node instanceof Boolean || node instanceof Character) {
                 return node;
             }
-            if (node instanceof FunctionInvocation) {
-                Object folded = foldCall((FunctionInvocation) node);
+            if (node instanceof FunctionInvocation functionInvocation) {
+                Object folded = foldCall(functionInvocation);
                 if (folded != null) {
                     return folded;
                 }
             }
-            if (node instanceof Option) {
-                Option<?> option = (Option<?>) node;
+            if (node instanceof Option<?> option) {
                 if (!option.isEmpty()) {
                     Object value = option.get();
                     Object copied = copy(value);
@@ -244,23 +243,22 @@ public final class CypherTemporalFunctions {
                 }
                 return node;
             }
-            if (node instanceof scala.collection.IndexedSeq) {
-                return copyIndexedSeq((scala.collection.IndexedSeq<?>) node);
+            if (node instanceof scala.collection.IndexedSeq<?> indexedSeq) {
+                return copyIndexedSeq(indexedSeq);
             }
-            if (node instanceof Seq) {
-                return copySeq((Seq<?>) node);
+            if (node instanceof Seq<?> matchedSeq) {
+                return copySeq(matchedSeq);
             }
-            if (node instanceof scala.collection.immutable.Set) {
-                return copySet((scala.collection.immutable.Set<?>) node);
+            if (node instanceof scala.collection.immutable.Set<?> matchedSet) {
+                return copySet(matchedSet);
             }
-            if (node instanceof Tuple2) {
-                Tuple2<?, ?> tuple = (Tuple2<?, ?>) node;
+            if (node instanceof Tuple2<?, ?> tuple) {
                 Object first = copy(tuple._1());
                 Object second = copy(tuple._2());
                 return first == tuple._1() && second == tuple._2() ? node : new Tuple2<>(first, second);
             }
-            if (node instanceof Product) {
-                return rebuild((Product) node);
+            if (node instanceof Product matchedProduct) {
+                return rebuild(matchedProduct);
             }
             return node;
         }
@@ -306,13 +304,13 @@ public final class CypherTemporalFunctions {
         }
 
         private String literalOf(Object argument) {
-            if (argument instanceof StringLiteral) {
-                return ((StringLiteral) argument).value();
+            if (argument instanceof StringLiteral stringLiteral) {
+                return stringLiteral.value();
             }
-            if (argument instanceof Parameter) {
-                Object bound = this.parameters.get(((Parameter) argument).name());
-                if (bound instanceof String) {
-                    return (String) bound;
+            if (argument instanceof Parameter matchedParameter) {
+                Object bound = this.parameters.get(matchedParameter.name());
+                if (bound instanceof String matchedString) {
+                    return matchedString;
                 }
             }
             return null;

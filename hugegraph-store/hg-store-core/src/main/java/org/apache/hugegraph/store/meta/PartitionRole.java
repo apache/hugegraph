@@ -34,19 +34,12 @@ public enum PartitionRole {
     }
 
     public static PartitionRole fromShardRole(Metapb.ShardRole shard) {
-        PartitionRole role = PartitionRole.FOLLOWER;
-        switch (shard) {
-            case Leader:
-                role = PartitionRole.LEADER;
-                break;
-            case Follower:
-                role = PartitionRole.FOLLOWER;
-                break;
-            case Learner:
-                role = PartitionRole.LEARNER;
-                break;
-        }
-        return role;
+        return switch (shard) {
+            case Leader -> PartitionRole.LEADER;
+            case Follower -> PartitionRole.FOLLOWER;
+            case Learner -> PartitionRole.LEARNER;
+            default -> PartitionRole.FOLLOWER;
+        };
 
     }
 
@@ -60,18 +53,11 @@ public enum PartitionRole {
     }
 
     public Metapb.ShardRole toShardRole() {
-        Metapb.ShardRole shardRole = Metapb.ShardRole.None;
-        switch (this) {
-            case LEADER:
-                shardRole = Metapb.ShardRole.Leader;
-                break;
-            case FOLLOWER:
-                shardRole = Metapb.ShardRole.Follower;
-                break;
-            case LEARNER:
-                shardRole = Metapb.ShardRole.Learner;
-                break;
-        }
-        return shardRole;
+        return switch (this) {
+            case LEADER -> Metapb.ShardRole.Leader;
+            case FOLLOWER -> Metapb.ShardRole.Follower;
+            case LEARNER -> Metapb.ShardRole.Learner;
+            default -> Metapb.ShardRole.None;
+        };
     }
 }

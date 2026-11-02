@@ -179,14 +179,12 @@ public class HbaseTable extends BackendTable<HbaseSessions.Session, BackendEntry
         }
 
         // Query by prefix
-        if (query instanceof IdPrefixQuery) {
-            IdPrefixQuery pq = (IdPrefixQuery) query;
+        if (query instanceof IdPrefixQuery pq) {
             return this.queryByPrefix(session, pq);
         }
 
         // Query by range
-        if (query instanceof IdRangeQuery) {
-            IdRangeQuery rq = (IdRangeQuery) query;
+        if (query instanceof IdRangeQuery rq) {
             return this.queryByRange(session, rq);
         }
 

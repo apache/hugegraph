@@ -6,6 +6,10 @@ The Apache Software Foundation (http://www.apache.org/).
 
 The initial codebase was donated to the ASF by HugeGraph Authors, copyright 2017-2021.
 
+The optional native Kubernetes deployment in helm/hugegraph/templates/seatunnel.yaml adapts resources from:
+Apache SeaTunnel
+Copyright 2021-2024 The Apache Software Foundation
+
 
 -----------------------------------------------------------------------
 This product contains code form the Apache TinkerPop Project:

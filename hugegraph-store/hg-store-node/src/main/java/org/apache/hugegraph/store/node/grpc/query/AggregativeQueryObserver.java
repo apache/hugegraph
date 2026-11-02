@@ -176,10 +176,10 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
     }
 
     private long countPartitions() {
-        if (!(this.iterator instanceof MultiPartitionIterator)) {
+        if (!(this.iterator instanceof MultiPartitionIterator multiIterator)) {
             return countIterator(this.iterator);
         }
-        List<ScanIterator> children = ((MultiPartitionIterator) this.iterator).getIterators();
+        List<ScanIterator> children = multiIterator.getIterators();
         CountDownLatch completed = new CountDownLatch(children.size());
         AtomicLong total = new AtomicLong();
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -231,11 +231,11 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
             Thread.currentThread().interrupt();
         }
         Throwable error = failure.get();
-        if (error instanceof RuntimeException) {
-            throw (RuntimeException) error;
+        if (error instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
         }
-        if (error instanceof Error) {
-            throw (Error) error;
+        if (error instanceof Error fatalFailure) {
+            throw fatalFailure;
         }
         return total.get();
     }
@@ -545,8 +545,8 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
                 } else if (this.plan.hasIteratorResult()) {
                     checkIterator = false;
                     AtomicReference<Throwable> exception = new AtomicReference<>();
-                    if (this.iterator instanceof MultiPartitionIterator) {
-                        var iterators = ((MultiPartitionIterator) this.iterator).getIterators();
+                    if (this.iterator instanceof MultiPartitionIterator multiIterator) {
+                        var iterators = multiIterator.getIterators();
                         CountDownLatch latch = new CountDownLatch(iterators.size());
                         synchronized (this) {
                             this.pendingTasks += iterators.size();
@@ -729,10 +729,10 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
 
     private Object executePipeline(Object obj) throws EarlyStopException {
         PipelineResult input;
-        if (obj instanceof RocksDBSession.BackendColumn) {
-            input = new PipelineResult((RocksDBSession.BackendColumn) obj);
-        } else if (obj instanceof BaseElement) {
-            input = new PipelineResult((BaseElement) obj);
+        if (obj instanceof RocksDBSession.BackendColumn column) {
+            input = new PipelineResult(column);
+        } else if (obj instanceof BaseElement element) {
+            input = new PipelineResult(element);
         } else {
             return null;
         }
@@ -768,8 +768,8 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
                 var element = result.getElement();
                 // builder.setKey(ByteString.copyFrom(element.id().asBytes()));
                 BackendColumn backendColumn;
-                if (element instanceof BaseVertex) {
-                    backendColumn = serializer.writeVertex((BaseVertex) element);
+                if (element instanceof BaseVertex vertex) {
+                    backendColumn = serializer.writeVertex(vertex);
                 } else { // if (element instanceof BaseEdge) {
                     backendColumn = serializer.writeEdge((BaseEdge) element);
                 }

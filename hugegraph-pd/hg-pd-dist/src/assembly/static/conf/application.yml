@@ -64,6 +64,9 @@ auth:
   secret-key:
 
 pd:
+  # Must match Server rest-server.properties cluster for storage quota enforcement.
+  # Keep hg for existing deployments; Server defaults to hg-test.
+  server-cluster: hg
   # Storage path
   data-path: ./pd_data
   # The check cycle of automatic expansion regularly checks the number of partitions in each store and automatically balances the number of partitions

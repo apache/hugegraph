@@ -90,6 +90,26 @@ enum ShardRole {
 
 Represents a Store node in the cluster.
 
+An `Exiting` Store continues renewing its heartbeat lease while draining, but is excluded from
+new replica allocation and migration destinations. Expiry of an old heartbeat does not complete
+retirement. PD keeps the Store `Exiting` until its latest heartbeat reports no local partition
+engines and PD has no shard group referencing its ID. Before deleting its Pod or volume, also
+verify the remaining groups' actual Raft membership, full replicas and fresh heartbeats; a
+management state or a successful state-update response alone is not a complete maintenance check.
+Replica allocation still enforces the configured minimum Store count using eligible destinations.
+If the remaining eligible Stores do not satisfy that minimum, draining remains blocked; expiry of
+the source lease must not be used to force retirement or reduce the configured replica policy.
+If a drain request fails this capacity check, add enough eligible capacity and repeat the same
+`Exiting` management request to resume planning for groups that still reference the source in PD.
+The persisted intent stays `Exiting`; there is no need to toggle it to `Up`. This retry does not
+establish that an already dispatched migration has completed or recover a lost Store-side task.
+`Tombstone` is permanent for that Store identity: management updates cannot return it to an active
+state, just as registration and heartbeat already reject a retired identity.
+Heartbeats, registration and management state changes serialize their Store-state updates.
+Re-registering an `Exiting` Store preserves that state even when its address is in the initial
+Store list. This preserves the drain intent, but does not replace checking restored engines and
+actual Raft configuration after a process restart.
+
 ```protobuf
 message Store {
     uint64 id = 1;
@@ -813,8 +833,8 @@ Two unauthenticated endpoints are meant for probes and startup gates:
 | `GET /v1/ready` | Readiness: the raft node is active and sees a leader, so this PD is inside a quorum. | `200` when ready, `503` otherwise |
 
 The health probe reads Raft state only; it does not verify metadata-store initialization.
-Metadata open failures propagate through startup; bounded LOCK retry remains tracked in
-[#3226](https://github.com/apache/hugegraph/issues/3226).
+If the metadata store cannot be opened, PD startup fails; while its RocksDB `LOCK` is still
+held, PD first retries for up to 30 seconds (see [PD Core Settings](configuration.md#pd-core-settings)).
 
 ```bash
 curl -i http://localhost:8620/v1/ready

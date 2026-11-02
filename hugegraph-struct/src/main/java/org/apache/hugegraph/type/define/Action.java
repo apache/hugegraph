@@ -54,21 +54,14 @@ public enum Action implements SerialEnum {
     }
 
     public static Action fromCode(byte code) {
-        switch (code) {
-            case 1:
-                return INSERT;
-            case 2:
-                return APPEND;
-            case 3:
-                return ELIMINATE;
-            case 4:
-                return DELETE;
-            case 5:
-                return UPDATE_IF_PRESENT;
-            case 6:
-                return UPDATE_IF_ABSENT;
-            default:
-                throw new AssertionError("Unsupported action code: " + code);
-        }
+        return switch (code) {
+            case 1 -> INSERT;
+            case 2 -> APPEND;
+            case 3 -> ELIMINATE;
+            case 4 -> DELETE;
+            case 5 -> UPDATE_IF_PRESENT;
+            case 6 -> UPDATE_IF_ABSENT;
+            default -> throw new AssertionError("Unsupported action code: " + code);
+        };
     }
 }

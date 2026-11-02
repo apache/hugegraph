@@ -131,6 +131,8 @@ public final class PDConnectionManager {
         try {
             result = future.get(WAITING_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
             log.error("[PDCM] Task [ {} ] interrupted. error:", taskName, e);
         } catch (ExecutionException e) {
             log.error("[PDCM] Task [ {} ] execution failed.", taskName, e);

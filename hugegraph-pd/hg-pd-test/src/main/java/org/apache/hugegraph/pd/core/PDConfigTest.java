@@ -24,6 +24,16 @@ import org.junit.Test;
 public class PDConfigTest {
 
     @Test
+    public void testStandaloneDefaults() {
+        PDConfig config = new PDConfig();
+        PDConfig.Partition partition = config.new Partition();
+
+        Assert.assertEquals(1, config.getInitialStoreCount());
+        Assert.assertEquals(1, partition.getShardCount());
+        Assert.assertEquals(0, config.getMinStoreCount());
+    }
+
+    @Test
     public void testToStringDoesNotExposeSecretKey() {
         PDConfig config = new PDConfig();
         config.setClusterId(123L);

@@ -372,15 +372,11 @@ public class NodeTxExecutorTest {
         AtomicInteger attempts = new AtomicInteger();
         HgStoreClientException e = assertThrows(HgStoreClientException.class, () ->
                 executor.retryingInvoke(() -> {
-                    switch (attempts.getAndIncrement()) {
-                        case 0:
-                        case 2:
-                            throw Status.DEADLINE_EXCEEDED.asRuntimeException();
-                        case 1:
-                            throw Status.UNAVAILABLE.asRuntimeException();
-                        default:
-                            return "ok";
-                    }
+                    return switch (attempts.getAndIncrement()) {
+                        case 0, 2 -> throw Status.DEADLINE_EXCEEDED.asRuntimeException();
+                        case 1 -> throw Status.UNAVAILABLE.asRuntimeException();
+                        default -> "ok";
+                    };
                 }));
         assertEquals(3, attempts.get());
         assertTrue(e.getMessage(), e.getMessage().contains("DEADLINE_EXCEEDED"));

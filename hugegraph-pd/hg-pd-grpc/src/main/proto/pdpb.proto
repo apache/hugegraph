@@ -63,6 +63,7 @@ service PD {
   rpc SetPDConfig(SetPDConfigRequest) returns (SetPDConfigResponse){}
   rpc GetGraphSpace(GetGraphSpaceRequest) returns (GetGraphSpaceResponse){}
   rpc SetGraphSpace(SetGraphSpaceRequest) returns (SetGraphSpaceResponse){}
+  rpc DeleteGraphSpace(DeleteGraphSpaceRequest) returns (DeleteGraphSpaceResponse){}
   // Get cluster health status
   rpc GetClusterStats(GetClusterStatsRequest) returns (GetClusterStatsResponse){}
   // Replace PD cluster nodes
@@ -424,6 +425,15 @@ message SetGraphSpaceRequest{
 }
 
 message SetGraphSpaceResponse{
+  ResponseHeader header = 1;
+}
+
+message DeleteGraphSpaceRequest{
+  RequestHeader header = 1;
+  string graph_space_name = 2;
+}
+
+message DeleteGraphSpaceResponse{
   ResponseHeader header = 1;
 }
 

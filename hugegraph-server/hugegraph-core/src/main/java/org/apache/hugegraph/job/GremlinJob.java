@@ -100,8 +100,8 @@ public class GremlinJob extends UserJob<Object> {
 
     private void checkResultsSize(Object results) {
         int size = 0;
-        if (results instanceof Collection) {
-            size = ((Collection<?>) results).size();
+        if (results instanceof Collection<?> collection) {
+            size = collection.size();
         }
         if (size > TASK_RESULTS_MAX_SIZE) {
             throw new LimitExceedException(

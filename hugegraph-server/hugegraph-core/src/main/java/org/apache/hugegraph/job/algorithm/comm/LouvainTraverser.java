@@ -427,6 +427,7 @@ public class LouvainTraverser extends AlgoTraverser {
         });
 
         consumers.start("louvain-move-pass-" + pass);
+        Throwable failure = null;
         try {
             while (vertices.hasNext()) {
                 this.updateProgress(++this.progress);
@@ -439,9 +440,9 @@ public class LouvainTraverser extends AlgoTraverser {
                 consumers.provide(v);
             }
         } catch (Throwable e) {
-            throw Consumers.wrapException(e);
+            failure = e;
         } finally {
-            consumers.await();
+            awaitConsumers(consumers, vertices, failure);
         }
 
         // maybe always shocking when set degree limited
@@ -465,6 +466,7 @@ public class LouvainTraverser extends AlgoTraverser {
         });
 
         consumers.start("louvain-merge-pass-" + pass);
+        Throwable failure = null;
         try {
             for (Pair<Community, Set<Id>> pair : comms) {
                 Community c = pair.getLeft();
@@ -477,9 +479,9 @@ public class LouvainTraverser extends AlgoTraverser {
                 consumers.provide(pair);
             }
         } catch (Throwable e) {
-            throw Consumers.wrapException(e);
+            failure = e;
         } finally {
-            consumers.await();
+            awaitConsumers(consumers, null, failure);
         }
 
         this.graph().tx().commit();
@@ -811,10 +813,9 @@ public class LouvainTraverser extends AlgoTraverser {
 
         @Override
         public boolean equals(Object object) {
-            if (!(object instanceof Community)) {
+            if (!(object instanceof Community other)) {
                 return false;
             }
-            Community other = (Community) object;
             return Objects.equals(this.cid, other.cid);
         }
 

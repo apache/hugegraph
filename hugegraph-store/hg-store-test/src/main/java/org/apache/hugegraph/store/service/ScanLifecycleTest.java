@@ -363,8 +363,8 @@ public class ScanLifecycleTest extends ScanTestSupport {
             for (Field field : input.getClass().getDeclaredFields()) {
                 field.setAccessible(true);
                 Object captured = field.get(input);
-                if (captured instanceof ScanBatchResponse) {
-                    response = (ScanBatchResponse) captured;
+                if (captured instanceof ScanBatchResponse batchResponse) {
+                    response = batchResponse;
                 }
             }
             org.junit.Assert.assertNotNull(response);
@@ -1114,8 +1114,8 @@ public class ScanLifecycleTest extends ScanTestSupport {
             // Preserve cleanup even when the old implementation allocated a second producer.
             Object remaining = iterator.get(response);
             response.onCompleted();
-            if (remaining instanceof ScanIterator) {
-                ((ScanIterator) remaining).close();
+            if (remaining instanceof ScanIterator iteratorToClose) {
+                iteratorToClose.close();
             }
             executor.shutdownNow();
         }

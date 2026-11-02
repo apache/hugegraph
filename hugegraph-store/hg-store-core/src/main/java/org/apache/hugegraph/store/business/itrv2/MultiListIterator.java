@@ -118,10 +118,12 @@ public class MultiListIterator implements ScanIterator {
         if (this.innerIterator != null) {
             this.innerIterator.close();
         }
-        if (this.innerListIterator != null) {
-            while (this.innerListIterator.hasNext()) {
-                this.innerListIterator.next().close();
-            }
+        if (this.innerListIterator == null) {
+            // never iterated, so every sub-iterator is still open
+            this.innerListIterator = this.iterators.iterator();
+        }
+        while (this.innerListIterator.hasNext()) {
+            this.innerListIterator.next().close();
         }
         this.iterators.clear();
     }

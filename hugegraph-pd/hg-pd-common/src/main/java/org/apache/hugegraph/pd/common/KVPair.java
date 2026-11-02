@@ -120,8 +120,7 @@ public class KVPair<K, V> implements Serializable {
         if (this == o) {
             return true;
         }
-        if (o instanceof KVPair) {
-            KVPair pair = (KVPair) o;
+        if (o instanceof KVPair<?, ?> pair) {
             if (!Objects.equals(key, pair.key)) {
                 return false;
             }

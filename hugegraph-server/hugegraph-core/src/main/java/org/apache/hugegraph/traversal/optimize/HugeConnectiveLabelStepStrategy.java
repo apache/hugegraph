@@ -78,10 +78,9 @@ public final class HugeConnectiveLabelStepStrategy
         }
 
         for (Step<?, ?> step : traversal.getSteps()) {
-            if (!(step instanceof TraversalParent)) {
+            if (!(step instanceof TraversalParent parent)) {
                 continue;
             }
-            TraversalParent parent = (TraversalParent) step;
             for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
                 markConnectiveLabelSteps(child, visited);
             }
@@ -104,10 +103,9 @@ public final class HugeConnectiveLabelStepStrategy
     private static void markPositiveLabelOnlyTraversal(
             Traversal.Admin<?, ?> traversal) {
         for (Step<?, ?> step : traversal.getSteps()) {
-            if (!(step instanceof HasStep)) {
+            if (!(step instanceof HasStep<?> hasStep)) {
                 return;
             }
-            HasStep<?> hasStep = (HasStep<?>) step;
             if (!hasOnlyPositiveLabelContainers(hasStep)) {
                 return;
             }

@@ -232,8 +232,8 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
         }
         setStateDone();
         ScanIterator current = this.iterator;
-        if (current instanceof ParallelScanIterator) {
-            ((ParallelScanIterator) current).requestStop();
+        if (current instanceof ParallelScanIterator parallelIterator) {
+            parallelIterator.requestStop();
         }
         try {
             closeIter();

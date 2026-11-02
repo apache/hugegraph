@@ -57,9 +57,11 @@ store:
     -XX:MaxMetaspaceSize=256m
     -XX:MaxDirectMemorySize=512m
     -XX:+UseContainerSupport
-  # Container limits do not configure JVM heap or RocksDB native cache budgets.
-  # Size this preset for the workload and configure those application budgets
-  # separately; javaOpts accepts explicit JVM/system-property overrides.
+  # Container limits do not configure the JVM heap; javaOpts does. Store images
+  # with auto-sized RocksDB memory (apache/hugegraph#3254) give RocksDB half of
+  # the container limit left after heap, direct memory and a 1.5 GiB reserve;
+  # with this preset that is 2.5 GiB. Set store.extraEnv
+  # HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE (bytes) to use a different value.
   resources:
     requests:
       cpu: "1"
@@ -129,3 +131,8 @@ server:
 #       memory: 1536Mi
 
 # Network isolation is selected by mode or an explicit enabled override.
+
+# Optional computation follows this preset only when explicitly enabled.
+vermeer:
+  enabled: false
+  mode: cluster

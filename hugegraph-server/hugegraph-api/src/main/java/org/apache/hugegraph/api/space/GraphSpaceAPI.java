@@ -415,15 +415,11 @@ public class GraphSpaceAPI extends API {
                     exist.storageLimit = storageLimit;
                 }
 
-                int computeCpuLimit = (int) graphSpaceMap
-                        .getOrDefault("compute_cpu_limit", 0);
-                if (computeCpuLimit != 0) {
-                    exist.computeCpuLimit(computeCpuLimit);
+                if (graphSpaceMap.containsKey("compute_cpu_limit")) {
+                    exist.computeCpuLimit((int) graphSpaceMap.get("compute_cpu_limit"));
                 }
-                int computeMemoryLimit = (int) graphSpaceMap
-                        .getOrDefault("compute_memory_limit", 0);
-                if (computeMemoryLimit != 0) {
-                    exist.computeMemoryLimit(computeMemoryLimit);
+                if (graphSpaceMap.containsKey("compute_memory_limit")) {
+                    exist.computeMemoryLimit((int) graphSpaceMap.get("compute_memory_limit"));
                 }
 
                 String oltpNamespace =
@@ -528,21 +524,22 @@ public class GraphSpaceAPI extends API {
         public String description;
 
         @JsonProperty("cpu_limit")
-        @Schema(description = "The CPU limit for the graph space", required = true)
-        public int cpuLimit;
+        @Schema(description = "The CPU limit for the graph space")
+        public int cpuLimit = GraphSpace.DEFAULT_CPU_LIMIT;
         @JsonProperty("memory_limit")
-        @Schema(description = "The memory limit for the graph space", required = true)
-        public int memoryLimit;
+        @Schema(description = "The memory limit for the graph space")
+        public int memoryLimit = GraphSpace.DEFAULT_MEMORY_LIMIT;
         @JsonProperty("storage_limit")
-        @Schema(description = "The storage limit for the graph space", required = true)
-        public int storageLimit;
+        @Schema(description = "The storage limit for the graph space")
+        public int storageLimit = GraphSpace.DEFAULT_STORAGE_LIMIT;
 
         @JsonProperty("compute_cpu_limit")
-        @Schema(description = "The compute CPU limit for the graph space")
-        public int computeCpuLimit = 0;
+        @Schema(description = "The compute CPU limit; omitted or zero continuously inherits the current CPU limit")
+        public int computeCpuLimit;
         @JsonProperty("compute_memory_limit")
-        @Schema(description = "The compute memory limit for the graph space")
-        public int computeMemoryLimit = 0;
+        @Schema(description = "The compute memory limit; omitted or zero continuously " +
+                              "inherits the current memory limit")
+        public int computeMemoryLimit;
 
         @JsonProperty("oltp_namespace")
         @Schema(description = "The OLTP namespace for the graph space")
@@ -555,11 +552,11 @@ public class GraphSpaceAPI extends API {
         public String storageNamespace = "";
 
         @JsonProperty("max_graph_number")
-        @Schema(description = "The maximum number of graphs allowed in the space", required = true)
-        public int maxGraphNumber;
+        @Schema(description = "The maximum number of graphs allowed in the space")
+        public int maxGraphNumber = GraphSpace.DEFAULT_MAX_GRAPH_NUMBER;
         @JsonProperty("max_role_number")
         @Schema(description = "The maximum number of roles allowed in the space")
-        public int maxRoleNumber;
+        public int maxRoleNumber = GraphSpace.DEFAULT_MAX_ROLE_NUMBER;
 
         @JsonProperty("dp_username")
         @Schema(description = "The data platform username for the graph space")

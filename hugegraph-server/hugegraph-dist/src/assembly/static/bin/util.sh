@@ -26,7 +26,7 @@ function print_jvm_thread_hint() {
     local kind
     kind=$(awk '
         /pthread_create.*\(EPERM\)|pthread_create.*Operation not permitted/ { denied = 1 }
-        /Cannot create worker GC thread/ { resources = 1 }
+        /Cannot create worker GC thread|pthread_create.*\(EAGAIN\)|pthread_create.*Resource temporarily unavailable/ { resources = 1 }
         END { if (denied) print "denied"; else if (resources) print "resources" }
     ')
     case "$kind" in
@@ -35,8 +35,8 @@ function print_jvm_thread_hint() {
             echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
             ;;
         resources)
-            echo 'ERROR: JVM could not create a GC worker thread. Possible causes include seccomp denial, insufficient memory, or process/thread limits.' >&2
-            echo 'Look for pthread_create failed (EPERM) in the JVM output: the container log, or logs/hugegraph-server-stdout.log with STDOUT_MODE=false.' >&2
+            echo 'ERROR: JVM could not create a thread. Possible causes include seccomp denial, insufficient memory, or process/thread limits.' >&2
+            echo 'Look for pthread_create errors (EPERM/EAGAIN) in the JVM output: the container log, or logs/hugegraph-server-stdout.log with STDOUT_MODE=false.' >&2
             echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
             echo 'If the process limit is too low, set --ulimit nproc=65535:65535.' >&2
             ;;

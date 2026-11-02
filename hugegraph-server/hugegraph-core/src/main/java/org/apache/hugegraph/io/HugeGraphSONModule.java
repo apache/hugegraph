@@ -322,6 +322,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
             Number cpuUsed = 0;
             Number memoryUsed = 0;
             Number storageUsed = 0;
+            long storageUsedKb = -1;
             Number graphNumberUsed = 0;
             Number roleNumberUsed = 0;
             Boolean auth = false;
@@ -369,6 +370,17 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                     memoryUsed = jsonParser.getNumberValue();
                 } else if ("storage_used".equals(fieldName)) {
                     storageUsed = jsonParser.getNumberValue();
+                } else if ("storage_used_kb".equals(fieldName)) {
+                    // Older Servers preserve unknown config values as strings.
+                    String value = jsonParser.getValueAsString();
+                    if (value != null) {
+                        try {
+                            storageUsedKb = Long.parseLong(value.trim());
+                        } catch (NumberFormatException ignored) {
+                            // Optional precision may be absent or invalid; retain GB usage.
+                        }
+                    }
+                    jsonParser.skipChildren();
                 } else if ("graph_number_used".equals(fieldName)) {
                     graphNumberUsed = jsonParser.getNumberValue();
                 } else if ("role_number_used".equals(fieldName)) {
@@ -429,6 +441,9 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                                               creator,
                                               configs);
 
+            if (storageUsedKb >= 0) {
+                space.setStorageUsedKb(storageUsedKb);
+            }
             space.updateTime(update);
             space.createTime(create);
             space.computeCpuLimit(computeCpuLimit.intValue());

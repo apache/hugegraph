@@ -51,16 +51,12 @@ public enum CollectionType implements SerialEnum {
     }
 
     public static CollectionType fromCode(byte code) {
-        switch (code) {
-            case 1:
-                return JCF;
-            case 2:
-                return EC;
-            case 3:
-                return FU;
-            default:
-                throw new AssertionError(
+        return switch (code) {
+            case 1 -> JCF;
+            case 2 -> EC;
+            case 3 -> FU;
+            default -> throw new AssertionError(
                         "Unsupported collection code: " + code);
-        }
+        };
     }
 }

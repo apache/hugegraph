@@ -45,10 +45,9 @@ public class Blob implements Comparable<Blob> {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof Blob)) {
+        if (!(obj instanceof Blob other)) {
             return false;
         }
-        Blob other = (Blob) obj;
         return Arrays.equals(this.bytes, other.bytes);
     }
 

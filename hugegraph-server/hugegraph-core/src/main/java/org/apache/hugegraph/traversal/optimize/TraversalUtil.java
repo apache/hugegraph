@@ -204,9 +204,9 @@ public final class TraversalUtil {
                                     .filter(g -> !(g instanceof EmptyGraph));
         if (!graph.isPresent()) {
             TraversalParent parent = step.getTraversal().getParent();
-            if (parent instanceof Traversal) {
+            if (parent instanceof Traversal<?, ?> matchedTraversal) {
                 Optional<Graph> parentGraph;
-                parentGraph = ((Traversal<?, ?>) parent).asAdmin()
+                parentGraph = matchedTraversal.asAdmin()
                                                         .getGraph()
                                                         .filter(g -> !(g instanceof EmptyGraph));
                 if (parentGraph.isPresent()) {
@@ -232,15 +232,15 @@ public final class TraversalUtil {
                                         .getGraph()
                                         .filter(g -> !(g instanceof EmptyGraph));
 
-        if (step instanceof TraversalParent) {
-            for (final Traversal.Admin<?, ?> local : ((TraversalParent) step).getLocalChildren()) {
+        if (step instanceof TraversalParent traversalParent) {
+            for (final Traversal.Admin<?, ?> local : traversalParent.getLocalChildren()) {
                 if (local.getGraph().filter(g -> !(g instanceof EmptyGraph)).isPresent()) {
                     continue;
                 }
                 local.setGraph(graph);
             }
             for (final Traversal.Admin<?, ?> global :
-                    ((TraversalParent) step).getGlobalChildren()) {
+                    traversalParent.getGlobalChildren()) {
                 if (global.getGraph().filter(g -> !(g instanceof EmptyGraph)).isPresent()) {
                     continue;
                 }
@@ -395,10 +395,9 @@ public final class TraversalUtil {
             return false;
         }
         Step<?, ?> step = traversal.getStartStep();
-        if (!(step instanceof HasStep)) {
+        if (!(step instanceof HasStep<?> hasStep)) {
             return false;
         }
-        HasStep<?> hasStep = (HasStep<?>) step;
         if (hasStep.getHasContainers().size() != 1) {
             return false;
         }
@@ -648,8 +647,8 @@ public final class TraversalUtil {
             if (value == null) {
                 return true;
             }
-            if (value instanceof Collection) {
-                for (Object label : (Collection<?>) value) {
+            if (value instanceof Collection<?> matchedCollection) {
+                for (Object label : matchedCollection) {
                     if (label == null) {
                         return true;
                     }
@@ -890,16 +889,15 @@ public final class TraversalUtil {
         }
         try {
             SchemaLabel label;
-            if (value instanceof Id) {
-                Id id = (Id) value;
+            if (value instanceof Id id) {
                 // Nonpositive IDs include internal schema objects that aren't
                 // user labels. Preserve their local matching behavior.
                 if (!id.number() || id.asLong() <= 0L) {
                     return false;
                 }
                 label = vertex ? graph.vertexLabel(id) : graph.edgeLabel(id);
-            } else if (value instanceof String) {
-                label = vertex ? graph.vertexLabel((String) value) : graph.edgeLabel((String) value);
+            } else if (value instanceof String matchedString) {
+                label = vertex ? graph.vertexLabel(matchedString) : graph.edgeLabel(matchedString);
             } else {
                 return false;
             }
@@ -919,9 +917,9 @@ public final class TraversalUtil {
         collectPredicates(leaves, ImmutableList.of(copy));
         for (P<Object> leaf : leaves) {
             Object value = leaf.getValue();
-            if (value instanceof Collection) {
+            if (value instanceof Collection<?> matchedCollection) {
                 List<Object> values = new ArrayList<>();
-                for (Object item : (Collection<?>) value) {
+                for (Object item : matchedCollection) {
                     values.add(localIdValue(item));
                 }
                 leaf.setValue(values);
@@ -989,12 +987,12 @@ public final class TraversalUtil {
 
     @SuppressWarnings("unchecked")
     private static boolean testLabelPredicate(P<?> predicate, SchemaLabel label) {
-        if (predicate instanceof NotP) {
-            return !testLabelPredicate(((NotP<?>) predicate).negate(), label);
+        if (predicate instanceof NotP<?> notPredicate) {
+            return !testLabelPredicate(notPredicate.negate(), label);
         }
-        if (predicate instanceof ConnectiveP) {
+        if (predicate instanceof ConnectiveP<?> connectivePredicate) {
             boolean and = predicate instanceof AndP;
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 if (testLabelPredicate(child, label) != and) {
                     return !and;
                 }
@@ -1065,11 +1063,11 @@ public final class TraversalUtil {
         if (cached == null || current.getClass() != cached.getClass()) {
             return false;
         }
-        if (current instanceof NotP) {
-            return samePredicateValues(((NotP<?>) current).negate(), ((NotP<?>) cached).negate());
+        if (current instanceof NotP<?> notPredicate) {
+            return samePredicateValues(notPredicate.negate(), ((NotP<?>) cached).negate());
         }
-        if (current instanceof ConnectiveP) {
-            List<? extends P<?>> children = ((ConnectiveP<?>) current).getPredicates();
+        if (current instanceof ConnectiveP<?> connectivePredicate) {
+            List<? extends P<?>> children = connectivePredicate.getPredicates();
             List<? extends P<?>> oldChildren = ((ConnectiveP<?>) cached).getPredicates();
             if (children.size() != oldChildren.size()) {
                 return false;
@@ -1086,11 +1084,11 @@ public final class TraversalUtil {
     }
 
     private static boolean containsSearchPredicate(P<?> predicate) {
-        if (predicate instanceof NotP) {
-            return containsSearchPredicate(((NotP<?>) predicate).negate());
+        if (predicate instanceof NotP<?> notPredicate) {
+            return containsSearchPredicate(notPredicate.negate());
         }
-        if (predicate instanceof ConnectiveP) {
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+        if (predicate instanceof ConnectiveP<?> connectivePredicate) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 if (containsSearchPredicate(child)) {
                     return true;
                 }
@@ -1102,13 +1100,13 @@ public final class TraversalUtil {
 
     @SuppressWarnings("unchecked")
     private static Predicate<Object> localSearchMatcher(P<?> predicate, HugeGraph graph) {
-        if (predicate instanceof NotP) {
-            Predicate<Object> child = localSearchMatcher(((NotP<?>) predicate).negate(), graph);
+        if (predicate instanceof NotP<?> notPredicate) {
+            Predicate<Object> child = localSearchMatcher(notPredicate.negate(), graph);
             return value -> !child.test(value);
         }
-        if (predicate instanceof ConnectiveP) {
+        if (predicate instanceof ConnectiveP<?> connectivePredicate) {
             List<Predicate<Object>> children = new ArrayList<>();
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 children.add(localSearchMatcher(child, graph));
             }
             boolean and = predicate instanceof AndP;
@@ -1198,8 +1196,7 @@ public final class TraversalUtil {
                 step instanceof FoldStep && !((FoldStep<?, ?>) step).isListFold()) {
                 return false;
             }
-            if (step instanceof TraversalParent) {
-                TraversalParent parent = (TraversalParent) step;
+            if (step instanceof TraversalParent parent) {
                 for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
                     if (!onlyCurrentElementSuffix(child.getSteps())) {
                         return false;
@@ -1220,10 +1217,9 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnsafeLabelInChildren(Step<?, ?> step, boolean negated) {
-        if (!(step instanceof TraversalParent)) {
+        if (!(step instanceof TraversalParent parent)) {
             return false;
         }
-        TraversalParent parent = (TraversalParent) step;
         // Even an EQ label under not() describes a complement, whose property
         // index coverage is unknown. Stay conservative for nested negations too.
         negated |= step instanceof NotStep;
@@ -1351,9 +1347,8 @@ public final class TraversalUtil {
         Step<?, ?> step = newStep;
         do {
             step = step.getNextStep();
-            if (step instanceof OrderGlobalStep) {
+            if (step instanceof OrderGlobalStep<?, ?> orderStep) {
                 QueryHolder holder = (QueryHolder) newStep;
-                OrderGlobalStep<?, ?> orderStep = (OrderGlobalStep<?, ?>) step;
                 orderStep.getComparators().forEach(comp -> {
                     ElementValueComparator<?> comparator =
                             (ElementValueComparator<?>) comp.getValue1();
@@ -1422,8 +1417,7 @@ public final class TraversalUtil {
         Step<?, ?> step = newStep;
         do {
             step = step.getNextStep();
-            if (step instanceof PropertiesStep) {
-                PropertiesStep<?> propStep = (PropertiesStep<?>) step;
+            if (step instanceof PropertiesStep<?> propStep) {
                 if (propStep.getReturnType() == PropertyType.VALUE &&
                     propStep.getPropertyKeys().length == 1) {
                     propertiesStep = propStep;
@@ -1483,9 +1477,9 @@ public final class TraversalUtil {
                 ((String) value).startsWith(TraversalUtil.P_CALL)) {
                 String predicate = (String) value;
                 query.query(TraversalUtil.parsePredicate(pk, predicate));
-            } else if (value instanceof Collection) {
+            } else if (value instanceof Collection<?> matchedCollection) {
                 List<Object> validValues = new ArrayList<>();
-                for (Object v : (Collection<?>) value) {
+                for (Object v : matchedCollection) {
                     validValues.add(TraversalUtil.validPropertyValue(v, pk));
                 }
                 query.query(Condition.in(key, validValues));
@@ -1590,22 +1584,15 @@ public final class TraversalUtil {
         E.checkNotNull(key, "token key");
         Object value = convSysValueIfNeeded(graph, type, key, has.getValue());
 
-        switch ((Compare) bp) {
-            case eq:
-                return Condition.eq(key, value);
-            case gt:
-                return Condition.gt(key, value);
-            case gte:
-                return Condition.gte(key, value);
-            case lt:
-                return Condition.lt(key, value);
-            case lte:
-                return Condition.lte(key, value);
-            case neq:
-                return Condition.neq(key, value);
-            default:
-                throw newUnsupportedPredicate(has.getPredicate());
-        }
+        return switch ((Compare) bp) {
+            case eq -> Condition.eq(key, value);
+            case gt -> Condition.gt(key, value);
+            case gte -> Condition.gte(key, value);
+            case lt -> Condition.lt(key, value);
+            case lte -> Condition.lte(key, value);
+            case neq -> Condition.neq(key, value);
+            default -> throw newUnsupportedPredicate(has.getPredicate());
+        };
     }
 
     private static Condition convCompare2UserpropRelation(HugeGraph graph,
@@ -1624,47 +1611,33 @@ public final class TraversalUtil {
                                                        (Boolean) value);
         }
 
-        switch ((Compare) bp) {
-            case eq:
-                return Condition.eq(pkeyId, value);
-            case gt:
-                return Condition.gt(pkeyId, value);
-            case gte:
-                return Condition.gte(pkeyId, value);
-            case lt:
-                return Condition.lt(pkeyId, value);
-            case lte:
-                return Condition.lte(pkeyId, value);
-            case neq:
-                return Condition.neq(pkeyId, value);
-            default:
-                throw newUnsupportedPredicate(has.getPredicate());
-        }
+        return switch ((Compare) bp) {
+            case eq -> Condition.eq(pkeyId, value);
+            case gt -> Condition.gt(pkeyId, value);
+            case gte -> Condition.gte(pkeyId, value);
+            case lt -> Condition.lt(pkeyId, value);
+            case lte -> Condition.lte(pkeyId, value);
+            case neq -> Condition.neq(pkeyId, value);
+            default -> throw newUnsupportedPredicate(has.getPredicate());
+        };
     }
 
     private static Condition convCompare2BooleanUserpropRelation(Compare compare,
                                                                  Id key,
                                                                  Boolean value) {
-        switch (compare) {
-            case eq:
-                return Condition.eq(key, value);
-            case neq:
-                return Condition.eq(key, !value);
-            case gt:
-                return value ? Condition.in(key, ImmutableList.of()) :
+        return switch (compare) {
+            case eq -> Condition.eq(key, value);
+            case neq -> Condition.eq(key, !value);
+            case gt -> value ? Condition.in(key, ImmutableList.of()) :
                        Condition.eq(key, true);
-            case gte:
-                return value ? Condition.eq(key, true) :
+            case gte -> value ? Condition.eq(key, true) :
                        Condition.in(key, ImmutableList.of(false, true));
-            case lt:
-                return value ? Condition.eq(key, false) :
+            case lt -> value ? Condition.eq(key, false) :
                        Condition.in(key, ImmutableList.of());
-            case lte:
-                return value ? Condition.in(key, ImmutableList.of(false, true)) :
+            case lte -> value ? Condition.in(key, ImmutableList.of(false, true)) :
                        Condition.eq(key, false);
-            default:
-                throw new AssertionError(compare);
-        }
+            default -> throw new AssertionError(compare);
+        };
     }
 
     private static Condition convRelationType2Relation(HugeGraph graph,
@@ -1700,27 +1673,21 @@ public final class TraversalUtil {
         List<?> valueList;
         if (hugeKey != null) {
             valueList = convSysListValueIfNeeded(graph, type, hugeKey, values);
-            switch ((Contains) bp) {
-                case within:
-                    return Condition.in(hugeKey, valueList);
-                case without:
-                    return Condition.nin(hugeKey, valueList);
-                default:
-                    throw newUnsupportedPredicate(has.getPredicate());
-            }
+            return switch ((Contains) bp) {
+                case within -> Condition.in(hugeKey, valueList);
+                case without -> Condition.nin(hugeKey, valueList);
+                default -> throw newUnsupportedPredicate(has.getPredicate());
+            };
         } else {
             valueList = new ArrayList<>(values);
             String key = has.getKey();
             PropertyKey pkey = graph.propertyKey(key);
 
-            switch ((Contains) bp) {
-                case within:
-                    return Condition.in(pkey.id(), valueList);
-                case without:
-                    return Condition.nin(pkey.id(), valueList);
-                default:
-                    throw newUnsupportedPredicate(has.getPredicate());
-            }
+            return switch ((Contains) bp) {
+                case within -> Condition.in(pkey.id(), valueList);
+                case without -> Condition.nin(pkey.id(), valueList);
+                default -> throw newUnsupportedPredicate(has.getPredicate());
+            };
         }
     }
 
@@ -1889,12 +1856,12 @@ public final class TraversalUtil {
         if (predicate == null) {
             return null;
         }
-        if (predicate instanceof NotP) {
-            return new NotP(copyResolvedPredicate(((NotP<?>) predicate).negate()));
+        if (predicate instanceof NotP<?> notPredicate) {
+            return new NotP(copyResolvedPredicate(notPredicate.negate()));
         }
-        if (predicate instanceof ConnectiveP) {
+        if (predicate instanceof ConnectiveP<?> connectivePredicate) {
             List<P<Object>> children = new ArrayList<>();
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 children.add((P<Object>) copyResolvedPredicate(child));
             }
             return predicate instanceof AndP ? new AndP<>(children) : new OrP<>(children);
@@ -1929,12 +1896,12 @@ public final class TraversalUtil {
         }
 
         private static boolean testIdPredicate(P<?> predicate, Element element) {
-            if (predicate instanceof NotP) {
-                return !testIdPredicate(((NotP<?>) predicate).negate(), element);
+            if (predicate instanceof NotP<?> notPredicate) {
+                return !testIdPredicate(notPredicate.negate(), element);
             }
-            if (predicate instanceof ConnectiveP) {
+            if (predicate instanceof ConnectiveP<?> connectivePredicate) {
                 boolean conjunction = predicate instanceof AndP;
-                for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                for (P<?> child : connectivePredicate.getPredicates()) {
                     if (testIdPredicate(child, element) != conjunction) {
                         return !conjunction;
                     }
@@ -1971,22 +1938,22 @@ public final class TraversalUtil {
 
     @SuppressWarnings("unchecked")
     private static void updateLocalIdPredicate(P<?> predicate) {
-        if (predicate instanceof NotP) {
+        if (predicate instanceof NotP<?> notPredicate) {
             // negate() exposes NotP's child without removing the wrapper.
-            updateLocalIdPredicate(((NotP<?>) predicate).negate());
-        } else if (predicate instanceof ConnectiveP) {
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            updateLocalIdPredicate(notPredicate.negate());
+        } else if (predicate instanceof ConnectiveP<?> connectivePredicate) {
+            for (P<?> child : connectivePredicate.getPredicates()) {
                 updateLocalIdPredicate(child);
             }
         } else if (predicate.getBiPredicate() instanceof Compare ||
                    predicate.getBiPredicate() instanceof Contains) {
             P<Object> leaf = (P<Object>) predicate;
             Object value = leaf.getValue();
-            if (value instanceof UUID) {
-                leaf.setValue(IdGenerator.of((UUID) value));
-            } else if (value instanceof Collection) {
+            if (value instanceof UUID uuid) {
+                leaf.setValue(IdGenerator.of(uuid));
+            } else if (value instanceof Collection<?> matchedCollection) {
                 List<Object> values = new ArrayList<>();
-                for (Object item : (Collection<?>) value) {
+                for (Object item : matchedCollection) {
                     values.add(item instanceof UUID ?
                                IdGenerator.of((UUID) item) : item);
                 }
@@ -2012,8 +1979,8 @@ public final class TraversalUtil {
             if (isNullInequalityPredicate(pred)) {
                 continue;
             }
-            if (pred instanceof NotP) {
-                updatePredicateValue(((NotP<?>) pred).negate(), pkey);
+            if (pred instanceof NotP<?> notPredicate) {
+                updatePredicateValue(notPredicate.negate(), pkey);
                 continue;
             }
             if (pred.getBiPredicate() instanceof CompareType) {
@@ -2051,8 +2018,8 @@ public final class TraversalUtil {
     private static void collectPredicates(List<P<Object>> results,
                                           List<P<?>> predicates) {
         for (P<?> p : predicates) {
-            if (p instanceof ConnectiveP) {
-                collectPredicates(results, ((ConnectiveP) p).getPredicates());
+            if (p instanceof ConnectiveP connectivePredicate) {
+                collectPredicates(results, connectivePredicate.getPredicates());
             } else {
                 results.add((P<Object>) p);
             }
@@ -2166,8 +2133,8 @@ public final class TraversalUtil {
 
     public static QueryHolder rootStep(GraphTraversal<?, ?> traversal) {
         for (final Step<?, ?> step : traversal.asAdmin().getSteps()) {
-            if (step instanceof QueryHolder) {
-                return (QueryHolder) step;
+            if (step instanceof QueryHolder queryHolder) {
+                return queryHolder;
             }
         }
         return null;

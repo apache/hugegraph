@@ -246,10 +246,9 @@ public class EdgeIdOffHeap extends EdgeId implements OffHeapObject {
 
     @Override
     public boolean equals(Object object) {
-        if (!(object instanceof EdgeIdOffHeap)) {
+        if (!(object instanceof EdgeIdOffHeap other)) {
             return false;
         }
-        EdgeIdOffHeap other = (EdgeIdOffHeap) object;
         if (this.directed) {
             return this.ownerVertexIdOffHeap.equals(other.ownerVertexIdOffHeap) &&
                    this.direction == other.direction &&

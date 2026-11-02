@@ -292,17 +292,12 @@ public class OffheapCache extends AbstractCache<Id, Object> {
 
         private Object deserialize(BytesBuffer buffer) {
             ValueType type = ValueType.valueOf(buffer.read());
-            switch (type) {
-                case LIST:
-                    return deserializeList(buffer);
-                case VERTEX:
-                case EDGE:
-                    return deserializeElement(type, buffer);
-                case UNKNOWN:
-                    throw unsupported(type);
-                default:
-                    return buffer.readProperty(type.dataType());
-            }
+            return switch (type) {
+                case LIST -> deserializeList(buffer);
+                case VERTEX, EDGE -> deserializeElement(type, buffer);
+                case UNKNOWN -> throw unsupported(type);
+                default -> buffer.readProperty(type.dataType());
+            };
         }
 
         private void serializeList(BytesBuffer buffer, Collection<Object> list) {

@@ -347,10 +347,9 @@ public class TextBackendEntry implements BackendEntry, Cloneable {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof TextBackendEntry)) {
+        if (!(obj instanceof TextBackendEntry other)) {
             return false;
         }
-        TextBackendEntry other = (TextBackendEntry) obj;
         if (this.id() != other.id() && !this.id().equals(other.id())) {
             return false;
         }

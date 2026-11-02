@@ -274,7 +274,7 @@ public class HstoreTables {
             BytesBuffer key = BytesBuffer.wrap(id.asBytes());
             Id propertyId = key.readId();
             Id vertexId = key.readId();
-            byte[] owner = this.getOwnerId(id instanceof BinaryId ? ((BinaryId) id).origin() : vertexId);
+            byte[] owner = this.getOwnerId(id instanceof BinaryId binaryId ? binaryId.origin() : vertexId);
             byte[] value = session.get(this.table(), owner, id.asBytes());
             if (value == null || value.length == 0) {
                 byte[] legacyKey = BytesBuffer.allocate(vertexId.length() + 9).writeId(vertexId).bytes();

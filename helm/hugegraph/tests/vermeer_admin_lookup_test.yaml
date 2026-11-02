@@ -1,0 +1,143 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Vermeer native login preserves its independent password during upgrades
+templates:
+  - vermeer-admin-secret.yaml
+  - vermeer-statefulset.yaml
+set:
+  vermeer.enabled: true
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+  objects:
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-vermeer-admin
+        namespace: NAMESPACE
+      data:
+        password: UGVyc2lzdGVkTG9naW4xMjM=
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: external-ui
+        namespace: NAMESPACE
+        resourceVersion: "17"
+      data:
+        ui-password: b3BlcmF0b3ItbG9naW4=
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: six-vermeer-admin
+        namespace: NAMESPACE
+      data:
+        password: QWIxMnhZ
+tests:
+  - it: preserves an existing easy password when switching to strict
+    template: vermeer-admin-secret.yaml
+    release:
+      name: six
+    set:
+      mode: strict
+    asserts:
+      - equal:
+          path: data.password
+          decodeBase64: true
+          value: Ab12xY
+
+  - it: reuses the installed native login password
+    template: vermeer-admin-secret.yaml
+    asserts:
+      - equal:
+          path: data.password
+          decodeBase64: true
+          value: PersistedLogin123
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+
+  - it: hashes the retained value so a no-change upgrade does not roll Master
+    template: vermeer-statefulset.yaml
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-admin"]
+          value: 7dca73c0c56b428dd060708b58055b2cd1e9a38d31017cde4c7881c3d4ef8b40
+
+  - it: keeps that checksum when pinning the installed password explicitly
+    template: vermeer-statefulset.yaml
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    set:
+      vermeer.auth.admin.password: PersistedLogin123
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-admin"]
+          value: 7dca73c0c56b428dd060708b58055b2cd1e9a38d31017cde4c7881c3d4ef8b40
+
+  - it: does not manage the external login Secret
+    template: vermeer-admin-secret.yaml
+    set:
+      vermeer.auth.admin.existingSecret: external-ui
+      vermeer.auth.admin.key: ui-password
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: tracks the external Secret revision and ignores an unused inline password
+    template: vermeer-statefulset.yaml
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    set:
+      vermeer.auth.admin.existingSecret: external-ui
+      vermeer.auth.admin.key: ui-password
+      vermeer.auth.admin.password: unused-inline-password
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/vermeer-admin"]
+          value: 384c79eb04541fb1216e49b3739cfa3ac87bf7a3ae3c84891eabda9421351b4b
+
+  - it: generates a 6 character independent login for a fresh easy release
+    template: vermeer-admin-secret.yaml
+    release:
+      name: fresh
+    asserts:
+      - matchRegex:
+          path: data.password
+          decodeBase64: true
+          pattern: '^[A-Za-z0-9]{6}$'
+
+  - it: generates a 16 character independent login for a fresh strict release
+    template: vermeer-admin-secret.yaml
+    release:
+      name: fresh
+    set:
+      mode: strict
+    asserts:
+      - matchRegex:
+          path: data.password
+          decodeBase64: true
+          pattern: '^[A-Za-z0-9]{16}$'

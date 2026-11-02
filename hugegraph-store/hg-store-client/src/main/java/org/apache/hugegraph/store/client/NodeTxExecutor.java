@@ -239,8 +239,8 @@ final class NodeTxExecutor {
         Iterator<Throwable> it = failures.iterator();
         Throwable first = it.next();
         Throwable cause = first.getCause() != null ? first.getCause() : first;
-        HgStoreClientException result = cause instanceof HgStoreClientException ?
-                                        (HgStoreClientException) cause :
+        HgStoreClientException result = cause instanceof HgStoreClientException failure ?
+                                        failure :
                                         HgStoreClientException.of(cause);
         while (it.hasNext()) {
             Throwable other = it.next();
@@ -284,8 +284,8 @@ final class NodeTxExecutor {
 
     public synchronized HgStoreSession openNodeSession(HgStoreNode node) {
         HgStoreSession res = this.sessions.get(node.getNodeId());
-        if (res instanceof HgStoreNodeSession &&
-            ((HgStoreNodeSession) res).getStoreNode() != node) {
+        if (res instanceof HgStoreNodeSession session &&
+            session.getStoreNode() != node) {
             // A retry can receive the same node ID backed by a new Store process.
             this.sessions.remove(node.getNodeId());
             res = null;
@@ -495,8 +495,8 @@ final class NodeTxExecutor {
             if (c instanceof InterruptedException) {
                 return Failure.FATAL;
             }
-            if (c instanceof StatusRuntimeException) {
-                Status.Code code = ((StatusRuntimeException) c).getStatus().getCode();
+            if (c instanceof StatusRuntimeException failure) {
+                Status.Code code = failure.getStatus().getCode();
                 if (code == Status.Code.CANCELLED) {
                     return Failure.FATAL;
                 }

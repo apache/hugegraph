@@ -56,6 +56,26 @@ public class MetadataFactory {
         return store;
     }
 
+    /**
+     * Open the store like {@link #getStore}, and return it only when this call opened it.
+     */
+    public static synchronized HgKVStore openStore(PDConfig pdConfig) {
+        HgKVStore previous = store;
+        HgKVStore current = getStore(pdConfig);
+        return previous == null ? current : null;
+    }
+
+    /**
+     * Close a store that a failed startup opened, so its LOCK does not outlive the attempt.
+     * A store another caller has replaced it with stays open.
+     */
+    public static synchronized void discardStore(HgKVStore opened) {
+        if (opened != null && store == opened) {
+            store = null;
+            opened.close();
+        }
+    }
+
     public static synchronized void closeStore() {
         if (store != null) {
             store.close();

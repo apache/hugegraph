@@ -13,12 +13,12 @@ on:
         description: Tests to run on the selected branch
         type: choice
         default: mainline
-        options: [mainline, distributed, macos-arm, hbase, riscv64, codeql, full]
+        options: [mainline, dependencies, distributed, macos-arm, hbase, riscv64, codeql, full]
 
-# A new PR head replaces its old run; scheduled and manual runs stay independent.
+# New PR heads and master pushes replace their old runs; scheduled and manual runs stay independent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref) || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 permissions:
   contents: read
@@ -28,10 +28,11 @@ jobs:
   preflight:
     name: check-license
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     outputs:
+      dependency_baseline: ${{ steps.baseline.outputs.enabled }}
       selection_result: ${{ steps.select.outcome }}
       java_result: ${{ steps.java.outcome }}
       java_versions: ${{ steps.java.outputs.versions }}
@@ -69,6 +70,12 @@ jobs:
           --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH"
           --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/ci-plan.json"
 
+      - name: Select trusted master baseline
+        id: baseline
+        env:
+          ENABLED: ${{ ((github.repository == 'apache/hugegraph' && github.event.repository.fork == false) || github.repository == 'hugegraph/hugegraph') && github.ref == 'refs/heads/master' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test-set == 'dependencies')) }}
+        run: echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
+
       - name: Read project Java runtime
         id: java
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
@@ -98,6 +105,10 @@ jobs:
       - name: Test CI policy and deployment checks
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Check Helm chart
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.select.outputs.helm == 'true' }}
+        uses: ./.github/actions/helm-checks
 
       - name: Check license headers
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
@@ -164,15 +175,24 @@ jobs:
     with:
       smoke-only: ${{ needs.preflight.outputs.distributed_smoke == 'true' && needs.preflight.outputs.docker != 'true' }}
 
-  helm:
-    needs: preflight
-    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.helm == 'true' }}
-    uses: ./.github/workflows/helm-chart-ci.yml
-
   dependency_license:
     needs: preflight
-    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.dependency_license == 'true' }}
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.dependency_license == 'true' || (needs.preflight.outputs.dependency_baseline == 'true' && needs.preflight.result == 'success')) }}
     uses: ./.github/workflows/check-dependencies.yml
+    with:
+      check-inventory: ${{ needs.preflight.outputs.dependency_license == 'true' }}
+      submit-baseline: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' }}
+
+  dependency_baseline:
+    needs: [preflight, dependency_license]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' && needs.dependency_license.result == 'success' }}
+    uses: ./.github/workflows/submit-dependencies.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      artifact-id: ${{ needs.dependency_license.outputs.artifact_id }}
+      inventory-artifact-id: ${{ needs.dependency_license.outputs.inventory_artifact_id }}
 
   compatibility:
     needs: preflight

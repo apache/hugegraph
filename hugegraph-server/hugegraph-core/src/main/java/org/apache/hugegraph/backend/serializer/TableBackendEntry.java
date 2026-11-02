@@ -274,10 +274,9 @@ public class TableBackendEntry implements BackendEntry {
 
     @Override
     public boolean mergeable(BackendEntry other) {
-        if (!(other instanceof TableBackendEntry)) {
+        if (!(other instanceof TableBackendEntry tableEntry)) {
             return false;
         }
-        TableBackendEntry tableEntry = (TableBackendEntry) other;
         Object selfId = this.column(HugeKeys.ID);
         Object otherId = tableEntry.column(HugeKeys.ID);
         if (!selfId.equals(otherId)) {

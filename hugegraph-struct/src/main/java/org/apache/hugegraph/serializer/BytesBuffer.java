@@ -228,8 +228,9 @@ public class BytesBuffer extends OutputStream {
                             requiredCapacity, maxCapacity);
         }
 
-        // Extra capacity as buffer
-        long newCapacity = Math.min(requiredCapacity + DEFAULT_CAPACITY,
+        // Avoid copying the entire buffer for every small appended block.
+        long newCapacity = Math.min(Math.max(requiredCapacity + DEFAULT_CAPACITY,
+                                            (long) this.buffer.capacity() * 2),
                                     maxCapacity);
         ByteBuffer newBuffer = ByteBuffer.allocate((int) newCapacity);
         this.buffer.flip();
@@ -665,14 +666,11 @@ public class BytesBuffer extends OutputStream {
 
     @SuppressWarnings("unchecked")
     public <T> T newValue(Cardinality cardinality) {
-        switch (cardinality) {
-            case SET:
-                return (T) new LinkedHashSet<>();
-            case LIST:
-                return (T) new ArrayList<>();
-            default:
-                return null;
-        }
+        return switch (cardinality) {
+            case SET -> (T) new LinkedHashSet<>();
+            case LIST -> (T) new ArrayList<>();
+            default -> null;
+        };
     }
 
     public static byte getCardinality(int value) {
@@ -706,7 +704,7 @@ public class BytesBuffer extends OutputStream {
                 this.writeString((String) value);
                 break;
             case BLOB:
-                byte[] bytes = value instanceof byte[] ? (byte[]) value : ((Blob) value).bytes();
+                byte[] bytes = value instanceof byte[] data ? data : ((Blob) value).bytes();
                 this.writeBigBytes(bytes);
                 break;
             case UUID:
@@ -726,30 +724,19 @@ public class BytesBuffer extends OutputStream {
     }
 
     public Object readProperty(DataType dataType) {
-        switch (dataType) {
-            case BOOLEAN:
-                return this.readVInt() == 1;
-            case BYTE:
-                return (byte) this.readVInt();
-            case INT:
-                return this.readVInt();
-            case FLOAT:
-                return this.readFloat();
-            case LONG:
-                return this.readVLong();
-            case DATE:
-                return new Date(this.readVLong());
-            case DOUBLE:
-                return this.readDouble();
-            case TEXT:
-                return this.readString();
-            case BLOB:
-                return Blob.wrap(this.readBigBytes());
-            case UUID:
-                return new UUID(this.readLong(), this.readLong());
-            default:
-                return KryoUtil.fromKryoWithType(this.readBytes());
-        }
+        return switch (dataType) {
+            case BOOLEAN -> this.readVInt() == 1;
+            case BYTE -> (byte) this.readVInt();
+            case INT -> this.readVInt();
+            case FLOAT -> this.readFloat();
+            case LONG -> this.readVLong();
+            case DATE -> new Date(this.readVLong());
+            case DOUBLE -> this.readDouble();
+            case TEXT -> this.readString();
+            case BLOB -> Blob.wrap(this.readBigBytes());
+            case UUID -> new UUID(this.readLong(), this.readLong());
+            default -> KryoUtil.fromKryoWithType(this.readBytes());
+        };
     }
 
     /** Skip a tagged property without allocating its value or collection. */

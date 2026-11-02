@@ -74,8 +74,8 @@ public class MultiStreamIterator<E> implements HgKvIterator<E> {
                 }
             }
         }
-        if (failure instanceof Error) {
-            throw (Error) failure;
+        if (failure instanceof Error error) {
+            throw error;
         }
         if (failure != null) {
             throw (RuntimeException) failure;

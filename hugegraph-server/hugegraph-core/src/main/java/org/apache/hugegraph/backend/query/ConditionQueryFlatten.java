@@ -165,8 +165,8 @@ public final class ConditionQueryFlatten {
         for (Object value : values) {
             Condition cond;
             // Convert IN to EQ
-            if (key instanceof HugeKeys) {
-                cond = Condition.eq((HugeKeys) key, value);
+            if (key instanceof HugeKeys hugeKeys) {
+                cond = Condition.eq(hugeKeys, value);
             } else {
                 cond = Condition.eq((Id) key, value);
             }
@@ -184,8 +184,8 @@ public final class ConditionQueryFlatten {
         Condition cond;
         Condition conds = null;
         for (Object value : values) {
-            if (key instanceof HugeKeys) {
-                cond = Condition.neq((HugeKeys) key, value);
+            if (key instanceof HugeKeys hugeKeys) {
+                cond = Condition.neq(hugeKeys, value);
             } else {
                 cond = Condition.neq((Id) key, value);
             }

@@ -81,18 +81,13 @@ public class NodeEvent {
         NODE_PD_LEADER_CHANGE;
 
         public static EventType grpcTypeOf(NodeEventType grpcType) {
-            switch (grpcType) {
-                case NODE_EVENT_TYPE_NODE_ONLINE:
-                    return NODE_ONLINE;
-                case NODE_EVENT_TYPE_NODE_OFFLINE:
-                    return NODE_OFFLINE;
-                case NODE_EVENT_TYPE_NODE_RAFT_CHANGE:
-                    return NODE_RAFT_CHANGE;
-                case NODE_EVENT_TYPE_PD_LEADER_CHANGE:
-                    return NODE_PD_LEADER_CHANGE;
-                default:
-                    return UNKNOWN;
-            }
+            return switch (grpcType) {
+                case NODE_EVENT_TYPE_NODE_ONLINE -> NODE_ONLINE;
+                case NODE_EVENT_TYPE_NODE_OFFLINE -> NODE_OFFLINE;
+                case NODE_EVENT_TYPE_NODE_RAFT_CHANGE -> NODE_RAFT_CHANGE;
+                case NODE_EVENT_TYPE_PD_LEADER_CHANGE -> NODE_PD_LEADER_CHANGE;
+                default -> UNKNOWN;
+            };
 
         }
 

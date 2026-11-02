@@ -832,7 +832,7 @@ tests:
         documentIndex: 0
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-helm-0.2.0
+          value: hugegraph-helm-0.4.0
         documentIndex: 0
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -840,7 +840,7 @@ tests:
         documentIndex: 1
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-helm-0.2.0
+          value: hugegraph-helm-0.4.0
         documentIndex: 1
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -848,7 +848,7 @@ tests:
         documentIndex: 2
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-helm-0.2.0
+          value: hugegraph-helm-0.4.0
         documentIndex: 2
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
@@ -856,7 +856,7 @@ tests:
         documentIndex: 3
       - equal:
           path: metadata.labels["helm.sh/chart"]
-          value: hugegraph-helm-0.2.0
+          value: hugegraph-helm-0.4.0
         documentIndex: 3
 
   - it: appends extra rules verbatim

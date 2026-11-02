@@ -43,6 +43,26 @@ assert denied.returncode == 0, denied.stderr
 assert '--security-opt seccomp=unconfined' in denied.stderr, denied.stderr
 assert 'nproc' not in denied.stderr and 'thread limits' not in denied.stderr, denied.stderr
 
+for message in ['pthread_create failed (EAGAIN) for attributes: stacksize: 1024k',
+                'pthread_create failed: Resource temporarily unavailable']:
+    exhausted = subprocess.run(['bash', '-c', 'source "$1"; print_jvm_thread_hint',
+                               'bash', str(static / 'util.sh')],
+                              input=message, text=True, capture_output=True)
+    assert exhausted.returncode == 0, exhausted.stderr
+    assert 'insufficient memory, or process/thread limits' in exhausted.stderr, exhausted.stderr
+    assert 'JVM thread creation was denied' not in exhausted.stderr, exhausted.stderr
+mixed = subprocess.run(['bash', '-c', 'source "$1"; print_jvm_thread_hint',
+                        'bash', str(static / 'util.sh')],
+                       input='pthread_create failed (EAGAIN)\npthread_create failed (EPERM)\n',
+                       text=True, capture_output=True)
+assert mixed.returncode == 0 and 'denied (EPERM)' in mixed.stderr, mixed.stderr
+assert 'nproc' not in mixed.stderr and 'Possible causes' not in mixed.stderr, mixed.stderr
+for message in ['unrelated I/O failed (EAGAIN)', 'Resource temporarily unavailable', 'Address already in use']:
+    unrelated = subprocess.run(['bash', '-c', 'source "$1"; print_jvm_thread_hint',
+                                'bash', str(static / 'util.sh')],
+                               input=message, text=True, capture_output=True)
+    assert unrelated.returncode == 1 and not unrelated.stderr, unrelated.stderr
+
 
 def await_file(path, process):
     deadline = time.monotonic() + 5

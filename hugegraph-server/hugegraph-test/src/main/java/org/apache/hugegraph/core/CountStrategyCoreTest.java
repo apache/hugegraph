@@ -829,9 +829,9 @@ public class CountStrategyCoreTest extends BaseCoreTest {
 
         boolean foundRangeStep = false;
         for (Step<?, ?> step : traversal.asAdmin().getSteps()) {
-            if (step instanceof TraversalParent) {
+            if (step instanceof TraversalParent traversalParent) {
                 for (Traversal.Admin<?, ?> inner :
-                     ((TraversalParent) step).getLocalChildren()) {
+                     traversalParent.getLocalChildren()) {
                     for (Step<?, ?> innerStep : inner.getSteps()) {
                         if (innerStep instanceof RangeGlobalStep) {
                             foundRangeStep = true;

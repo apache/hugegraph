@@ -105,7 +105,7 @@ public class PDRestService implements InitializingBean {
     }
 
     public Metapb.GraphSpace setGraphSpace(Metapb.GraphSpace graphSpace) throws PDException {
-        return configService.setGraphSpace(graphSpace);
+        return configService.setGraphSpaceLimit(graphSpace);
     }
 
     public List<Metapb.GraphSpace> getGraphSpaces() throws PDException {

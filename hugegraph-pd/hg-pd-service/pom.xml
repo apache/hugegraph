@@ -191,6 +191,7 @@
                 <executions>
                     <execution>
                         <configuration>
+                            <classifier>exec</classifier>
                             <mainClass>
                                 org.apache.hugegraph.pd.boot.HugePDServer
                             </mainClass>

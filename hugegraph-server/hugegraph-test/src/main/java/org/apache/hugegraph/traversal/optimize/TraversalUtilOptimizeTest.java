@@ -1426,8 +1426,8 @@ public class TraversalUtilOptimizeTest {
     private static HugeVertexStep<?> replaceVertexStep(Traversal.Admin<?, ?> traversal) {
         VertexStep<Vertex> origin = null;
         for (Step<?, ?> step : traversal.getSteps()) {
-            if (step instanceof VertexStep) {
-                origin = (VertexStep) step;
+            if (step instanceof VertexStep matchedVertexStep) {
+                origin = matchedVertexStep;
                 break;
             }
         }
@@ -1470,10 +1470,9 @@ public class TraversalUtilOptimizeTest {
     private static boolean hasStepExists(Traversal.Admin<?, ?> traversal,
                                          String key) {
         for (Step<?, ?> step : traversal.getSteps()) {
-            if (!(step instanceof HasStep)) {
+            if (!(step instanceof HasStep<?> hasStep)) {
                 continue;
             }
-            HasStep<?> hasStep = (HasStep<?>) step;
             for (HasContainer has : hasStep.getHasContainers()) {
                 if (key.equals(has.getKey())) {
                     return true;

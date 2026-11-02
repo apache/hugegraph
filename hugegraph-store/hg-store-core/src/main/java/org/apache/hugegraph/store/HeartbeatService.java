@@ -149,8 +149,8 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
                     }
                 }
             } catch (Throwable e) {
-                if (e instanceof PDRuntimeException &&
-                    ((PDRuntimeException) e).getErrorCode() == PD_UNREACHABLE_VALUE) {
+                if (e instanceof PDRuntimeException failure &&
+                    failure.getErrorCode() == PD_UNREACHABLE_VALUE) {
                     log.error("store heartbeat error: PD UNREACHABLE");
                     synchronized (storeThreadLock) {
                         try {

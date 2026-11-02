@@ -49,8 +49,8 @@ public class KeyUtil {
     }
 
     public static byte[] getOwnerId(Id id) {
-        if (id instanceof BinaryId) {
-            id = ((BinaryId) id).origin();
+        if (id instanceof BinaryId binaryId) {
+            id = binaryId.origin();
         }
         if (id != null && id.edge()) {
             id = ((EdgeId) id).ownerVertexId();

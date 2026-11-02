@@ -55,12 +55,22 @@ public class PDConfig implements InitializingBean {
     @Value("${pd.cluster_id:1}")
     private long clusterId;
 
+    // Server metadata namespace, distinct from the numeric PD cluster ID.
+    @Value("${pd.server-cluster:hg}")
+    private String serverCluster = "hg";
+
     // The patrol task interval
     @Value("${pd.patrol-interval:300}")
     private long patrolInterval = 300;
     @Value("${pd.data-path}")
     private String dataPath;
-    @Value("${pd.initial-store-count:3}")
+    // Default to the single-Store distribution; multi-Store deployments override this.
+    @Value("${pd.initial-store-count:1}")
+    private int initialStoreCount = 1;
+
+    // Extra placement/retirement floor, persisted in PDConfig.min_store_count. Zero means
+    // no extra floor beyond the desired replica count, including metadata from older versions.
+    @Value("${pd.min-store-count:0}")
     private int minStoreCount;
 
     // The initial store list, within which the store is automatically activated
@@ -314,8 +324,8 @@ public class PDConfig implements InitializingBean {
         @Value("${partition.store-max-shard-count:24}")
         private int maxShardsPerStore = 24;
 
-        @Value("${partition.default-shard-count:3}")
-        private int shardCount = 3;
+        @Value("${partition.default-shard-count:1}")
+        private int shardCount = 1;
 
         public int getTotalCount() {
             if (totalCount == 0) {

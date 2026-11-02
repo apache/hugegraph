@@ -33,7 +33,7 @@ Use Docker to quickly start a standalone HugeGraph Server with RocksDB.
 
 To preload sample data on startup, set `PRELOAD=true`.
 
-To customize the preload, mount your own Groovy script.
+To customize the preload, mount your own Groovy script. Images built from this version run as UID `10001`, so the script must be readable by that user; see [Container user](../../../docker/README.md#container-user).
 
 1. Using `docker run`
 

@@ -286,11 +286,9 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof Element)) {
+        if (!(obj instanceof Element other)) {
             return false;
         }
-
-        Element other = (Element) obj;
         if (this.id() == null) {
             return false;
         }
@@ -367,21 +365,21 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
             return null;
         }
 
-        if (idValue instanceof String) {
+        if (idValue instanceof String matchedString) {
             // String id
-            return IdGenerator.of((String) idValue);
-        } else if (idValue instanceof Number) {
+            return IdGenerator.of(matchedString);
+        } else if (idValue instanceof Number number) {
             // Long id
-            return IdGenerator.of(((Number) idValue).longValue());
-        } else if (idValue instanceof UUID) {
+            return IdGenerator.of(number.longValue());
+        } else if (idValue instanceof UUID uuid) {
             // UUID id
-            return IdGenerator.of((UUID) idValue);
-        } else if (idValue instanceof Id) {
+            return IdGenerator.of(uuid);
+        } else if (idValue instanceof Id matchedId) {
             // Id itself
-            return (Id) idValue;
-        } else if (idValue instanceof Element) {
+            return matchedId;
+        } else if (idValue instanceof Element matchedElement) {
             // Element
-            return (Id) ((Element) idValue).id();
+            return (Id) matchedElement.id();
         }
 
         // Throw if error type
@@ -401,8 +399,8 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
                                 "Expect a string or a VertexLabel object " +
                                 "as the vertex label argument, but got: '%s'",
                                 labelValue);
-                if (labelValue instanceof String) {
-                    ElementHelper.validateLabel((String) labelValue);
+                if (labelValue instanceof String matchedString) {
+                    ElementHelper.validateLabel(matchedString);
                 }
                 break;
             }

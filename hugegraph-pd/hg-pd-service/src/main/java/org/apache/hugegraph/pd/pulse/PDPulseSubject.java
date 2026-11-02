@@ -406,8 +406,7 @@ public class PDPulseSubject {
             try {
                 subject.handleClientNotice(noticeRequest);
             } catch (Exception e) {
-                if (e instanceof PDException) {
-                    var pde = (PDException) e;
+                if (e instanceof PDException pde) {
                     if (pde.getErrorCode() == NOT_LEADER.getNumber()) {
                         try {
                             log.info("send change leader command to watch, due to ERROR-100", pde);

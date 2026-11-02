@@ -414,7 +414,7 @@ public class EdgeLabel extends SchemaLabel {
             Object value = map.get(P.LINKS);
             E.checkArgument(value instanceof List, "Invalid edge label links: %s", value);
             for (Object item : (List<?>) value) {
-                E.checkArgument(item instanceof Map && !((Map<?, ?>) item).isEmpty(),
+                E.checkArgument(item instanceof Map<?, ?> linkMap && !linkMap.isEmpty(),
                                 "Invalid edge label link: %s", item);
                 for (Map.Entry<?, ?> link : ((Map<?, ?>) item).entrySet()) {
                     links.add(Pair.of(linkId(link.getKey(), P.SOURCE_LABEL),
