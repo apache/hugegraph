@@ -59,6 +59,14 @@ runs:
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_metadata_cluster.py' -v
 
+  - name: Stable bootstrap topology regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_bootstrap.py' -v
+
+  - name: Bootstrap adoption preflight regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_bootstrap_adoption.py' -v
+
   - name: helm unittest
     shell: 'bash -e {0}'
     run: |
@@ -547,7 +555,9 @@ runs:
       cp -R helm/hugegraph "$LEGACY_ROOT/chart"
       cp helm/hugegraph/testdata/values-pre-hardening.yaml "$LEGACY_ROOT/chart/values.yaml"
       helm template legacy "$LEGACY_ROOT/chart" > /dev/null
-      LEGACY_UPGRADE=$(helm template legacy "$LEGACY_ROOT/chart" --is-upgrade)
+      LEGACY_UPGRADE=$(helm template legacy "$LEGACY_ROOT/chart" --is-upgrade \
+        --set bootstrap.pdReplicas=3 --set bootstrap.storeReplicas=3 \
+        --set bootstrap.initialStoreCount=3)
       # The non-root PD and Store images need fsGroup on their data volumes
       # even when the reused values predate that default.
       [ "$(grep -c 'fsGroup: 10001' <<<"$LEGACY_UPGRADE")" -eq 2 ] || {
