@@ -76,8 +76,27 @@ rag:
 
 The chart-managed Server Secret is covered by a pod-template checksum. An
 explicit `rag.hugegraph.passwordSecret` is covered by its live resource version
-during `helm upgrade`. In both cases, the restarted Pod uses the new Secret even
-when an older value exists in the retained `.env` file.
+during an online `helm upgrade`. In both cases, the restarted Pod uses the new
+Secret even when an older value exists in the retained `.env` file.
+
+Offline renderers and GitOps controllers cannot use Helm `lookup` to observe a
+live Secret's resource version. Rotating an explicit
+`rag.hugegraph.passwordSecret` while applying otherwise identical rendered
+manifests therefore needs an explicit rollout trigger after the Secret has been
+updated. Either restart the Deployment:
+
+```bash
+RELEASE=hugegraph
+kubectl -n hugegraph rollout restart deployment/${RELEASE}-hugegraph-rag
+```
+
+or change a reviewed Pod annotation in the same GitOps change:
+
+```yaml
+rag:
+  podAnnotations:
+    hugegraph.apache.org/credential-revision: "2026-11-04-1"
+```
 
 When `rag.env` explicitly supplies `GRAPH_URL`, the chart does not attach the
 same-release administrator password to that endpoint. Supply an explicit
@@ -121,6 +140,14 @@ rag:
     - secretRef:
         name: rag-model
 ```
+
+Kubernetes gives an explicit `env` entry precedence over the same key imported
+through `envFrom`. Because automatic same-release wiring injects `GRAPH_PWD` as
+an explicit entry, an `envFrom` Secret cannot replace that particular key. Use
+`rag.hugegraph.passwordSecret` (preferred), or declare a `rag.env` entry named
+`GRAPH_PWD` with its own `secretKeyRef`; either choice suppresses the automatic
+password entry. `envFrom` remains appropriate for provider and other keys that
+the chart does not generate.
 
 At every start, any key present in the current Pod environment—including keys
 loaded by `envFrom`—takes precedence over the same key in the retained `.env`.

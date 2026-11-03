@@ -62,5 +62,15 @@
 {{- if or (not $mountPath) (not (hasPrefix "/" $mountPath)) -}}
 {{- fail "rag.persistence.mountPath must be an absolute path" -}}
 {{- end -}}
+{{- range $mount := get $rag "extraVolumeMounts" | default (list) -}}
+{{- if eq (get $mount "mountPath" | default "" | toString) $mountPath -}}
+{{- fail "rag.extraVolumeMounts must not use rag.persistence.mountPath when persistence is enabled" -}}
+{{- end -}}
+{{- end -}}
+{{- range $volume := get $rag "extraVolumes" | default (list) -}}
+{{- if eq (get $volume "name" | default "" | toString) "data" -}}
+{{- fail "rag.extraVolumes must not use the reserved volume name data when persistence is enabled" -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end }}

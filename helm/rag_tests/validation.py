@@ -16,7 +16,7 @@
 
 """Validation regression coverage for the optional RAG component."""
 
-from .support import pod
+from .support import RAG_MOUNT, pod
 
 
 class RagValidationMixin:
@@ -41,6 +41,10 @@ class RagValidationMixin:
             ({"serviceAccount": {"automountServiceAccountToken": True}}, "automountServiceAccountToken"),
             ({"hugegraph": {"passwordSecret": {"key": "password"}}}, "passwordSecret.name"),
             ({"persistence": {"mountPath": "relative/path"}}, "mountPath"),
+            ({"extraVolumeMounts": [{"name": "other", "mountPath": RAG_MOUNT}]},
+             "extraVolumeMounts"),
+            ({"extraVolumes": [{"name": "data", "emptyDir": {}}]},
+             "reserved volume name data"),
             ({"env": [{"name": "GRAPH_URL", "value": "a"}, {"name": "GRAPH_URL", "value": "b"}]}, "duplicate"),
             ({"persistance": {"enabled": False}}, "persistance"),
         )
@@ -49,6 +53,17 @@ class RagValidationMixin:
                 result = self.render(values)
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn(expected, result.stderr)
+
+    def test_reserved_data_volume_and_mount_path_are_available_when_persistence_is_off(self):
+        documents = self.documents({
+            "persistence": {"enabled": False},
+            "extraVolumes": [{"name": "data", "emptyDir": {}}],
+            "extraVolumeMounts": [{"name": "data", "mountPath": RAG_MOUNT}],
+        })
+        workload = self.deployment(documents)
+        self.assertIn({"name": "data", "emptyDir": {}}, pod(workload)["spec"]["volumes"])
+        self.assertIn({"name": "data", "mountPath": RAG_MOUNT},
+                      pod(workload)["spec"]["containers"][0]["volumeMounts"])
 
     def test_platform_assigned_non_root_ids_can_be_requested_with_auto(self):
         documents = self.documents({
