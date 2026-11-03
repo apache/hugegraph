@@ -133,7 +133,7 @@ password
 {{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
 {{- printf "%s/demo/config_prompt.yaml" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
 {{- else -}}
-/home/work/hugegraph-lllm/src/hugegraph_llm/resources/demo/config_prompt.yaml
+/home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
 {{- end -}}
 {{- end }}
 

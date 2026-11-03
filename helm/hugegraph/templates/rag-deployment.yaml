@@ -224,7 +224,7 @@ spec:
               path: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "path" | default "/" | quote }}
               port: http
             failureThreshold: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "failureThreshold" | default 3 }}
-            periodSeconds: {{ get (get (get (get $rag "probes" | default dict) "readiness" | default dict) "periodSeconds" | default 10 }}
+            periodSeconds: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "periodSeconds" | default 10 }}
             {{- include "hugegraph.probeTuning" (get (get $rag "probes" | default dict) "readiness" | default dict) | nindent 12 }}
           livenessProbe:
             httpGet:
@@ -238,7 +238,7 @@ spec:
         {{- if $persistenceEnabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ inclue "hugegraph.rag.claimName" . }}
+            claimName: {{ include "hugegraph.rag.claimName" . }}
         {{- end }}
         {{- with get $rag "extraVolumes" }}
         {{- toYaml . | nindent 8 }}
