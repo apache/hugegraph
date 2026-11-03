@@ -58,6 +58,27 @@ public class HugeGraphSONModuleTest extends BaseUnitTest {
         Assert.assertNull(restored.oltpNamespace());
         Assert.assertEquals("null", restored.olapNamespace());
 
+        Map<String, Object> nullableFields = space.info();
+        nullableFields.put("nickname", null);
+        nullableFields.put("storage_namespace", null);
+        nullableFields.put("operator_image_path", null);
+        nullableFields.put("creator", null);
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), GraphSpace.class);
+        Assert.assertNull(restored.nickname());
+        Assert.assertNull(restored.storageNamespace());
+        Assert.assertNull(restored.operatorImagePath());
+        Assert.assertNull(restored.creator());
+
+        nullableFields.put("nickname", "null");
+        nullableFields.put("storage_namespace", "null");
+        nullableFields.put("operator_image_path", "null");
+        nullableFields.put("creator", "null");
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), GraphSpace.class);
+        Assert.assertEquals("null", restored.nickname());
+        Assert.assertEquals("null", restored.storageNamespace());
+        Assert.assertEquals("null", restored.operatorImagePath());
+        Assert.assertEquals("null", restored.creator());
+
         space.description("null");
         Assert.assertEquals("null", JsonUtil.fromJson(JsonUtil.toJson(space),
                                                        GraphSpace.class).description());
@@ -75,6 +96,18 @@ public class HugeGraphSONModuleTest extends BaseUnitTest {
         Assert.assertNull(restored.description());
         Assert.assertNull(restored.serviceId());
         Assert.assertNull(restored.pdServiceId());
+        Map<String, Object> nullableFields = service.info();
+        nullableFields.put("route_type", null);
+        nullableFields.put("creator", null);
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), Service.class);
+        Assert.assertNull(restored.routeType());
+        Assert.assertNull(restored.creator());
+
+        nullableFields.put("route_type", "null");
+        nullableFields.put("creator", "null");
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), Service.class);
+        Assert.assertEquals("null", restored.routeType());
+        Assert.assertEquals("null", restored.creator());
         service.description("null");
         service.serviceId("null");
         restored = JsonUtil.fromJson(JsonUtil.toJson(service), Service.class);
