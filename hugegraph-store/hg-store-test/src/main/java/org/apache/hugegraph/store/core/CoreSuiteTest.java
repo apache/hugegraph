@@ -29,6 +29,7 @@ import org.apache.hugegraph.store.options.RocksdbMemoryBudgetTest;
 import org.apache.hugegraph.store.util.FileObjectIteratorTest;
 import org.apache.hugegraph.store.util.FilterIteratorCleanupTest;
 import org.apache.hugegraph.store.util.FilterIteratorColumnEqualityTest;
+import org.apache.hugegraph.store.util.MapLimitIteratorTest;
 import org.apache.hugegraph.store.util.SortShuffleSerializerTest;
 import org.apache.hugegraph.store.util.SortShuffleTest;
 import org.apache.hugegraph.store.util.TypeTransIteratorTest;
@@ -62,6 +63,7 @@ import lombok.extern.slf4j.Slf4j;
         FileObjectIteratorTest.class,
         FilterIteratorCleanupTest.class,
         FilterIteratorColumnEqualityTest.class,
+        MapLimitIteratorTest.class,
         SortShuffleSerializerTest.class,
         SortShuffleTest.class,
         TypeTransIteratorTest.class,
