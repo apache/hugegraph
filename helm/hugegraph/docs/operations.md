@@ -243,7 +243,9 @@ capability from an image tag. See the [PD configuration guide](../../../hugegrap
 On a fresh install, empty `bootstrap.pdReplicas`, `bootstrap.storeReplicas` and
 `bootstrap.initialStoreCount` inherit the requested PD count, Store count and
 Store count, respectively. A fresh five-PD installation therefore starts with
-five initial voters, not three. The chart records these counts in a kept,
+five initial voters, not three. Set `pd.pdb.minAvailable=3` when
+`pd.replicas=5`; the default value `2` does not preserve the five-PD majority
+and the chart rejects that render. The chart records these counts in a kept,
 immutable `<fullname>-bootstrap` ConfigMap (with a hash for long names). PD startup inputs, client PD
 seeds, Store startup seed wait, and an unspecified initial shard count use the
 recorded topology. PDB validation still uses the current desired PD majority.
