@@ -113,3 +113,12 @@ tests:
     asserts:
       - isKind:
           of: Deployment
+
+  - it: accepts changing runtime while keeping persistent storage
+    release:
+      upgrade: true
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - isKind:
+          of: Deployment

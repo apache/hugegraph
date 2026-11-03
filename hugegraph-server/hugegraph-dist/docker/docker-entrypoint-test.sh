@@ -561,5 +561,103 @@ for invalid_k8s_flag in 1 0 enabled "t rue" "tr ue"; do
         "${TEST_HOME}/conf/graphs/hugegraph.properties"
 done
 
+# A Topling image configures every local graph while retaining remote graphs.
+printf 'backend=rocksdb\n' > "${TEST_HOME}/conf/graphs/analytics.properties"
+printf 'backend=hstore\nrocksdb.provider=rocksdb\n' > "${TEST_HOME}/conf/graphs/remote.properties"
+(
+    cd "${TEST_HOME}"
+    HG_SERVER_BACKEND=rocksdb TOPLINGDB_ROCKSDB_PROVIDER=topling bash ./docker-entrypoint.sh
+)
+for graph in hugegraph analytics; do
+    grep -qx 'rocksdb.provider=topling' "${TEST_HOME}/conf/graphs/${graph}.properties"
+done
+grep -qx 'rocksdb.provider=rocksdb' "${TEST_HOME}/conf/graphs/remote.properties"
+# A bare launcher with no selection retains the supplied provider. Docker's
+# standard image explicitly selects rocksdb, including when returning from Topling.
+(
+    cd "${TEST_HOME}"
+    env -u TOPLINGDB_ROCKSDB_PROVIDER bash ./docker-entrypoint.sh
+)
+grep -qx 'rocksdb.provider=topling' "${TEST_HOME}/conf/graphs/analytics.properties"
+(
+    cd "${TEST_HOME}"
+    TOPLINGDB_ROCKSDB_PROVIDER=rocksdb bash ./docker-entrypoint.sh
+)
+for graph in hugegraph analytics; do
+    grep -qx 'rocksdb.provider=rocksdb' "${TEST_HOME}/conf/graphs/${graph}.properties"
+done
+grep -qx 'backend=hstore' "${TEST_HOME}/conf/graphs/remote.properties"
+cp "${TEST_HOME}/conf/graphs/analytics.properties" "${TEST_HOME}/analytics.before-invalid-provider"
+if (
+    cd "${TEST_HOME}"
+    TOPLINGDB_ROCKSDB_PROVIDER=invalid bash ./docker-entrypoint.sh
+); then
+    echo "invalid TOPLINGDB_ROCKSDB_PROVIDER unexpectedly succeeded" >&2
+    exit 1
+fi
+cmp "${TEST_HOME}/analytics.before-invalid-provider" "${TEST_HOME}/conf/graphs/analytics.properties"
+
+# Matching providers must leave the configuration byte-for-byte unchanged.
+# Real read-only directory/file mounts are also exercised by Docker deployment CI.
+for provider_case in default rocksdb topling; do
+    selected_provider="${provider_case}"
+    [[ "${provider_case}" != default ]] || selected_provider=rocksdb
+    readonly_graph="${TEST_HOME}/conf/graphs/readonly.properties"
+    printf 'backend=rocksdb\n# Preserve formatting and unrelated settings\ncustom=true\n' > "${readonly_graph}"
+    if [[ "${provider_case}" != default ]]; then
+        printf 'rocksdb.provider : %s   \n' "${provider_case}" >> "${readonly_graph}"
+    fi
+    cp "${readonly_graph}" "${TEST_HOME}/readonly.before"
+    chmod 444 "${readonly_graph}"
+    readonly_identity=$(ls -di "${readonly_graph}")
+    (
+        cd "${TEST_HOME}"
+        TOPLINGDB_ROCKSDB_PROVIDER="${selected_provider}" bash ./docker-entrypoint.sh
+    )
+    cmp "${TEST_HOME}/readonly.before" "${readonly_graph}"
+    [[ "$(ls -di "${readonly_graph}")" == "${readonly_identity}" ]]
+    chmod 644 "${readonly_graph}"
+    rm "${readonly_graph}"
+done
+
+# Reproduce the image's symlink with an already populated legacy data directory.
+# The default copy must bootstrap it, retain data, and never replace later user
+# definitions. An explicit conf/graphs directory must also bypass bootstrapping.
+mv "${TEST_HOME}/conf/graphs" "${TEST_HOME}/conf/graphs.default"
+mkdir -p "${TEST_HOME}/rocksdb-data/data" "${TEST_HOME}/rocksdb-data/wal"
+printf 'legacy data\n' > "${TEST_HOME}/rocksdb-data/data/keep"
+ln -s ../rocksdb-data/.hugegraph-config/graphs "${TEST_HOME}/conf/graphs"
+(
+    cd "${TEST_HOME}"
+    env -u HG_SERVER_AUTH_TOKEN_SECRET PASSWORD=entrypoint-test-secret \
+        TOPLINGDB_ROCKSDB_PROVIDER=topling bash ./docker-entrypoint.sh
+)
+grep -qx 'legacy data' "${TEST_HOME}/rocksdb-data/data/keep"
+grep -qx 'rocksdb.provider=topling' "${TEST_HOME}/conf/graphs/hugegraph.properties"
+printf 'custom=true\n' >> "${TEST_HOME}/conf/graphs/analytics.properties"
+cp "${TEST_HOME}/conf/graphs/analytics.properties" "${TEST_HOME}/analytics.persisted"
+printf 'unrelated image default\n' > "${TEST_HOME}/conf/graphs.default/analytics.properties"
+(
+    cd "${TEST_HOME}"
+    TOPLINGDB_ROCKSDB_PROVIDER=topling bash ./docker-entrypoint.sh
+)
+cmp "${TEST_HOME}/analytics.persisted" "${TEST_HOME}/conf/graphs/analytics.properties"
+(
+    cd "${TEST_HOME}"
+    TOPLINGDB_ROCKSDB_PROVIDER=rocksdb bash ./docker-entrypoint.sh
+)
+grep -qx 'custom=true' "${TEST_HOME}/conf/graphs/analytics.properties"
+grep -qx 'rocksdb.provider=rocksdb' "${TEST_HOME}/conf/graphs/analytics.properties"
+grep -qx 'rocksdb.provider=rocksdb' "${TEST_HOME}/conf/graphs/hugegraph.properties"
+[[ -z "$(find "${TEST_HOME}/rocksdb-data/.hugegraph-config" -name '.graphs-init.*' -print -quit)" ]]
+unlink "${TEST_HOME}/conf/graphs"
+mv "${TEST_HOME}/rocksdb-data/.hugegraph-config/graphs" "${TEST_HOME}/conf/graphs"
+(
+    cd "${TEST_HOME}"
+    TOPLINGDB_ROCKSDB_PROVIDER=rocksdb bash ./docker-entrypoint.sh
+)
+[[ ! -e "${TEST_HOME}/rocksdb-data/.hugegraph-config/graphs" ]]
+grep -qx 'custom=true' "${TEST_HOME}/conf/graphs/analytics.properties"
+
 echo "PASS: Docker entrypoint configures HStore discovery and authentication"
 bash "${SCRIPT_DIR}/test/test-docker-entrypoint-process.sh"

@@ -417,6 +417,14 @@ class PolicyTest(unittest.TestCase):
                     condition = re.search(r"^        if: (.+)$", step, re.M).group(1)
                     self.assertTrue(eval(condition.replace("inputs.backend", repr(backend)),
                                          {"__builtins__": {}}))
+
+    def test_topling_image_contract_selects_its_pd_executor(self):
+        plan = self.plan_for(["docker/test-topling-images.sh"])
+        self.assertEqual({"pd"}, set(plan["selected"]))
+        self.assertEqual({"pd_store"}, self.coordinator_jobs(plan))
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/pd-store-ci.yml").read_text()
+        pd = workflow.split("\n  pd:\n", 1)[1].split("\n  store:\n", 1)[0]
+        self.assertIn("bash docker/test-topling-images.sh", pd)
         mixed = self.plan_for([policy.TRAVIS + "test-stop-hugegraph-store.sh", "hugegraph-pd/src/A.java"])
         self.assertTrue({"struct", "pd", "store", "hstore", "cluster"}.issubset(mixed["selected"]))
         checker = self.plan_for([policy.TRAVIS + "check-java-runtime-logs.sh"])

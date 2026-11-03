@@ -19,23 +19,106 @@ package org.apache.hugegraph.store.node.listener;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 
+import javax.tools.ToolProvider;
+
+import org.apache.hugegraph.pd.client.KvClient;
+import org.apache.hugegraph.pd.grpc.kv.KResponse;
+import org.apache.hugegraph.util.RocksDBRuntime;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.PropertiesPropertySource;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.FileSystemResource;
 import org.yaml.snakeyaml.error.YAMLException;
 
 public class PdConfigureListenerYamlTest {
+
+    @TempDir
+    public Path temporary;
+
+    @Test
+    public void testSelectedRuntimeSurvivesRetainedPdConfiguration() throws Exception {
+        for (String provider : new String[]{"rocksdb", "topling"}) {
+            StandardEnvironment environment = new StandardEnvironment();
+            Properties image = new Properties();
+            image.setProperty("rocksdb.provider", provider);
+            environment.getPropertySources().addFirst(new PropertiesPropertySource("spring.application.json", image));
+            String retained = "rocksdb:\n  provider: " +
+                              ("topling".equals(provider) ? "rocksdb" : "topling") +
+                              "\n  max_background_jobs: 8\n";
+            Path file = this.temporary.resolve(provider + "-application-pd.yml");
+            Files.writeString(file, retained);
+            PdConfigureListener listener = new PdConfigureListener();
+            set(listener, "pdConfFile", file.toFile());
+            set(listener, "selectedProvider", provider);
+            KvClient client = Mockito.mock(KvClient.class);
+            Mockito.when(client.get("S:Timestamp")).thenReturn(
+                    KResponse.newBuilder().setValue(Long.toString(System.currentTimeMillis() + 60000)).build());
+            Method update = PdConfigureListener.class.getDeclaredMethod(
+                    "updatePdConfig", org.springframework.core.env.MutablePropertySources.class,
+                    KvClient.class, String.class);
+            update.setAccessible(true);
+            update.invoke(listener, environment.getPropertySources(), client, retained);
+            Assertions.assertEquals(provider, environment.getProperty("rocksdb.provider"));
+            Assertions.assertEquals("8", environment.getProperty("rocksdb.max_background_jobs"));
+            Assertions.assertEquals(retained, Files.readString(file));
+            verifyRuntime(provider, environment.getProperty("rocksdb.provider"));
+        }
+    }
+
+    @Test
+    public void testNoRuntimeSelectionDoesNotOverrideManagedProvider() throws Exception {
+        StandardEnvironment environment = new StandardEnvironment();
+        Properties configured = new Properties();
+        configured.setProperty("rocksdb.provider", "topling");
+        environment.getPropertySources().addFirst(new PropertiesPropertySource("pd-config", configured));
+        Method prioritize = PdConfigureListener.class.getDeclaredMethod(
+                "prioritizeSelectedProvider", org.springframework.core.env.MutablePropertySources.class);
+        prioritize.setAccessible(true);
+        prioritize.invoke(new PdConfigureListener(), environment.getPropertySources());
+        Assertions.assertEquals("topling", environment.getProperty("rocksdb.provider"));
+        Assertions.assertFalse(environment.getPropertySources().contains("rocksdb-runtime-provider"));
+    }
+
+    private static void set(PdConfigureListener listener, String name, Object value) throws Exception {
+        Field field = PdConfigureListener.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(listener, value);
+    }
+
+    private void verifyRuntime(String runtime, String configured) throws Exception {
+        Path classes = Files.createDirectory(this.temporary.resolve(runtime));
+        Path source = classes.resolve("RocksDB.java");
+        Files.writeString(source, "package org.rocksdb; public class RocksDB {}" +
+                                  ("topling".equals(runtime) ? " class SidePluginRepo {}" : ""));
+        Assertions.assertEquals(0, ToolProvider.getSystemJavaCompiler().run(
+                null, null, null, "-d", classes.toString(), source.toString()));
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{classes.toUri().toURL()}, null)) {
+            Thread.currentThread().setContextClassLoader(loader);
+            RocksDBRuntime.verify(configured);
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
 
     @Test
     public void testFlattenMapsAndMultipleDocuments() throws Exception {

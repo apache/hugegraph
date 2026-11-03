@@ -101,6 +101,7 @@ RISCV_PROTO_ROOTS = ("hugegraph-server/hugegraph-core/", "hugegraph-pd/hg-pd-grp
 TRAVIS = "hugegraph-server/hugegraph-dist/src/assembly/travis/"
 # Contract tests follow their executing suites, without runtime consumer fan-out.
 CONTRACT_SUITES = {
+    "docker/test-topling-images.sh": {"pd"},
     TRAVIS + "test-check-java-runtime-logs.sh": {"struct"},
     TRAVIS + "check-java-runtime-logs.sh": {"server", "commons", "struct", "pd", "store", "hstore", "cluster",
                                           "macos", "macos_full", "hbase", "riscv64"},

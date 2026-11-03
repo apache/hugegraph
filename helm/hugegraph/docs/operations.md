@@ -226,6 +226,37 @@ Server replicas can be changed routinely; CPU-utilization HPA requires positive
 CPU requests. Store growth still needs volume and shard planning. Use chart
 updates for Store scale changes so Hubble's endpoint list is updated too.
 
+## Storage runtime upgrades
+
+For the verified stock RocksDB 8.10.2 and pinned community ToplingDB 8.10.2,
+change `global.runtimeVariant` with the ordinary
+[Helm upgrade command](../README.md#toplingdb-runtime). The existing PD and Store
+StatefulSet names, data paths and PVCs stay the same, including Store Raft data.
+The verified pair supports both `standard` to `topling` and a return to `standard`
+after Topling writes, using the same volumes.
+Use matching HugeGraph image versions and retain the installed credentials and
+storage values; runtime selection does not require graph export or initialization.
+Development `latest` tags may have different source revisions because they are
+published independently.
+
+The default `RollingUpdate` strategy terminates each Pod normally before its
+replacement starts with the same ordinal and PVC. `podManagementPolicy: Parallel`
+controls creation and scaling, not parallel rolling replacement within a
+StatefulSet. PD and Store have separate controllers, so plan the change in a
+maintenance window; this does not promise uninterrupted requests. Keep enough
+termination grace for database shutdown and do not force-delete the old Pods.
+The existing [Store rollout and recovery checks](#rolling-store-updates-and-recovery)
+still apply.
+
+The compatibility scope is the pinned community profile, which uses SkipList and
+BlockBasedTable. Other JNI versions and custom SST formats need their own
+compatibility evidence. For `global.runtimeVariant=topling`, clear the PD, Store
+and Server `image.digest` values and use matching `-topling` version tags; the
+chart rejects those digest overrides instead of silently running the wrong
+runtime. Standard mode retains exact digest support. See the
+[storage runtime guide](../../../docs/storage-lifecycle.md#storage-provider-selection-and-toplingdb)
+for the tested native versions and data coverage.
+
 ## Rolling Store updates and recovery
 
 Use `store.updateStrategy.type=OnDelete` for a controlled rollout. Replace one

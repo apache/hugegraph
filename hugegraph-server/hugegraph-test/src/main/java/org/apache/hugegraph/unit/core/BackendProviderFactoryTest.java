@@ -25,11 +25,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.hugegraph.exception.BackendException;
+import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
 import org.apache.hugegraph.backend.store.memory.InMemoryDBStoreProvider;
 import org.apache.hugegraph.backend.store.raft.RaftBackendStoreProvider;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBStoreProvider;
+import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.junit.Test;
 
@@ -104,5 +109,45 @@ public class BackendProviderFactoryTest extends BaseUnitTest {
             start.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void testRocksDBImageProviderIsRuntimeOnlyAndPreservesExplicitConfig() {
+        applyImageProvider(null, "topling");
+
+        HugeConfig implicit = rocksConfig();
+        applyImageProvider(implicit, "topling");
+        Assert.assertEquals("topling", implicit.get(RocksDBOptions.PROVIDER));
+
+        HugeConfig standard = rocksConfig();
+        applyImageProvider(standard, "rocksdb");
+        Assert.assertEquals("rocksdb", standard.get(RocksDBOptions.PROVIDER));
+
+        HugeConfig explicit = rocksConfig();
+        explicit.setProperty(RocksDBOptions.PROVIDER.name(), "rocksdb");
+        applyImageProvider(explicit, "topling");
+        Assert.assertEquals("rocksdb", explicit.get(RocksDBOptions.PROVIDER));
+
+        HugeConfig absent = rocksConfig();
+        applyImageProvider(absent, null);
+        applyImageProvider(absent, "");
+        Assert.assertFalse(absent.containsKey(RocksDBOptions.PROVIDER.name()));
+
+        HugeConfig invalid = rocksConfig();
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> applyImageProvider(invalid, "invalid"));
+        Assert.assertFalse(invalid.containsKey(RocksDBOptions.PROVIDER.name()));
+    }
+
+    private static HugeConfig rocksConfig() {
+        PropertiesConfiguration properties = new PropertiesConfiguration();
+        properties.setProperty("backend", "rocksdb");
+        return new HugeConfig(properties);
+    }
+
+    private static void applyImageProvider(HugeConfig config, String provider) {
+        Whitebox.invoke(RocksDBStoreProvider.class,
+                        new Class<?>[]{HugeConfig.class, String.class},
+                        "applyImageProvider", null, config, provider);
     }
 }

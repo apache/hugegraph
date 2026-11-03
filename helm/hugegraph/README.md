@@ -158,6 +158,60 @@ The optional Vermeer image defaults to `latest` with `Always` pull policy, like
 the other HugeGraph components. See [image compatibility and upgrades](docs/vermeer.md#image-compatibility)
 for image settings and production pinning.
 
+### ToplingDB runtime
+
+Switch an existing release to ToplingDB with one value while keeping its values
+and persistent volumes:
+
+```bash
+helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
+  --set global.runtimeVariant=topling --wait --timeout 15m
+```
+
+Use matching standard/Topling images of the same HugeGraph version. Development
+`latest` and `latest-topling` tags are published independently and may refer to
+different source revisions; select a matching build before changing the runtime.
+For a new installation, use the same runtime parameter:
+
+```bash
+helm install hugegraph-topling ./helm/hugegraph -n hugegraph-topling \
+  --create-namespace --set global.runtimeVariant=topling --wait --timeout 15m
+```
+
+This selects the matching `-topling` image tags for PD, Store and HStore Server,
+including the Store wait container and Helm test image. PD and Store own the
+ToplingDB databases; Server continues to use `backend=hstore`. Hubble keeps its
+independent image. Linux amd64 scheduling is added to these HugeGraph workloads
+and the test hook. Contradictory OS/architecture node selectors are rejected;
+other scheduling constraints are preserved. The deployment images already include
+the verified community JNI; no artifact URL or checksum is needed in Helm values.
+For source image builds, `RUNTIME_VARIANT=topling` uses the release pinned in
+[`docker/topling-runtime.env`](../../docker/topling-runtime.env).
+
+The current JNI requires a Haswell-compatible x86-64 CPU, including AVX2 and BMI2.
+The architecture selector does not inspect CPU extensions; use a compatible node pool.
+
+A component tag such as `1.8.0` becomes `1.8.0-topling`; tags already ending in
+`-topling` are kept. Custom repositories and `global.imageRegistry` work as usual.
+In `global.runtimeVariant=topling`, clear `pd.image.digest`, `store.image.digest`
+and `server.image.digest`; the chart rejects these overrides because a digest
+would bypass the derived `-topling` tag. Use matching version tags for this runtime.
+Variant-specific immutable digest fields are not currently supported. In standard
+mode an explicit digest still takes precedence over the tag. Explicit helper image
+overrides remain exact.
+
+The default `global.runtimeVariant=standard` keeps RocksDB. The verified stock
+RocksDB 8.10.2 and pinned community ToplingDB 8.10.2 use compatible data: the
+upgrade retains PD/Store data and Raft volumes, schema, indexes and graph records.
+Keep the release name, namespace, data paths, storage settings and credentials;
+no graph export or new release is needed. Allow normal Pod shutdown during the
+maintenance window. The same verified pair also supports returning to RocksDB:
+repeat the upgrade with `global.runtimeVariant=standard`, keeping the same PVCs.
+Use base image tags without the `-topling` suffix, or update explicit digests to
+the matching RocksDB images. See [storage runtime upgrades](docs/operations.md#storage-runtime-upgrades)
+for rollout behavior and the [storage runtime guide](../../docs/storage-lifecycle.md#storage-provider-selection-and-toplingdb)
+for the verified native versions, profile and compatibility coverage.
+
 ### Storage
 
 Use a named dynamic StorageClass when the cluster has no suitable default:
@@ -243,8 +297,9 @@ Use `--set mode=strict` or `-f helm/hugegraph/values-strict.yaml`.
 
 **Explicit component value > global value > mode default.** An explicit `false`
 is preserved; null component values inherit. The global settings are
-`persistence.enabled` and `global.imageRegistry`. SeaTunnel/Vermeer HTTP stays
-authenticated and peer channels remain internal. No mode requires HTTPS.
+`persistence.enabled`, `global.imageRegistry` and `global.runtimeVariant`.
+SeaTunnel/Vermeer HTTP stays authenticated and peer channels remain internal.
+No mode requires HTTPS.
 
 Server/Hubble entry choices:
 
@@ -297,6 +352,7 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 | `pd.service.type` | PD client entry type | `ClusterIP` |
 | `*.service.nodePort` | Fixed component HTTP NodePort; omitted/0 allocates automatically | unset |
 | `global.imageRegistry` | Prefix image repositories without an explicit registry | `""` |
+| `global.runtimeVariant` | `standard` RocksDB or Linux amd64 `topling` deployment images | `standard` |
 | `*.image.repository` / `tag` / `digest` | Component image; digest takes priority | see values |
 | `persistence.enabled` | Global persistent storage | `true` |
 | `pd.storage.enabled` / `store.storage.enabled` / `hubble.persistence.enabled` | Explicit component storage override | `null` (inherits) |

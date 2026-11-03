@@ -1525,9 +1525,21 @@ public final class GraphManager {
 
         PropertiesConfiguration propConfig = ConfigUtil.buildConfig(configText);
         HugeConfig config = new HugeConfig(propConfig);
+        applyImageProvider(config, System.getenv("TOPLINGDB_ROCKSDB_PROVIDER"));
         this.checkOptions(config);
 
         return this.createGraphLocal(config, name);
+    }
+
+    private static void applyImageProvider(HugeConfig config, String provider) {
+        if (StringUtils.isEmpty(provider) ||
+            !"rocksdb".equals(config.get(CoreOptions.BACKEND)) ||
+            config.containsKey("rocksdb.provider")) {
+            return;
+        }
+        E.checkArgument("rocksdb".equals(provider) || "topling".equals(provider),
+                        "Invalid TOPLINGDB_ROCKSDB_PROVIDER: %s", provider);
+        config.setProperty("rocksdb.provider", provider);
     }
 
     private HugeGraph createGraphLocal(HugeConfig config, String name) {

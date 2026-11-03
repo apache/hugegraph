@@ -1,0 +1,109 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Retained RocksDB volumes on Topling upgrades
+templates:
+  - pd-statefulset.yaml
+  - store-statefulset.yaml
+kubernetesProvider:
+  scheme:
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: RELEASE-NAME-hugegraph-pd
+        namespace: NAMESPACE
+      spec:
+        replicas: "3"
+        volumeClaimTemplates:
+          - metadata:
+              name: pd-data
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: RELEASE-NAME-hugegraph-store
+        namespace: NAMESPACE
+      spec:
+        replicas: "3"
+        volumeClaimTemplates:
+          - metadata:
+              name: store-data
+tests:
+  - it: changes PD to Topling while retaining its existing claim and data mount
+    template: pd-statefulset.yaml
+    release:
+      upgrade: true
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/pd:latest-topling
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: pd-data
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0]
+          value:
+            name: pd-data
+            mountPath: /hugegraph-pd/pd_data
+      - equal:
+          path: spec.replicas
+          value: 3
+      - equal:
+          path: spec.updateStrategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 300
+
+  - it: changes Store to Topling while retaining its existing claim and data mount
+    template: store-statefulset.yaml
+    release:
+      upgrade: true
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-store
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/store:latest-topling
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: store-data
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0]
+          value:
+            name: store-data
+            mountPath: /hugegraph-store/storage
+      - equal:
+          path: spec.replicas
+          value: 3
+      - equal:
+          path: spec.updateStrategy.type
+          value: RollingUpdate

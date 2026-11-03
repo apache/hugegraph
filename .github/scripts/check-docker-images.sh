@@ -30,6 +30,33 @@ for pair in \
         HC=$(docker image inspect --format '{{json .Config.Healthcheck}}' "$IMAGE_ID")
         [[ "$HC" != null ]] || { echo "Missing HEALTHCHECK: $dockerfile"; exit 1; }
 
+        case "$dockerfile" in
+            hugegraph-pd/Dockerfile)
+                EXPECTED_VOLUME=/hugegraph-pd/pd_data
+                ;;
+            hugegraph-store/Dockerfile)
+                EXPECTED_VOLUME=/hugegraph-store/storage
+                ;;
+            hugegraph-server/Dockerfile)
+                EXPECTED_VOLUME=/hugegraph-server/rocksdb-data
+                ;;
+            hugegraph-server/Dockerfile-hstore)
+                EXPECTED_VOLUME=
+                ;;
+        esac
+        ACTUAL_VOLUMES=$(docker image inspect --format \
+            '{{range $path, $_ := .Config.Volumes}}{{$path}}{{"\n"}}{{end}}' \
+            "$IMAGE_ID" | sed '/^$/d' | sort)
+        [[ "$ACTUAL_VOLUMES" == "$EXPECTED_VOLUME" ]] || {
+            echo "ERROR: $dockerfile declares volumes [$ACTUAL_VOLUMES]; expected [$EXPECTED_VOLUME]"
+            exit 1
+        }
+        if [[ "$dockerfile" != hugegraph-server/Dockerfile-hstore ]]; then
+            expected_provider=rocksdb
+            if [[ "${RUNTIME_VARIANT:-standard}" == topling ]]; then expected_provider=topling; fi
+            docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE_ID" |
+                grep -qx "TOPLINGDB_ROCKSDB_PROVIDER=$expected_provider"
+        fi
         # The images must run as the fixed non-root user and own the directories
         # the start scripts and default volumes write to.
         case "$dockerfile" in

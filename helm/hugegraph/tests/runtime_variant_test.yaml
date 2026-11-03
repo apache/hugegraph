@@ -1,0 +1,139 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Topling runtime image selection
+templates:
+  - pd-statefulset.yaml
+  - store-statefulset.yaml
+  - server-deployment.yaml
+  - hubble-deployment.yaml
+  - tests/test-connection.yaml
+tests:
+  - it: selects the matching PD runtime image and architecture
+    template: pd-statefulset.yaml
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/pd:latest-topling
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/arch: amd64
+            kubernetes.io/os: linux
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/rocksdb-runtime"]
+          value: topling
+
+  - it: reuses the selected Store image for its wait helper
+    template: store-statefulset.yaml
+    set:
+      global.runtimeVariant: topling
+      store.image.tag: 1.8.0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/store:1.8.0-topling
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: hugegraph/store:1.8.0-topling
+      - equal:
+          path: spec.template.spec.nodeSelector["kubernetes.io/arch"]
+          value: amd64
+
+  - it: selects the matching HStore Server image without changing the backend
+    template: server-deployment.yaml
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/server:latest-topling
+      - equal:
+          path: spec.template.spec.nodeSelector["kubernetes.io/arch"]
+          value: amd64
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_BACKEND
+            value: hstore
+
+  - it: keeps the independent Hubble image
+    template: hubble-deployment.yaml
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/hubble:latest
+      - notExists:
+          path: spec.template.spec.nodeSelector
+
+  - it: schedules the inherited Helm test image on Linux amd64
+    template: tests/test-connection.yaml
+    set:
+      global.runtimeVariant: topling
+    asserts:
+      - equal:
+          path: spec.containers[0].image
+          value: hugegraph/server:latest-topling
+      - equal:
+          path: spec.nodeSelector
+          value:
+            kubernetes.io/arch: amd64
+            kubernetes.io/os: linux
+
+  - it: keeps exact digest references and registry overrides
+    template: pd-statefulset.yaml
+    set:
+      global.runtimeVariant: topling
+      global.imageRegistry: registry.example.com
+      pd.image.digest: sha256:43999a5ccda34883a9e4e458e25cb903ce34adbc66782d9f4a5260d68b2b5a82
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/hugegraph/pd@sha256:43999a5ccda34883a9e4e458e25cb903ce34adbc66782d9f4a5260d68b2b5a82
+
+  - it: keeps a custom repository and an already suffixed tag
+    template: store-statefulset.yaml
+    set:
+      global.runtimeVariant: topling
+      global.imageRegistry: ignored.example.com
+      store.image.repository: custom.example.com/team/store
+      store.image.tag: custom-topling
+      store.nodeSelector:
+        workload: graph
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: custom.example.com/team/store:custom-topling
+      - equal:
+          path: spec.template.spec.nodeSelector.workload
+          value: graph
+
+  - it: keeps standard images and unrestricted architecture by default
+    template: pd-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/pd:latest
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - equal:
+          path: metadata.annotations["hugegraph.apache.org/rocksdb-runtime"]
+          value: standard
