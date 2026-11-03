@@ -132,6 +132,13 @@ server:
 
 # Network isolation is selected by mode or an explicit enabled override.
 
+# Optional RAG application follows this preset only when explicitly enabled.
+# Two stateless Pods are a reasonable cluster starting point; configure shared
+# ReadWriteMany storage before enabling persistence with more than one replica.
+rag:
+  enabled: false
+  replicas: 2
+
 # Optional computation follows this preset only when explicitly enabled.
 vermeer:
   enabled: false
