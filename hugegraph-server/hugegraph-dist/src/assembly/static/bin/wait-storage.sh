@@ -112,7 +112,8 @@ BACKEND=$(awk '
         if ($0 !~ /^backend([ \t\f]*[:=]|[ \t\f]+|$)/) next
         sub(/^backend[ \t\f]*([:=][ \t\f]*)?/, "")
         sub(/[ \t\f]+$/, "")
-        backend = $0
+        # Match case-insensitive provider selection in BackendProviderFactory.
+        backend = tolower($0)
     }
     END { print backend }
 ' "$GRAPH_CONF")

@@ -345,6 +345,7 @@ done
 # the configured-property parsing bug.
 for property in 'backend = hstore' $' \tbackend\t=\thstore \t' \
                 'backend:hstore' 'backend hstore' \
+                'backend = HStore' 'backend = HSTORE' \
                 $'# backend=memory\nbackend.other=rocksdb\nbackend=rocksdb\nbackend = hstore'; do
     run_case "pd1-up" "pd0:8620,pd1:8620" 6 test-password 5 "$property"
     assert_equal "configured HStore rc" 0 "$CASE_RC"
@@ -360,7 +361,7 @@ done
 
 # A local backend override must ignore even the distributed image's active
 # pd.peers. A failed fix would reach curl or timeout before initialization.
-for backend in rocksdb memory hbase; do
+for backend in rocksdb memory hbase RocksDB ROCKSDB Memory MEMORY HBase HBASE; do
     cp "$SOURCE_BIN/../conf/graphs/hstore.properties.template" \
        "$DIST_ROOT/conf/graphs/hugegraph.properties" || fail "cannot copy the HStore graph template"
     grep -Eq '^[[:blank:]]*pd[.]peers[[:blank:]]*=[[:blank:]]*[^[:space:]#]' \
@@ -370,7 +371,7 @@ for backend in rocksdb memory hbase; do
     CASE_OUTPUT=$(env PATH="$MOCK_BIN:$PATH" \
         MOCK_CALL_LOG="$CALL_LOG" MOCK_ARGS_LOG="$ARGS_LOG" \
         MOCK_CONFIG_LOG="$CONFIG_LOG" MOCK_COUNT_FILE="$COUNT_FILE" \
-        MOCK_TIMEOUT_LOG="$TIMEOUT_LOG" MOCK_SCENARIO=auth-401 MOCK_ABORT_AFTER=1 \
+        MOCK_TIMEOUT_LOG="$TIMEOUT_LOG" MOCK_SCENARIO=none MOCK_ABORT_AFTER=1 \
         WAIT_STORAGE_TIMEOUT_S=5 "hugegraph.backend=$backend" \
         "$DIST_ROOT/bin/wait-storage.sh" 2>&1)
     CASE_RC=$?
@@ -378,9 +379,9 @@ for backend in rocksdb memory hbase; do
     [[ ! -s "$CALL_LOG" && ! -s "$TIMEOUT_LOG" ]] || fail "local backend contacted PD"
     assert_output "does not use PD/Store, skipping storage wait"
 
-    run_case "auth-401" "pd0:8620,pd1:8620" 1 test-password 5 "backend = $backend"
+    run_case "none" "pd0:8620,pd1:8620" 1 test-password 5 "backend = $backend"
     assert_equal "configured $backend ignores PD" 0 "$CASE_RC"
     [[ ! -s "$CALL_LOG" && ! -s "$TIMEOUT_LOG" ]] || fail "configured local backend contacted PD"
 done
 
-echo "36 passed, 0 failed"
+echo "52 passed, 0 failed"
