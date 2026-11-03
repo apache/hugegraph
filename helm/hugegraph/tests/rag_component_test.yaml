@@ -56,7 +56,7 @@ tests:
           value: seed-resources
       - matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
-          pattern: "cp -a -n"
+          pattern: "cp -R -n"
       - equal:
           path: spec.template.spec.containers[0].image
           value: hugegraph/rag:latest
@@ -69,16 +69,17 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].command
           value:
-            - python
-            - -m
-            - hugegraph_llm.demo.rag_demo.app
-      - equal:
-          path: spec.template.spec.containers[0].args
-          value:
-            - --host
-            - 0.0.0.0
-            - --port
-            - "8001"
+            - /bin/sh
+            - -ec
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "if key in os.environ"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "unset_key"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "--port \"8001\""
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 8001
@@ -102,7 +103,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
-            value: /tmp/hugegraph-llm.env
+            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/.env
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -115,9 +116,9 @@ tests:
       rag.enabled: true
       rag.port: 9001
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].args[3]
-          value: "9001"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "--port \"9001\""
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 9001
@@ -175,6 +176,32 @@ tests:
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
             value: /tmp/hugegraph-llm.env
+
+  - it: supports platform-assigned non-root IDs
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.podSecurityContext.runAsUser: auto
+      rag.podSecurityContext.runAsGroup: auto
+      rag.podSecurityContext.fsGroup: auto
+      rag.securityContext.runAsUser: auto
+      rag.securityContext.runAsGroup: auto
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+      - notExists:
+          path: spec.template.spec.securityContext.runAsGroup
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroup
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroupChangePolicy
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsGroup
 
   - it: keeps the RAG service internal by default in easy mode
     template: rag-service.yaml
@@ -234,11 +261,20 @@ tests:
           path: spec.accessModes[0]
           value: ReadWriteOnce
 
-  - it: creates no claim when persistence is explicitly disabled
+  - it: creates no claim when RAG persistence is explicitly disabled
     template: rag-pvc.yaml
     set:
       rag.enabled: true
       rag.persistence.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: inherits the global persistence disable when RAG does not override it
+    template: rag-pvc.yaml
+    set:
+      rag.enabled: true
+      persistence.enabled: false
     asserts:
       - hasDocuments:
           count: 0

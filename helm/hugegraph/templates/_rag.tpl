@@ -105,7 +105,14 @@ password
 {{- define "hugegraph.rag.persistenceEnabled" -}}
 {{- $rag := get .Values "rag" | default dict -}}
 {{- $persistence := get $rag "persistence" | default dict -}}
-{{- if hasKey $persistence "enabled" -}}{{- get $persistence "enabled" -}}{{- else -}}true{{- end -}}
+{{- if and (hasKey $persistence "enabled") (ne (get $persistence "enabled" | toString) "<nil>") -}}
+{{- get $persistence "enabled" -}}
+{{- else -}}
+{{- $global := get .Values "persistence" | default dict -}}
+{{- if and (hasKey $global "enabled") (ne (get $global "enabled" | toString) "<nil>") -}}
+{{- get $global "enabled" -}}
+{{- else -}}true{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{- define "hugegraph.rag.mountPath" -}}
@@ -114,21 +121,19 @@ password
 {{- get $persistence "mountPath" | default "/home/work/hugegraph-llm/src/hugegraph_llm/resources" -}}
 {{- end }}
 
-{{/*
-Keep the generated .env outside the persistent resource tree. HugeGraph AI
-loads an existing .env into os.environ before Pydantic reads the container
-environment, so persisting it would let stale graph/model credentials override
-rotated Kubernetes Secrets after a restart.
-*/}}
 {{- define "hugegraph.rag.envPath" -}}
+{{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
+{{- printf "%s/.env" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
+{{- else -}}
 /tmp/hugegraph-llm.env
+{{- end -}}
 {{- end }}
 
 {{- define "hugegraph.rag.promptConfigPath" -}}
 {{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
 {{- printf "%s/demo/config_prompt.yaml" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
 {{- else -}}
-/home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
+/home/work/hugegraph-lllm/src/hugegraph_llm/resources/demo/config_prompt.yaml
 {{- end -}}
 {{- end }}
 
@@ -137,4 +142,3 @@ rotated Kubernetes Secrets after a restart.
 {{- $persistence := get $rag "persistence" | default dict -}}
 {{- get $persistence "existingClaim" | default (include "hugegraph.rag.dataName" .) -}}
 {{- end }}
-

@@ -28,7 +28,9 @@ import yaml
 CHART = Path(__file__).resolve().parents[1] / "hugegraph"
 HELM_TEMPLATE_TIMEOUT_SECONDS = 120
 RAG_MOUNT = "/home/work/hugegraph-llm/src/hugegraph_llm/resources"
-RAG_ENV = "/tmp/hugegraph-llm.env"
+RAG_PERSISTENT_ENV = f"{RAG_MOUNT}/.env"
+RAG_EPHEMERAL_ENV = "/tmp/hugegraph-llm.env"
+RAG_ENV = RAG_PERSISTENT_ENV
 
 
 def component_resources(documents, component="rag", kind=None):
@@ -88,4 +90,3 @@ class RagChartBase(unittest.TestCase):
     def container(self, documents):
         container, = pod(self.deployment(documents))["spec"]["containers"]
         return container
-

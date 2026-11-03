@@ -14,7 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression coverage for the optional HugeGraph RAG Helm component."""
+"""Validation regression coverage for the optional RAG component."""
+
+from .support import pod
 
 
 class RagValidationMixin:
@@ -48,3 +50,30 @@ class RagValidationMixin:
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn(expected, result.stderr)
 
+    def test_platform_assigned_non_root_ids_can_be_requested_with_auto(self):
+        documents = self.documents({
+            "podSecurityContext": {
+                "runAsUser": "auto",
+                "runAsGroup": "auto",
+                "fsGroup": "auto",
+            },
+            "securityContext": {
+                "runAsUser": "auto",
+                "runAsGroup": "auto",
+            },
+        })
+        workload = self.deployment(documents)
+        pod_context = pod(workload)["spec"]["securityContext"]
+        self.assertTrue(pod_context["runAsNonRoot"])
+        self.assertNotIn("runAsUser", pod_context)
+        self.assertNotIn("runAsGroup", pod_context)
+        self.assertNotIn("fsGroup", pod_context)
+        self.assertNotIn("fsGroupChangePolicy", pod_context)
+        for container in [
+            *pod(workload)["spec"].get("initContainers", []),
+            *pod(workload)["spec"]["containers"],
+        ]:
+            context = container["securityContext"]
+            self.assertTrue(context["runAsNonRoot"])
+            self.assertNotIn("runAsUser", context)
+            self.assertNotIn("runAsGroup", context)

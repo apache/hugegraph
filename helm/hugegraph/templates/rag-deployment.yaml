@@ -116,7 +116,10 @@ spec:
             - |
               # Preserve operator and UI edits. Image upgrades add only files
               # that are still missing from the persistent resource directory.
-              cp -a -n /home/work/hugegraph-llm/src/hugegraph_llm/resources/. /data/
+              # Recursive copy deliberately avoids archive-mode metadata writes
+              # against a CSI volume root that remains owned by root.
+              umask 007
+              cp -R -n /home/work/hugegraph-llm/src/hugegraph_llm/resources/. /data/
           securityContext:
             {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
           resources:
@@ -129,15 +132,29 @@ spec:
         - name: rag
           image: {{ include "hugegraph.rag.image" . | quote }}
           imagePullPolicy: {{ get (get $rag "image" | default dict) "pullPolicy" | default "Always" }}
-          command:
-            - python
-            - -m
-            - hugegraph_llm.demo.rag_demo.app
+          command: ["/bin/sh", "-ec"]
           args:
-            - --host
-            - 0.0.0.0
-            - --port
-            - {{ include "hugegraph.rag.port" . | int | quote }}
+            - |
+              # HugeGraph AI loads an existing .env into os.environ before
+              # Pydantic reads settings. Remove only keys already supplied by
+              # this Pod (including envFrom Secrets) so the current Kubernetes
+              # environment wins while all other UI/operator edits persist.
+              umask 007
+              python - <<'PY'
+              import os
+              from pathlib import Path
+
+              from dotenv import dotenv_values, unset_key
+
+              env_path = Path(os.environ["HUGEGRAPH_LLM_ENV_PATH"])
+              env_path.parent.mkdir(parents=True, exist_ok=True)
+              env_path.touch(exist_ok=True)
+              for key in dotenv_values(env_path):
+                  if key in os.environ:
+                      unset_key(str(env_path), key)
+              PY
+              exec python -m hugegraph_llm.demo.rag_demo.app \
+                --host 0.0.0.0 --port {{ include "hugegraph.rag.port" . | int | quote }}
           securityContext:
             {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
           ports:
@@ -207,7 +224,7 @@ spec:
               path: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "path" | default "/" | quote }}
               port: http
             failureThreshold: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "failureThreshold" | default 3 }}
-            periodSeconds: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "periodSeconds" | default 10 }}
+            periodSeconds: {{ get (get (get (get $rag "probes" | default dict) "readiness" | default dict) "periodSeconds" | default 10 }}
             {{- include "hugegraph.probeTuning" (get (get $rag "probes" | default dict) "readiness" | default dict) | nindent 12 }}
           livenessProbe:
             httpGet:
@@ -221,7 +238,7 @@ spec:
         {{- if $persistenceEnabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "hugegraph.rag.claimName" . }}
+            claimName: {{ inclue "hugegraph.rag.claimName" . }}
         {{- end }}
         {{- with get $rag "extraVolumes" }}
         {{- toYaml . | nindent 8 }}

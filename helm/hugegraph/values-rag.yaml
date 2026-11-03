@@ -52,7 +52,7 @@ rag:
   # Non-root execution, RuntimeDefault seccomp, no added capabilities, disabled
   # privilege escalation and no ServiceAccount token are enforced by templates,
   # including bare --set rag.enabled=true installs. UID/GID/fsGroup default to
-  # 1000 and custom values must remain positive non-root IDs.
+  # 1000; use the string auto for platform-assigned non-root identities.
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -60,6 +60,8 @@ rag:
   priorityClassName: ''
   podAnnotations: {}
   podLabels: {}
+  # Explicit env/envFrom values automatically take precedence over matching
+  # keys in the retained .env file on every Pod start.
   env: []
   envFrom: []
   terminationGracePeriodSeconds: 30
@@ -87,14 +89,12 @@ rag:
         pathType: Prefix
     tls: []
 
-  # Persistence defaults on when RAG is enabled. The claim stores the editable
-  # resource tree, prompts, schema examples and indexes. The generated .env is
-  # deliberately kept in /tmp so a stale file cannot override rotated graph or
-  # model credentials supplied through Kubernetes Secrets after a restart. The
-  # init container adds missing files from a new image but never overwrites
-  # files already changed on the claim.
+  # Unset inherits the top-level persistence.enabled value (true by default).
+  # The claim stores the editable .env, prompt configuration, indexes and
+  # resource tree. The init container adds missing image files but never
+  # overwrites files already changed on the claim.
   persistence:
-    enabled: true
+    enabled:
     existingClaim: ''
     size: 10Gi
     storageClassName: ''

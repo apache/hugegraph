@@ -69,7 +69,7 @@ class HelmPackageTest(unittest.TestCase):
                         "Chart exceeds its package budget; check non-runtime assets")
 
     def test_no_contributor_or_binary_documentation_files(self):
-        excluded = ("images/", "tests/", "scripts/", "testdata/")
+        excluded = ("images/", "docs/images/", "tests/", "scripts/", "testdata/")
         leaked = [name for name in self.files
                   if name.startswith(excluded) or name.endswith(".tgz")]
         self.assertEqual([], leaked,
@@ -143,6 +143,7 @@ class HelmPackageTest(unittest.TestCase):
                                  "Optional Vermeer must reuse its native image for token helpers")
                 self.assertTrue(all(image.startswith(registry + "/") for image in selected))
                 self.assertIn("/go/bin/vermeer-token", rendered)
+
 
 
 def load_tests(loader, tests, pattern):

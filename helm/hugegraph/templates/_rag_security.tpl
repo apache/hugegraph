@@ -24,10 +24,21 @@
       "fsGroup" 1000
       "fsGroupChangePolicy" "OnRootMismatch"
       "seccompProfile" (dict "type" "RuntimeDefault") -}}
-{{- $context := mergeOverwrite (deepCopy $defaults) (deepCopy (get $rag "podSecurityContext" | default dict)) -}}
+{{- $overrides := deepCopy (get $rag "podSecurityContext" | default dict) -}}
+{{- $context := mergeOverwrite (deepCopy $defaults) $overrides -}}
 {{- range $field := list "runAsUser" "runAsGroup" "fsGroup" -}}
-{{- if hasKey $context $field -}}{{- $_ := set $context $field (int (get $context $field)) -}}{{- end -}}
+{{- if hasKey $overrides $field -}}
+{{- $raw := get $overrides $field | toString -}}
+{{- if or (eq $raw "<nil>") (eq (lower $raw) "auto") -}}
+{{- $_ := unset $context $field -}}
+{{- else -}}
+{{- $_ := set $context $field (int (get $overrides $field)) -}}
 {{- end -}}
+{{- else if hasKey $context $field -}}
+{{- $_ := set $context $field (int (get $context $field)) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey $context "fsGroup") -}}{{- $_ := unset $context "fsGroupChangePolicy" -}}{{- end -}}
 {{- toYaml $context -}}
 {{- end }}
 
@@ -41,10 +52,19 @@
       "allowPrivilegeEscalation" false
       "capabilities" (dict "drop" (list "ALL"))
       "seccompProfile" (dict "type" "RuntimeDefault") -}}
-{{- $context := mergeOverwrite (deepCopy $defaults) (deepCopy (get $rag "securityContext" | default dict)) -}}
+{{- $overrides := deepCopy (get $rag "securityContext" | default dict) -}}
+{{- $context := mergeOverwrite (deepCopy $defaults) $overrides -}}
 {{- range $field := list "runAsUser" "runAsGroup" -}}
-{{- if hasKey $context $field -}}{{- $_ := set $context $field (int (get $context $field)) -}}{{- end -}}
+{{- if hasKey $overrides $field -}}
+{{- $raw := get $overrides $field | toString -}}
+{{- if or (eq $raw "<nil>") (eq (lower $raw) "auto") -}}
+{{- $_ := unset $context $field -}}
+{{- else -}}
+{{- $_ := set $context $field (int (get $overrides $field)) -}}
+{{- end -}}
+{{- else if hasKey $context $field -}}
+{{- $_ := set $context $field (int (get $context $field)) -}}
+{{- end -}}
 {{- end -}}
 {{- toYaml $context -}}
 {{- end }}
-

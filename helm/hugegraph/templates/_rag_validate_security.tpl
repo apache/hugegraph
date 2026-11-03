@@ -31,8 +31,8 @@
 {{- range $field := list "runAsUser" "runAsGroup" -}}
 {{- if hasKey $context $field -}}
 {{- $raw := get $context $field | toString -}}
-{{- if not (regexMatch "^[1-9][0-9]*$" $raw) -}}
-{{- fail (printf "%s.%s must be a positive integer" $scope $field) -}}
+{{- if and (ne $raw "<nil>") (ne (lower $raw) "auto") (not (regexMatch "^[1-9][0-9]*$" $raw)) -}}
+{{- fail (printf "%s.%s must be a positive integer, null or auto" $scope $field) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -48,8 +48,8 @@
 {{- end -}}
 {{- if hasKey $podContext "fsGroup" -}}
 {{- $rawFsGroup := get $podContext "fsGroup" | toString -}}
-{{- if not (regexMatch "^[1-9][0-9]*$" $rawFsGroup) -}}
-{{- fail "rag.podSecurityContext.fsGroup must be a positive integer" -}}
+{{- if and (ne $rawFsGroup "<nil>") (ne (lower $rawFsGroup) "auto") (not (regexMatch "^[1-9][0-9]*$" $rawFsGroup)) -}}
+{{- fail "rag.podSecurityContext.fsGroup must be a positive integer, null or auto" -}}
 {{- end -}}
 {{- end -}}
 {{- range $field := list "privileged" "allowPrivilegeEscalation" -}}

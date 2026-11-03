@@ -14,17 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression coverage for the optional HugeGraph RAG Helm component."""
+"""Source-level contracts for the optional HugeGraph RAG component."""
 
 import unittest
 
 import yaml
 
-from .support import CHART, RAG_ENV, RAG_MOUNT
+from .support import CHART, RAG_MOUNT, RAG_PERSISTENT_ENV
 
 
 class RagSourceContractTest(unittest.TestCase):
-    def test_profile_is_internal_persistent_and_matches_the_image_contract(self):
+    def test_profile_is_internal_and_inherits_persistence(self):
         values = yaml.safe_load((CHART / "values-rag.yaml").read_text(encoding="utf-8"))
         rag = values["rag"]
         self.assertTrue(rag["enabled"])
@@ -33,10 +33,10 @@ class RagSourceContractTest(unittest.TestCase):
         self.assertEqual(8001, rag["port"])
         self.assertEqual({"autoConfigure": True}, rag["hugegraph"])
         self.assertEqual("ClusterIP", rag["service"]["type"])
-        self.assertTrue(rag["persistence"]["enabled"])
+        self.assertIsNone(rag["persistence"]["enabled"])
         self.assertEqual(RAG_MOUNT, rag["persistence"]["mountPath"])
 
-    def test_single_and_cluster_presets_keep_one_persistent_rag_replica(self):
+    def test_single_and_cluster_presets_keep_one_rag_replica(self):
         single = yaml.safe_load((CHART / "values-single.yaml").read_text(encoding="utf-8"))
         cluster = yaml.safe_load((CHART / "values-cluster.yaml").read_text(encoding="utf-8"))
         self.assertEqual({"enabled": False, "replicas": 1}, single["rag"])
@@ -51,7 +51,7 @@ class RagSourceContractTest(unittest.TestCase):
         self.assertIn("rag contains unsupported field", helpers)
         self.assertIn("rag.persistence contains unsupported field", helpers)
 
-    def test_templates_use_one_process_port_and_split_runtime_from_durable_config(self):
+    def test_templates_use_one_port_and_kubernetes_env_precedence(self):
         deployment = (CHART / "templates" / "rag-deployment.yaml").read_text(encoding="utf-8")
         service = (CHART / "templates" / "rag-service.yaml").read_text(encoding="utf-8")
         helpers = "\n".join(
@@ -60,12 +60,15 @@ class RagSourceContractTest(unittest.TestCase):
         )
         self.assertIn("hugegraph_llm.demo.rag_demo.app", deployment)
         self.assertIn('containerPort: {{ include "hugegraph.rag.port" . | int }}', deployment)
-        self.assertIn('include "hugegraph.rag.port" . | int | quote', deployment)
+        self.assertIn("--port {{ include", deployment)
         self.assertIn("targetPort: http", service)
         self.assertIn('include "hugegraph.server.clientUrl"', helpers)
         self.assertIn('trimPrefix "http://"', helpers)
-        self.assertIn(RAG_ENV, helpers)
+        self.assertIn('printf "%s/.env"', helpers)
         self.assertIn("HUGEGRAPH_LLM_ENV_PATH", deployment)
-        self.assertIn("HUGEGRAPH_LLM_PROMPT_CONFIG_PATH", deployment)
+        self.assertIn("if key in os.environ", deployment)
+        self.assertIn("unset_key", deployment)
+        self.assertIn("cp -R -n", deployment)
+        self.assertNotIn("cp -a", deployment)
         self.assertNotIn("touch /data/.hugegraph-rag-seeded", deployment)
-
+        self.assertIn(RAG_PERSISTENT_ENV.rsplit("/", 1)[0], helpers)

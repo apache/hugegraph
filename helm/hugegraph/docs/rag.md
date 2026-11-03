@@ -1,98 +1,94 @@
 # Optional HugeGraph RAG deployment
 
-The main HugeGraph chart owns the Kubernetes topology for the whole system.
-`rag.enabled=true` adds the `hugegraph/rag` application from
-[hugegraph-ai](https://github.com/apache/hugegraph-ai) without changing the
-PD, Store, Server or Hubble topology. RAG remains disabled by default, and the
-Docker image and Docker Compose workflows in hugegraph-ai remain independent.
+The canonical HugeGraph chart can deploy the `hugegraph/rag` application from
+[hugegraph-ai](https://github.com/apache/hugegraph-ai) beside PD, Store, Server
+and Hubble. RAG is opt-in and does not change the existing graph topology.
 
-![RAG Helm integration](images/rag-helm-architecture.svg)
+![RAG Helm integration](https://raw.githubusercontent.com/apache/hugegraph/master/helm/hugegraph/docs/images/rag-helm-architecture.svg)
 
-## Minimal configuration
+## Minimal same-release configuration
 
-For a RAG Pod connected to the HugeGraph Server in the **same Helm release**, the
-chart deliberately keeps the required values small:
+For the normal case, the only RAG value that must be set is:
 
-1. Enable RAG with `rag.enabled=true` or the supplied `values-rag.yaml` overlay.
-2. Provide the selected model-provider credentials and model settings, normally
-   through a Kubernetes Secret.
-3. Set `rag.persistence.storageClassName` or `existingClaim` only when the
-   cluster has no suitable default StorageClass.
+```yaml
+rag:
+  enabled: true
+```
 
-Do **not** repeat the Server Pod IP, REST port, graph name, graph space or Server
-administrator Secret for the normal same-release deployment. The chart derives
-them from the Server Service and existing Server values. RAG is deliberately
-single-replica in both topology presets, so the ordinary `ReadWriteOnce` claim is
-sufficient.
+The chart derives the complete connection to the Server in the same release:
+
+- `GRAPH_URL` uses the release-scoped Server Service and `server.port`;
+- `GRAPH_NAME` defaults to `hugegraph`;
+- `GRAPH_SPACE` follows `server.graphSpace`;
+- `GRAPH_USER` defaults to `admin`; and
+- `GRAPH_PWD` comes from the existing Server administrator Secret when Server
+  authentication is enabled.
+
+Do not repeat a Server Pod IP, REST port, graph name, graph space or administrator
+Secret for this topology. A custom `rag.port` is also applied consistently to the
+RAG process, container, Service and probes.
+
+The supplied overlay keeps the ordinary settings in one reviewed file:
 
 ```bash
-# Single PD + Store + Server, plus one persistent RAG Pod
+# One PD + Store + Server, plus one RAG Pod
 helm upgrade --install hugegraph ./helm/hugegraph \
   -n hugegraph --create-namespace \
   -f helm/hugegraph/values-single.yaml \
   -f helm/hugegraph/values-rag.yaml
 
-# 3 + 3 + 3 HugeGraph cluster, plus one persistent RAG Pod
+# 3 + 3 + 3 HugeGraph cluster, plus one RAG Pod
 helm upgrade --install hugegraph ./helm/hugegraph \
   -n hugegraph --create-namespace \
   -f helm/hugegraph/values-cluster.yaml \
   -f helm/hugegraph/values-rag.yaml
 ```
 
-A bare `--set rag.enabled=true` has the same non-root, internal-Service,
-single-replica and persistent-resource defaults. The overlay keeps the commonly
-reviewed knobs in one file, but no second copy of the Server connection is
-required.
+When `rag.persistence.enabled` is unset, RAG inherits the top-level
+`persistence.enabled` value. The chart default is `true`, so a bare
+`--set rag.enabled=true` creates one retained PVC. Set the RAG-specific value only
+when this component must differ from the rest of the release.
 
-## Automatic HugeGraph wiring
+Model, embedding and prompt settings can be entered through the RAG interface
+and retained on the PVC. Kubernetes Secrets remain preferable for declarative
+production credentials.
+
+## Automatic HugeGraph wiring and credentials
 
 With `rag.hugegraph.autoConfigure=true` and an empty `rag.hugegraph.url`, the
-chart injects:
+same-release connection above is generated automatically. A matching entry in
+`rag.env` replaces its generated counterpart.
 
-- `GRAPH_URL` as the same-release Server client Service in the application's
-  native `host:port` form;
-- `GRAPH_NAME=hugegraph`, unless explicitly overridden;
-- `GRAPH_SPACE` from `server.graphSpace`;
-- `GRAPH_USER=admin`, unless explicitly overridden; and
-- `GRAPH_PWD` from the same Server administrator Secret when Server auth is
-  enabled.
-
-The chart also passes `rag.port` to the native RAG process. The process,
-container port, Service and probes therefore use one resolved port value.
-
-Any entry in `rag.env` with the same name replaces its automatic counterpart.
-When `rag.env` explicitly supplies `GRAPH_URL`, the chart does **not** attach the
-same-release administrator password to that endpoint. Supply an explicit
-`rag.hugegraph.passwordSecret` or `GRAPH_PWD` for the selected endpoint. Set
-`rag.hugegraph.autoConfigure=false` to manage the complete application
-environment yourself.
-
-The automatic user is convenient for a local or evaluation installation, but it
-inherits administrator privileges. Production deployments should create a
-dedicated least-privilege HugeGraph user and Secret, then override only the user
-and password source while keeping the release-derived Server address:
+The automatic `admin` identity is convenient for evaluation but has full Server
+privileges. Production deployments should create a dedicated least-privilege
+HugeGraph account and override only its identity and Secret while retaining the
+automatically derived address:
 
 ```yaml
 rag:
   enabled: true
   hugegraph:
-    autoConfigure: true
     username: rag-service
     passwordSecret:
       name: rag-hugegraph-credentials
       key: password
 ```
 
-When the chart-managed Server administrator Secret changes during a Helm
-upgrade, the RAG pod-template checksum changes and RAG rolls out with the new
-credential. For an external password Secret, update the Secret and run
-`helm upgrade` so its resource version is re-evaluated; changing the Secret alone
-does not restart a Pod whose environment was already populated.
+The chart-managed Server Secret is covered by a pod-template checksum. An
+explicit `rag.hugegraph.passwordSecret` is covered by its live resource version
+during `helm upgrade`. In both cases, the restarted Pod uses the new Secret even
+when an older value exists in the retained `.env` file.
 
-## Model-provider credentials
+When `rag.env` explicitly supplies `GRAPH_URL`, the chart does not attach the
+same-release administrator password to that endpoint. Supply an explicit
+`passwordSecret` or `GRAPH_PWD` if the selected endpoint requires authentication.
+Set `rag.hugegraph.autoConfigure=false` when the complete graph connection is
+owned outside the chart.
 
-Keep provider credentials out of values files. Create a Secret and expose it
-with `envFrom`:
+## Model-provider Secrets
+
+Keep provider credentials out of values files. Explicit `env` entries are easy
+to audit:
 
 ```bash
 kubectl -n hugegraph create secret generic rag-model \
@@ -103,58 +99,106 @@ kubectl -n hugegraph create secret generic rag-model \
 ```yaml
 rag:
   enabled: true
+  env:
+    - name: OPENAI_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: rag-model
+          key: OPENAI_API_KEY
+    - name: OPENAI_EMBEDDING_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: rag-model
+          key: OPENAI_EMBEDDING_API_KEY
+```
+
+`envFrom` is also supported without an extra key list:
+
+```yaml
+rag:
+  enabled: true
   envFrom:
     - secretRef:
         name: rag-model
 ```
 
-The application supports other providers through the same native `env` and
-`envFrom` mechanisms. The chart does not copy provider credentials into a
-ConfigMap or generate a second credential system. Kubernetes injects Secret
-values into a container only when the Pod starts, so restart or roll out RAG
-after changing a provider Secret.
+At every start, any key present in the current Pod environment—including keys
+loaded by `envFrom`—takes precedence over the same key in the retained `.env`.
+Changing a provider Secret alone does not restart a Pod whose environment was
+already populated, so restart RAG after the Secret changes:
 
-The generated application `.env` is intentionally placed at
-`/tmp/hugegraph-llm.env`, outside the persistent claim. HugeGraph AI loads an
-existing `.env` into the process environment before reading its settings; if
-that file were retained, stale graph or model credentials could override newly
-rotated Kubernetes Secrets after a restart.
+```bash
+kubectl -n hugegraph rollout restart deployment/hugegraph-hugegraph-rag
+```
 
-## Persistent and externally editable resources
+The exact Deployment name follows the Helm release name. The application may
+write credentials to `.env`; treat the RAG PVC as sensitive, restrict access,
+use storage encryption where appropriate, and include it in the relevant backup
+policy.
 
-Persistence defaults to enabled after RAG is enabled. One claim stores the
-application's writable resource tree at:
+## Persistent and externally editable configuration
+
+When persistence is enabled, the claim is mounted at the native HugeGraph AI
+resource directory:
 
 ```text
 /home/work/hugegraph-llm/src/hugegraph_llm/resources
 ```
 
-The chart separates durable resources from runtime environment settings:
+The important writable locations are:
 
 ```text
-/tmp/hugegraph-llm.env                     ephemeral model/graph settings
-<mountPath>/demo/config_prompt.yaml        durable prompts and schema examples
-<mountPath>/...                            durable indexes and other resources
+.env                         model and graph runtime settings
+/demo/config_prompt.yaml     prompts and graph-schema examples
+/...                         indexes and other generated resources
 ```
 
-The effective environment variables are therefore:
+The chart sets:
 
 ```text
-HUGEGRAPH_LLM_ENV_PATH=/tmp/hugegraph-llm.env
+HUGEGRAPH_LLM_ENV_PATH=<mountPath>/.env
 HUGEGRAPH_LLM_PROMPT_CONFIG_PATH=<mountPath>/demo/config_prompt.yaml
 ```
 
-A restart or image replacement reuses the persistent resource tree and prompt
-configuration, while model and graph settings are reconstructed from the Pod
-environment and Kubernetes Secrets. The init container copies only files that
-are missing from the claim (`cp -n`); it never overwrites a file already changed
-through the UI or by an operator. Consequently, an image upgrade also does not
-replace existing prompt/config files with newer packaged defaults. Back up the
-claim and update selected files manually when adopting those new defaults.
+A restart or image replacement reuses these files. The init container copies
+only files missing from the claim and uses an ordinary recursive copy so it does
+not attempt privileged ownership or timestamp changes on the CSI volume root.
+Existing operator or UI edits are never overwritten. Consequently, an image
+upgrade does not replace an existing prompt or configuration file with a newer
+packaged default; compare and update selected files manually when adopting those
+defaults.
 
-The durable files can be inspected or replaced without rebuilding the image.
-The following example locates the RAG Pod by labels instead of assuming a
-generated name:
+### Configuration precedence on restart
+
+HugeGraph AI loads an existing `.env` before Pydantic reads settings. To prevent
+an old file from masking a rotated Secret or changed Helm value, the container
+performs one narrow reconciliation before starting the application:
+
+1. Read the configured `.env` file.
+2. Remove only keys that are already present in the current Pod environment.
+3. Leave every other `.env` key unchanged.
+4. Start the native RAG process.
+
+The result is a simple precedence rule:
+
+```text
+current Kubernetes env / envFrom  >  retained .env  >  image defaults
+```
+
+This covers the automatically generated graph connection, explicit `rag.env`,
+and arbitrary Secret or ConfigMap keys supplied through `envFrom` without a
+second key registry. UI and operator settings that are not declared in the Pod
+environment remain persistent and externally editable. The application may
+write the current values back during the run; the same reconciliation happens
+before the next start.
+
+A custom `HUGEGRAPH_LLM_ENV_PATH` in `rag.env` follows the same rule. Make that
+path writable and mount persistent storage there when it must survive Pod
+replacement.
+
+### Read and update files from outside the Pod
+
+Locate the Pod through stable labels rather than assuming its generated name:
 
 ```bash
 NS=hugegraph
@@ -163,51 +207,64 @@ MOUNT=/home/work/hugegraph-llm/src/hugegraph_llm/resources
 POD=$(kubectl -n "$NS" get pod \
   -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=rag" \
   -o jsonpath='{.items[0].metadata.name}')
-
-kubectl -n "$NS" exec "$POD" -- ls -la "$MOUNT"
-kubectl -n "$NS" exec -it "$POD" -- sh
 ```
 
-For GitOps or an externally managed resource lifecycle, provision a PVC, seed or
-mount it with the desired files, and point the chart at it:
+Export, edit locally, then replace the files atomically:
+
+```bash
+kubectl -n "$NS" exec "$POD" -- cat "$MOUNT/.env" > rag.env
+kubectl -n "$NS" exec "$POD" -- cat "$MOUNT/demo/config_prompt.yaml" \
+  > config_prompt.yaml
+
+# Edit the local files. Do not commit rag.env.
+kubectl -n "$NS" exec -i "$POD" -- sh -c \
+  'umask 007; tmp="$1.tmp"; cat > "$tmp" && mv "$tmp" "$1"' sh \
+  "$MOUNT/.env" < rag.env
+kubectl -n "$NS" exec -i "$POD" -- sh -c \
+  'tmp="$1.tmp"; cat > "$tmp" && mv "$tmp" "$1"' sh \
+  "$MOUNT/demo/config_prompt.yaml" < config_prompt.yaml
+
+kubectl -n "$NS" rollout restart deployment/${RELEASE}-hugegraph-rag
+```
+
+Back up a file before replacing it. Do not print `.env` in shared logs.
+
+For GitOps, provision and seed a PVC separately, then use it directly:
 
 ```yaml
 rag:
   enabled: true
   persistence:
-    enabled: true
     existingClaim: managed-rag-resources
 ```
-
-`rag.persistence.mountPath` and `HUGEGRAPH_LLM_PROMPT_CONFIG_PATH` can be
-overridden when another volume layout is required. Overriding
-`HUGEGRAPH_LLM_ENV_PATH` to a persistent path is possible through `rag.env`, but
-is not recommended: the retained file becomes a higher-priority configuration
-source and can mask rotated Secret values.
 
 ## Persistence lifecycle and single-replica contract
 
 A chart-generated RAG PVC has `helm.sh/resource-policy: keep`. Disabling RAG or
-uninstalling the release removes the RAG workload but retains that PVC and its
-data. Delete it manually only after the data is no longer required:
+uninstalling the release removes the workload but retains the claim and its data.
+Inspect the generated name and delete it only after the data is no longer needed:
 
 ```bash
-kubectl -n hugegraph delete pvc hugegraph-rag-data
+kubectl -n hugegraph get pvc
+kubectl -n hugegraph delete pvc hugegraph-hugegraph-rag-data
 ```
 
-The exact generated name follows the Helm release name; inspect it before
-deleting with `kubectl -n hugegraph get pvc`.
+The current HugeGraph RAG application keeps mutable settings in one process and
+writes the resource tree without cross-Pod coordination. An RWX volume would
+make files mountable by multiple Pods, but would not synchronize in-memory
+settings or serialize writes. The chart therefore requires `rag.replicas=1` and
+uses `Recreate`, so an update never leaves two active RAG Pods.
 
-The current HugeGraph RAG application keeps mutable settings in process and
-writes prompt/resource files without cross-Pod coordination. An RWX volume would
-only make the files mountable by multiple Pods; it would not synchronize their
-in-memory settings or serialize writes. The chart therefore requires
-`rag.replicas=1` and always uses the `Recreate` deployment strategy so an update
-never leaves two active RAG Pods. Multi-replica support should be enabled only
-after the application provides an external, concurrency-safe configuration
-store and cross-Pod reload semantics.
+Disable all chart persistence for disposable environments:
 
-Persistence can be disabled explicitly for disposable tests:
+```yaml
+persistence:
+  enabled: false
+rag:
+  enabled: true
+```
+
+Or override only RAG:
 
 ```yaml
 rag:
@@ -216,20 +273,17 @@ rag:
     enabled: false
 ```
 
-In that mode prompt, index and other filesystem changes are lost when the Pod is
-replaced. Runtime `.env` settings are ephemeral in both modes by design.
+Without persistence, `.env` is created under `/tmp` and in-container edits are
+lost when the Pod is replaced.
 
-## Use another HugeGraph deployment
+## External HugeGraph deployment
 
-Set an explicit URL and credential Secret for an external Server. A custom
-Secret defaults to the key `password` when `key` is omitted; specifying the key
-is clearer and recommended.
+Set an explicit URL and credential source for another Server:
 
 ```yaml
 rag:
   enabled: true
   hugegraph:
-    autoConfigure: true
     url: http://hugegraph-server.graphs.svc:8080
     graphName: hugegraph
     graphSpace: DEFAULT
@@ -239,31 +293,45 @@ rag:
       key: password
 ```
 
-## Exposure and authentication
+A custom Secret defaults to key `password` when `key` is omitted, although an
+explicit key is clearer.
+
+## Security contexts and OpenShift
+
+The templates default to non-root UID/GID/fsGroup `1000`, dropped Linux
+capabilities, disabled privilege escalation and RuntimeDefault seccomp. The main
+RAG container intentionally keeps `resources: {}` because model, embedding and
+index workloads need installation-specific sizing; only the small seeding init
+container has generic defaults in `values-rag.yaml`.
+
+Platforms such as OpenShift restricted SCC assign the numeric identity at
+admission time. Keep `runAsNonRoot: true`, but use `auto` to omit the fixed IDs:
+
+```yaml
+rag:
+  podSecurityContext:
+    runAsUser: auto
+    runAsGroup: auto
+    fsGroup: auto
+  securityContext:
+    runAsUser: auto
+    runAsGroup: auto
+```
+
+When `fsGroup` is omitted, the chart also omits `fsGroupChangePolicy`. Confirm
+that the platform makes the selected PVC writable for the assigned identity.
+
+## Exposure and NetworkPolicy
 
 The RAG Service defaults to `ClusterIP` in both `easy` and `strict` modes. This
-is intentionally stricter than the browser-oriented Server and Hubble defaults:
-the current RAG application login does not provide unified authentication for
-every HTTP API route.
+is deliberately stricter than browser-oriented Server and Hubble defaults: the
+current application login does not protect every HTTP route.
 
-An explicit `rag.service.type` always wins. Ingress remains disabled until
-`rag.ingress.enabled=true`. Treat NodePort, LoadBalancer and Ingress as reviewed
-external-exposure choices. Put the application behind an authenticated reverse
-proxy or another trusted network boundary and apply model-provider spend limits.
-The application's native login can still be enabled for its own UI and guarded
-write paths, but it is not a substitute for an authenticated ingress protecting
-all routes.
+NodePort, LoadBalancer and Ingress are explicit choices. Put externally exposed
+RAG behind an authenticated reverse proxy or another reviewed network boundary,
+and apply model-provider spend limits.
 
-In `mode=strict`, a NetworkPolicy isolates the Pod. Strict mode permits DNS and
-the same-release Server automatically, but does not silently open access to
-public model APIs or an Ingress controller. Add the required peers to
-`rag.networkPolicy.extraIngress` and provider destinations to
-`rag.networkPolicy.extraEgress` using native Kubernetes NetworkPolicy rules.
-
-The templates enforce non-root execution, `privileged=false`, no added Linux
-capabilities, `allowPrivilegeEscalation=false`, RuntimeDefault seccomp and a
-disabled ServiceAccount token. UID/GID/fsGroup default to `1000`; explicit
-values must remain positive non-root IDs. The small default requests/limits in
-`values-rag.yaml` apply only to the resource-seeding init container. The main RAG
-container deliberately keeps `resources: {}` because model, embedding and index
-workloads require installation-specific sizing.
+In `mode=strict`, NetworkPolicy permits DNS and the same-release Server. Add the
+Ingress controller and required model-provider destinations through
+`rag.networkPolicy.extraIngress` and `rag.networkPolicy.extraEgress`. Policy
+objects are effective only when the cluster CNI implements NetworkPolicy.

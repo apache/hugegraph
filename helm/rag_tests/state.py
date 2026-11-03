@@ -14,37 +14,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression coverage for the optional HugeGraph RAG Helm component."""
+"""State and network regression coverage for the optional RAG component."""
 
-from .support import RAG_ENV, RAG_MOUNT, component_resources, env_by_name, pod
+from .support import (
+    RAG_EPHEMERAL_ENV,
+    RAG_MOUNT,
+    RAG_PERSISTENT_ENV,
+    component_resources,
+    env_by_name,
+    pod,
+)
 
 
 class RagStateMixin:
-    def test_persistence_seeds_resources_but_keeps_runtime_env_ephemeral(self):
+    def test_persistence_seeds_resources_and_reconciles_runtime_environment(self):
         documents = self.documents({"persistence": {"enabled": True}})
         deployment = self.deployment(documents)
         pvc, = component_resources(documents, kind="PersistentVolumeClaim")
         self.assertEqual("fixture-hugegraph-rag-data", pvc["metadata"]["name"])
         self.assertEqual("Recreate", deployment["spec"]["strategy"]["type"])
+
         init, = pod(deployment)["spec"]["initContainers"]
-        self.assertIn("cp -a -n", init["args"][0])
+        self.assertIn("cp -R -n", init["args"][0])
+        self.assertNotIn("cp -a", init["args"][0])
         self.assertNotIn(".hugegraph-rag-seeded", init["args"][0])
+
         container = self.container(documents)
+        startup = container["args"][0]
+        self.assertIn("dotenv_values", startup)
+        self.assertIn("if key in os.environ", startup)
+        self.assertIn("unset_key", startup)
+        self.assertIn("exec python -m hugegraph_llm.demo.rag_demo.app", startup)
+
         mount, = [item for item in container["volumeMounts"] if item["name"] == "data"]
         self.assertEqual(RAG_MOUNT, mount["mountPath"])
         environment = env_by_name(container)
-        self.assertEqual(RAG_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
+        self.assertEqual(RAG_PERSISTENT_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
         self.assertEqual(
             f"{RAG_MOUNT}/demo/config_prompt.yaml",
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
         )
 
-    def test_custom_mount_path_updates_only_the_durable_prompt_path(self):
+    def test_env_from_is_rendered_and_covered_by_generic_precedence(self):
+        documents = self.documents({
+            "envFrom": [{"secretRef": {"name": "rag-model"}}],
+        })
+        container = self.container(documents)
+        self.assertEqual([{"secretRef": {"name": "rag-model"}}], container["envFrom"])
+        self.assertIn("if key in os.environ", container["args"][0])
+
+    def test_custom_mount_path_updates_both_durable_config_paths(self):
         mount_path = "/var/lib/hugegraph-rag"
         documents = self.documents({"persistence": {"mountPath": mount_path}})
         container = self.container(documents)
         environment = env_by_name(container)
-        self.assertEqual(RAG_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
+        self.assertEqual(f"{mount_path}/.env", environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
         self.assertEqual(
             f"{mount_path}/demo/config_prompt.yaml",
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
@@ -61,10 +85,19 @@ class RagStateMixin:
         container = self.container(documents)
         self.assertFalse(any(item["name"] == "data" for item in container.get("volumeMounts", [])))
         environment = env_by_name(container)
-        self.assertEqual(RAG_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
+        self.assertEqual(RAG_EPHEMERAL_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
         self.assertEqual(
             f"{RAG_MOUNT}/demo/config_prompt.yaml",
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
+        )
+
+    def test_global_persistence_disable_is_inherited_when_rag_override_is_unset(self):
+        documents = self.documents({}, use_profile=False, persistence={"enabled": False})
+        self.assertEqual([], component_resources(documents, kind="PersistentVolumeClaim"))
+        container = self.container(documents)
+        self.assertEqual(
+            RAG_EPHEMERAL_ENV,
+            env_by_name(container)["HUGEGRAPH_LLM_ENV_PATH"]["value"],
         )
 
     def test_multiple_replicas_are_rejected_even_with_shared_storage(self):
@@ -134,4 +167,3 @@ class RagStateMixin:
         deployment = self.deployment(documents)
         self.assertEqual(expected, pod(deployment)["spec"]["containers"][0]["image"])
         self.assertEqual(expected, pod(deployment)["spec"]["initContainers"][0]["image"])
-

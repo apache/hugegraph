@@ -14,9 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression coverage for the optional HugeGraph RAG Helm component."""
+"""Basic rendered contracts for the optional HugeGraph RAG component."""
 
-from .support import RAG_ENV, RAG_MOUNT, component_resources, env_by_name, pod
+from .support import RAG_MOUNT, RAG_PERSISTENT_ENV, component_resources, env_by_name, pod
 
 
 class RagBasicMixin:
@@ -36,8 +36,9 @@ class RagBasicMixin:
         self.assertEqual(1, deployment["spec"]["replicas"])
         self.assertEqual("Recreate", deployment["spec"]["strategy"]["type"])
         self.assertEqual(8001, container["ports"][0]["containerPort"])
-        self.assertEqual(["python", "-m", "hugegraph_llm.demo.rag_demo.app"], container["command"])
-        self.assertEqual(["--host", "0.0.0.0", "--port", "8001"], container["args"])
+        self.assertEqual(["/bin/sh", "-ec"], container["command"])
+        self.assertIn("exec python -m hugegraph_llm.demo.rag_demo.app", container["args"][0])
+        self.assertIn("--host 0.0.0.0 --port \"8001\"", container["args"][0])
         self.assertEqual("ClusterIP", service["spec"]["type"])
         self.assertEqual("10Gi", pvc["spec"]["resources"]["requests"]["storage"])
 
@@ -53,7 +54,7 @@ class RagBasicMixin:
         self.assertFalse(pod(deployment)["spec"]["automountServiceAccountToken"])
 
         environment = env_by_name(container)
-        self.assertEqual(RAG_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
+        self.assertEqual(RAG_PERSISTENT_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
         self.assertEqual(
             f"{RAG_MOUNT}/demo/config_prompt.yaml",
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
@@ -79,9 +80,8 @@ class RagBasicMixin:
         documents = self.documents({"port": 9001})
         container = self.container(documents)
         service, = component_resources(documents, kind="Service")
-        self.assertEqual("9001", container["args"][3])
+        self.assertIn('--port "9001"', container["args"][0])
         self.assertEqual(9001, container["ports"][0]["containerPort"])
         self.assertEqual(9001, service["spec"]["ports"][0]["port"])
         for name in ("startupProbe", "readinessProbe", "livenessProbe"):
             self.assertEqual("http", container[name]["httpGet"]["port"])
-
