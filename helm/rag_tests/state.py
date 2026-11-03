@@ -35,7 +35,7 @@ class RagStateMixin:
         self.assertEqual([{"secretRef": {"name": "rag-model"}}], container["envFrom"])
 
     def test_custom_mount_path_updates_both_durable_config_paths(self):
-        mount_path = "/var/lib/hugegraph-rag"
+        mount_path = "/srv/hugegraph-rag"
         documents = self.documents({"persistence": {"mountPath": mount_path}})
         container = self.container(documents)
         environment = env_by_name(container)
@@ -97,11 +97,25 @@ class RagStateMixin:
         )
 
         egress = rag_policy["spec"]["egress"]
-        self.assertTrue(any(
-            peer.get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/component") == "server"
-            for rule in egress
-            for peer in rule.get("to", [])
-        ))
+        server_rules = [
+            rule for rule in egress
+            if any(
+                peer.get("podSelector", {}).get("matchLabels", {}).get(
+                    "app.kubernetes.io/component"
+                ) == "server"
+                for peer in rule.get("to", [])
+            )
+        ]
+        self.assertEqual(1, len(server_rules))
+        server_ports = {
+            (item.get("protocol"), item.get("port"))
+            for item in server_rules[0].get("ports", [])
+        }
+        self.assertEqual(
+            {("TCP", 8080)},
+            server_ports,
+            "Internal Server egress must remain scoped to the REST port",
+        )
         for rule in egress:
             if rule.get("to"):
                 continue
