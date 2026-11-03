@@ -23,7 +23,7 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: connects an enabled RAG pod to the same-release Server service
+  - it: connects a persistent non-root RAG pod to the same-release Server
     template: rag-deployment.yaml
     set:
       rag.enabled: true
@@ -33,6 +33,24 @@ tests:
       - equal:
           path: spec.replicas
           value: 1
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.runAsGroup
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 1000
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: seed-resources
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "cp -a -n"
       - equal:
           path: spec.template.spec.containers[0].image
           value: hugegraph/rag:latest
@@ -52,6 +70,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 8001
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /home/work/hugegraph-llm/src/hugegraph_llm/resources
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -69,7 +90,12 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
-            value: /tmp/hugegraph-llm.env
+            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/.env
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HUGEGRAPH_LLM_PROMPT_CONFIG_PATH
+            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
 
   - it: passes a custom port to the process and Pod contract
     template: rag-deployment.yaml
@@ -106,37 +132,37 @@ tests:
                 name: remote-admin
                 key: credential
 
-  - it: uses the topology preset replica count without changing the template
+  - it: defaults a custom password Secret to the password key
     template: rag-deployment.yaml
     set:
       rag.enabled: true
-      rag.replicas: 2
+      rag.hugegraph.passwordSecret.name: rag-credentials
     asserts:
-      - equal:
-          path: spec.replicas
-          value: 2
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRAPH_PWD
+            valueFrom:
+              secretKeyRef:
+                name: rag-credentials
+                key: password
+
+  - it: supports an explicitly disposable RAG pod
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.persistence.enabled: false
+    asserts:
       - equal:
           path: spec.strategy.type
           value: RollingUpdate
-
-  - it: seeds image resources before mounting persistent storage
-    template: rag-deployment.yaml
-    set:
-      rag.enabled: true
-      rag.persistence.enabled: true
-    asserts:
-      - equal:
-          path: spec.strategy.type
-          value: Recreate
-      - equal:
-          path: spec.template.spec.initContainers[0].name
-          value: seed-resources
-      - matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "cp -a -n"
-      - equal:
-          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
-          value: /home/work/hugegraph-llm/src/hugegraph_llm/resources
+      - notExists:
+          path: spec.template.spec.initContainers
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HUGEGRAPH_LLM_ENV_PATH
+            value: /tmp/hugegraph-llm.env
 
   - it: keeps the RAG service internal by default in easy mode
     template: rag-service.yaml
@@ -179,11 +205,10 @@ tests:
           path: spec.ports[0].nodePort
           value: 31001
 
-  - it: creates a retained claim only when persistence is enabled
+  - it: creates a retained claim by default after RAG is enabled
     template: rag-pvc.yaml
     set:
       rag.enabled: true
-      rag.persistence.enabled: true
     asserts:
       - isKind:
           of: PersistentVolumeClaim
@@ -193,3 +218,15 @@ tests:
       - equal:
           path: spec.resources.requests.storage
           value: 10Gi
+      - equal:
+          path: spec.accessModes[0]
+          value: ReadWriteOnce
+
+  - it: creates no claim when persistence is explicitly disabled
+    template: rag-pvc.yaml
+    set:
+      rag.enabled: true
+      rag.persistence.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

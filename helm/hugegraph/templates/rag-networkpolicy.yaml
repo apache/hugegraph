@@ -23,7 +23,11 @@
 {{- $graph := get $rag "hugegraph" | default dict }}
 {{- $autoConfigure := true }}
 {{- if hasKey $graph "autoConfigure" }}{{- $autoConfigure = get $graph "autoConfigure" }}{{- end }}
-{{- $internalServer := and $autoConfigure (not (trim (get $graph "url" | default ""))) }}
+{{- $envNames := dict }}
+{{- range get $rag "env" | default list }}
+{{- $_ := set $envNames (.name | toString) true }}
+{{- end }}
+{{- $internalServer := and $autoConfigure (not (trim (get $graph "url" | default ""))) (not (hasKey $envNames "GRAPH_URL")) }}
 {{- $ragPolicy := get $rag "networkPolicy" | default dict }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

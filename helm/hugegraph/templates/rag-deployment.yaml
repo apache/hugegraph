@@ -22,12 +22,15 @@
 {{- $graph := get $rag "hugegraph" | default dict }}
 {{- $autoConfigure := true }}
 {{- if hasKey $graph "autoConfigure" }}{{- $autoConfigure = get $graph "autoConfigure" }}{{- end }}
-{{- $persistence := get $rag "persistence" | default dict }}
-{{- $persistenceEnabled := get $persistence "enabled" | default false }}
+{{- $persistenceEnabled := eq (include "hugegraph.rag.persistenceEnabled" .) "true" }}
 {{- $envNames := dict }}
 {{- range get $rag "env" | default list }}
 {{- $_ := set $envNames (.name | toString) true }}
 {{- end }}
+{{- $password := get $graph "passwordSecret" | default dict }}
+{{- $explicitPasswordSecret := trim (get $password "name" | default "") }}
+{{- $passwordSecret := include "hugegraph.rag.passwordSecretName" . }}
+{{- $injectPassword := and $autoConfigure $passwordSecret (not (hasKey $envNames "GRAPH_PWD")) (or $explicitPasswordSecret (not (hasKey $envNames "GRAPH_URL"))) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,7 +39,7 @@ metadata:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: rag
 spec:
-  replicas: {{ include "hugegraph.rag.replicas" . }}
+  replicas: {{ include "hugegraph.rag.replicas" . | int }}
   strategy:
     type: {{ ternary "Recreate" "RollingUpdate" (and $persistenceEnabled (eq (include "hugegraph.rag.replicas" . | int) 1)) }}
   selector:
@@ -49,9 +52,17 @@ spec:
         {{- include "hugegraph.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: rag
         {{- with get $rag "podLabels" }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- with get $rag "podAnnotations" }}
+      {{- if or $injectPassword (get $rag "podAnnotations") }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- if $injectPassword }}
+        {{- if $explicitPasswordSecret }}
+        {{- $live := lookup "v1" "Secret" .Release.Namespace $passwordSecret | default dict }}
+        checksum/hugegraph-auth: {{ printf "%s|%s|%s" $passwordSecret (include "hugegraph.rag.passwordSecretKey" .) (dig "metadata" "resourceVersion" "" $live) | sha256sum | quote }}
+        {{- else }}
+        checksum/hugegraph-auth: {{ include "hugegraph.server.authChecksum" . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- with get $rag "podAnnotations" }}{{ toYaml . | nindent 8 }}{{- end }}
       {{- end }}
     spec:
       {{- $serviceAccount := get $rag "serviceAccount" | default dict }}
@@ -87,10 +98,8 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with get $rag "podSecurityContext" }}
       securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- include "hugegraph.rag.podSecurityContext" . | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -103,12 +112,11 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
+              # Preserve operator and UI edits. Image upgrades add only files
+              # that are still missing from the persistent resource directory.
               cp -a -n /home/work/hugegraph-llm/src/hugegraph_llm/resources/. /data/
-              touch /data/.hugegraph-rag-seeded
-          {{- with get $rag "securityContext" }}
           securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
           resources:
             {{- toYaml (get $rag "initResources" | default dict) | nindent 12 }}
           volumeMounts:
@@ -127,14 +135,12 @@ spec:
             - --host
             - 0.0.0.0
             - --port
-            - {{ include "hugegraph.rag.port" . | quote }}
-          {{- with get $rag "securityContext" }}
+            - {{ include "hugegraph.rag.port" . | int | quote }}
           securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
           ports:
             - name: http
-              containerPort: {{ include "hugegraph.rag.port" . }}
+              containerPort: {{ include "hugegraph.rag.port" . | int }}
               protocol: TCP
           env:
             {{- if and $autoConfigure (not (hasKey $envNames "GRAPH_URL")) }}
@@ -153,8 +159,7 @@ spec:
             - name: GRAPH_USER
               value: {{ get $graph "username" | default "admin" | quote }}
             {{- end }}
-            {{- $passwordSecret := include "hugegraph.rag.passwordSecretName" . }}
-            {{- if and $autoConfigure $passwordSecret (not (hasKey $envNames "GRAPH_PWD")) }}
+            {{- if $injectPassword }}
             - name: GRAPH_PWD
               valueFrom:
                 secretKeyRef:
@@ -163,7 +168,11 @@ spec:
             {{- end }}
             {{- if not (hasKey $envNames "HUGEGRAPH_LLM_ENV_PATH") }}
             - name: HUGEGRAPH_LLM_ENV_PATH
-              value: /tmp/hugegraph-llm.env
+              value: {{ include "hugegraph.rag.envPath" . | quote }}
+            {{- end }}
+            {{- if not (hasKey $envNames "HUGEGRAPH_LLM_PROMPT_CONFIG_PATH") }}
+            - name: HUGEGRAPH_LLM_PROMPT_CONFIG_PATH
+              value: {{ include "hugegraph.rag.promptConfigPath" . | quote }}
             {{- end }}
             {{- with get $rag "env" }}
             {{- toYaml . | nindent 12 }}
@@ -178,7 +187,7 @@ spec:
           volumeMounts:
             {{- if $persistenceEnabled }}
             - name: data
-              mountPath: {{ get $persistence "mountPath" | default "/home/work/hugegraph-llm/src/hugegraph_llm/resources" | quote }}
+              mountPath: {{ include "hugegraph.rag.mountPath" . | quote }}
             {{- end }}
             {{- with get $rag "extraVolumeMounts" }}
             {{- toYaml . | nindent 12 }}
@@ -190,21 +199,21 @@ spec:
               port: http
             failureThreshold: {{ get (get (get $rag "probes" | default dict) "startup" | default dict) "failureThreshold" | default 60 }}
             periodSeconds: {{ get (get (get $rag "probes" | default dict) "startup" | default dict) "periodSeconds" | default 5 }}
-            {{- include "hugegraph.probeTuning" (get (get (get $rag "probes" | default dict) "startup" | default dict)) | nindent 12 }}
+            {{- include "hugegraph.probeTuning" (get (get $rag "probes" | default dict) "startup" | default dict) | nindent 12 }}
           readinessProbe:
             httpGet:
               path: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "path" | default "/" | quote }}
               port: http
             failureThreshold: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "failureThreshold" | default 3 }}
             periodSeconds: {{ get (get (get $rag "probes" | default dict) "readiness" | default dict) "periodSeconds" | default 10 }}
-            {{- include "hugegraph.probeTuning" (get (get (get $rag "probes" | default dict) "readiness" | default dict)) | nindent 12 }}
+            {{- include "hugegraph.probeTuning" (get (get $rag "probes" | default dict) "readiness" | default dict) | nindent 12 }}
           livenessProbe:
             httpGet:
               path: {{ get (get (get $rag "probes" | default dict) "liveness" | default dict) "path" | default "/" | quote }}
               port: http
             failureThreshold: {{ get (get (get $rag "probes" | default dict) "liveness" | default dict) "failureThreshold" | default 3 }}
             periodSeconds: {{ get (get (get $rag "probes" | default dict) "liveness" | default dict) "periodSeconds" | default 20 }}
-            {{- include "hugegraph.probeTuning" (get (get (get $rag "probes" | default dict) "liveness" | default dict)) | nindent 12 }}
+            {{- include "hugegraph.probeTuning" (get (get $rag "probes" | default dict) "liveness" | default dict) | nindent 12 }}
       {{- if or $persistenceEnabled (get $rag "extraVolumes") }}
       volumes:
         {{- if $persistenceEnabled }}

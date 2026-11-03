@@ -16,7 +16,8 @@
 #
 
 # Optional HugeGraph RAG overlay. Layer it after values-single.yaml or
-# values-cluster.yaml; topology presets retain their own RAG replica count.
+# values-cluster.yaml. The same-release Server address, port, graph identity
+# and administrator Secret are derived by the chart and need no duplication.
 rag:
   enabled: true
   image:
@@ -25,15 +26,16 @@ rag:
     digest: ''
     pullPolicy: Always
   port: 8001
+
+  # Keep this true for a Server deployed by the same Helm release. Configure
+  # url/graphName/graphSpace/username/passwordSecret only for an external or
+  # deliberately separate HugeGraph deployment; see docs/rag.md.
   hugegraph:
     autoConfigure: true
-    url: ''
-    graphName: hugegraph
-    graphSpace: ''
-    username: admin
-    passwordSecret:
-      name: ''
-      key: ''
+
+  # The main RAG process has no universal resource profile because model,
+  # embedding and indexing workloads vary widely. Size it for the selected
+  # providers and dataset.
   resources: {}
   initResources:
     requests:
@@ -42,19 +44,9 @@ rag:
     limits:
       cpu: 100m
       memory: 64Mi
-  podSecurityContext:
-    fsGroup: 1000
-    fsGroupChangePolicy: OnRootMismatch
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-      - ALL
-    seccompProfile:
-      type: RuntimeDefault
+
+  # Safe non-root UID/GID/fsGroup 1000 and RuntimeDefault seccomp are built
+  # into the templates, including bare --set rag.enabled=true installs.
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -65,13 +57,15 @@ rag:
   env: []
   envFrom: []
   terminationGracePeriodSeconds: 30
+
   serviceAccount:
     create: true
     name: ''
     annotations: {}
     automountServiceAccountToken: false
-  # RAG stays internal by default because the application login is optional.
-  # Select NodePort/LoadBalancer or enable Ingress only with reviewed auth.
+
+  # RAG stays internal by default because the application login does not
+  # protect every HTTP route. Expose it only behind a reviewed auth boundary.
   service:
     type: ClusterIP
     nodePort: null
@@ -86,14 +80,20 @@ rag:
       - path: /
         pathType: Prefix
     tls: []
+
+  # Persistence defaults on when RAG is enabled. The claim stores the editable
+  # resource tree, generated .env model/graph settings and prompt YAML. The
+  # init container adds missing files from a new image but never overwrites
+  # files already changed on the claim.
   persistence:
-    enabled: false
+    enabled: true
     existingClaim: ''
     size: 10Gi
     storageClassName: ''
     accessModes:
     - ReadWriteOnce
     mountPath: /home/work/hugegraph-llm/src/hugegraph_llm/resources
+
   extraVolumes: []
   extraVolumeMounts: []
   probes:

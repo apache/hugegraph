@@ -18,7 +18,8 @@
 {{ include "hugegraph.resolveValues" . }}
 {{- $rag := get .Values "rag" | default dict }}
 {{- $persistence := get $rag "persistence" | default dict }}
-{{- if and (get $rag "enabled" | default false) (get $persistence "enabled" | default false) (not (get $persistence "existingClaim" | default "")) }}
+{{- $persistenceEnabled := eq (include "hugegraph.rag.persistenceEnabled" .) "true" }}
+{{- if and (get $rag "enabled" | default false) $persistenceEnabled (not (get $persistence "existingClaim" | default "")) }}
 {{- include "hugegraph.rag.validate" . }}
 apiVersion: v1
 kind: PersistentVolumeClaim

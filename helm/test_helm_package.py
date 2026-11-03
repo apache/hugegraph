@@ -146,8 +146,11 @@ class HelmPackageTest(unittest.TestCase):
 
 
 def load_tests(loader, tests, _pattern):
-    """Run the optional RAG contract in the shared packaged-chart CI entrypoint."""
-    from test_helm_rag import RagChartTest, RagSourceContractTest
+    """Run the optional RAG contract from discover and module-style entry points."""
+    try:
+        from test_helm_rag import RagChartTest, RagSourceContractTest
+    except ModuleNotFoundError:
+        from helm.test_helm_rag import RagChartTest, RagSourceContractTest
 
     tests.addTests(loader.loadTestsFromTestCase(RagSourceContractTest))
     tests.addTests(loader.loadTestsFromTestCase(RagChartTest))
