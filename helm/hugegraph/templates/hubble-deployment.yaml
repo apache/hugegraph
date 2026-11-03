@@ -150,6 +150,18 @@ spec:
                 exit 1
               fi
               {{- end }}
+              # fsGroup can widen a persisted key's permissions on volume mount.
+              # An environment key takes precedence; otherwise restore owner-only
+              # access without creating a key or following a symbolic link.
+              if [[ "${HUBBLE_TEXT2GQL_MASTER_KEY:-}" =~ ^[[:space:]]*$ &&
+                    ! -L "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" &&
+                    -f "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" ]]; then
+                if ! chmod 600 "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}"; then
+                  echo "cannot secure the Text2GQL master key; ensure the file is owned" \
+                       "by the Hubble runAsUser and the data volume is writable" >&2
+                  exit 1
+                fi
+              fi
               TMP=$(mktemp)
               FOUND_PD_ENABLED=false
               {{- if $pdMode }}
@@ -162,7 +174,6 @@ spec:
               FOUND_DIRECT_URL=false
               {{- end }}
               FOUND_SERVER_HOST=false
-              FOUND_TEXT2GQL_MASTER_KEY=false
               {{- if $customPort }}
               FOUND_HUBBLE_PORT=false
               FOUND_SERVER_PORT=false
@@ -212,8 +223,7 @@ spec:
                     FOUND_SERVER_HOST=true
                     ;;
                   text2gql.shared.master_key_file=*)
-                    printf 'text2gql.shared.master_key_file=%s\n' "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" >>"${TMP}"
-                    FOUND_TEXT2GQL_MASTER_KEY=true
+                    # Discard stale defaults and write the managed path once below.
                     ;;
                   {{- if $customPort }}
                   hubble.port=*)
@@ -274,9 +284,7 @@ spec:
               fi
               # The image default (data/text2gql-master.key, relative to /hubble)
               # is outside the data volume; keep the key next to the H2 database.
-              if [[ "${FOUND_TEXT2GQL_MASTER_KEY}" == false ]]; then
-                printf 'text2gql.shared.master_key_file=%s\n' "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" >>"${TMP}"
-              fi
+              printf 'text2gql.shared.master_key_file=%s\n' "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" >>"${TMP}"
               {{- if $customPort }}
               if [[ "${FOUND_HUBBLE_PORT}" == false ]]; then
                 printf 'hubble.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"

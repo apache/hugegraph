@@ -159,6 +159,32 @@ See [all seven local PVs](../examples/README.md#storage) for directory, capacity
 claim binding and scheduling requirements. `Retain` preserves files on claim
 deletion; reclamation/recovery needs explicit inspection.
 
+### Hubble Text2GQL credentials
+
+The chart stores the Text2GQL encryption master key at
+`/hubble-data/text2gql-master.key`, on the same volume as H2. With Hubble
+persistence enabled, both the saved API key and its encryption key survive Pod
+replacement. Back up and restore them together. With
+`hubble.persistence.enabled=false` (or inherited `persistence.enabled=false`),
+the `emptyDir` volume loses both H2 data and the master key on Pod replacement.
+
+When upgrading a release that used the old container-local default
+`/hubble/data/text2gql-master.key`, **re-enter and save the Text2GQL model API key
+once after upgrading**, unless the old master key was separately preserved at
+the new path. The chart does not migrate that file automatically. H2 can still
+show a saved API key even though generation returns HTTP 503;
+saving other settings without re-entering the API key does not repair it.
+Hubble creates a missing master key on the next API-key save, not at startup or
+when decrypting an existing value.
+
+For non-root deployments, keep the same Hubble UID and ownership of the key
+file across replacements. `fsGroup` can add group permissions on volume mount;
+the startup wrapper restores an existing regular key file to `0600`, as Hubble
+requires owner-only permissions. `fsGroup` alone does not transfer file
+ownership. If `HUBBLE_TEXT2GQL_MASTER_KEY` is supplied from a Secret through
+`hubble.extraEnv`, Hubble uses that value instead of the file; preserve the same
+Secret value to decrypt existing credentials.
+
 ## Startup and probes
 
 Store's init container waits for a majority of PD peers on `store.waitPath`
