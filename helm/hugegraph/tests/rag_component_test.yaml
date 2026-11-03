@@ -1,0 +1,155 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Optional RAG component
+tests:
+  - it: renders no RAG deployment while the component is disabled
+    template: rag-deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: connects an enabled RAG pod to the same-release Server service
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/rag:latest
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8001
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRAPH_URL
+            value: RELEASE-NAME-hugegraph-server.NAMESPACE.svc:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRAPH_PWD
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-admin
+                key: password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HUGEGRAPH_LLM_ENV_PATH
+            value: /tmp/hugegraph-llm.env
+
+  - it: lets an explicit graph endpoint and Secret replace release wiring
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.hugegraph.url: http://remote.graphs.svc:8080
+      rag.hugegraph.passwordSecret.name: remote-admin
+      rag.hugegraph.passwordSecret.key: credential
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRAPH_URL
+            value: http://remote.graphs.svc:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRAPH_PWD
+            valueFrom:
+              secretKeyRef:
+                name: remote-admin
+                key: credential
+
+  - it: uses the topology preset replica count without changing the template
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.replicas: 2
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+
+  - it: seeds image resources before mounting persistent storage
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.persistence.enabled: true
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: seed-resources
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "cp -a -n"
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /home/work/hugegraph-llm/src/hugegraph_llm/resources
+
+  - it: defaults the RAG service to NodePort in easy mode
+    template: rag-service.yaml
+    set:
+      rag.enabled: true
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - equal:
+          path: spec.ports[0].port
+          value: 8001
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+      - notExists:
+          path: spec.ports[0].nodePort
+
+  - it: defaults the RAG service to ClusterIP in strict mode
+    template: rag-service.yaml
+    set:
+      mode: strict
+      rag.enabled: true
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: creates a retained claim only when persistence is enabled
+    template: rag-pvc.yaml
+    set:
+      rag.enabled: true
+      rag.persistence.enabled: true
+    asserts:
+      - isKind:
+          of: PersistentVolumeClaim
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+      - equal:
+          path: spec.resources.requests.storage
+          value: 10Gi
