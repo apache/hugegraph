@@ -16,7 +16,6 @@
 
 """State and network regression coverage for the optional RAG component."""
 
-import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -31,6 +30,60 @@ from .support import (
     env_by_name,
     pod,
 )
+
+
+_DOTENV_STUB = '''from pathlib import Path
+
+
+def dotenv_values(path):
+    values = {}
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        if not raw or raw.lstrip().startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        values[key] = value
+    return values
+
+
+def unset_key(path, key):
+    target = Path(path)
+    kept = []
+    for raw in target.read_text(encoding="utf-8").splitlines():
+        if "=" in raw and raw.split("=", 1)[0] == key:
+            continue
+        kept.append(raw)
+    target.write_text("\\n".join(kept) + ("\\n" if kept else ""), encoding="utf-8")
+    return True, key
+'''
+
+
+def _reconciliation_script(container):
+    startup = container["args"][0]
+    marker = "python - <<'PY'\n"
+    if marker not in startup:
+        raise AssertionError("rendered startup command does not contain the reconciliation script")
+    return startup.split(marker, 1)[1].split("\nPY\n", 1)[0]
+
+
+def _execution_environment(directory, env_path):
+    module_dir = Path(directory) / "pythonpath"
+    module_dir.mkdir()
+    (module_dir / "dotenv.py").write_text(_DOTENV_STUB, encoding="utf-8")
+    environment = os.environ.copy()
+    existing = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = str(module_dir) + (os.pathsep + existing if existing else "")
+    environment["HUGEGRAPH_LLM_ENV_PATH"] = str(env_path)
+    return environment
+
+
+def _read_env(path):
+    values = {}
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        if not raw or raw.lstrip().startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        values[key] = value
+    return values
 
 
 class RagStateMixin:
@@ -49,7 +102,8 @@ class RagStateMixin:
         container = self.container(documents)
         startup = container["args"][0]
         self.assertIn("dotenv_values", startup)
-        self.assertIn("if key in os.environ", startup)
+        self.assertIn("managed_keys", startup)
+        self.assertIn("OPENAI_CHAT_API_KEY", startup)
         self.assertIn("unset_key", startup)
         self.assertIn("exec python -m hugegraph_llm.demo.rag_demo.app", startup)
 
@@ -62,28 +116,48 @@ class RagStateMixin:
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
         )
 
-    def test_reconciliation_script_executes_and_rejects_empty_env_path(self):
-        if importlib.util.find_spec("dotenv") is None:
-            self.skipTest("python-dotenv is required to execute the rendered reconciliation block")
-        from dotenv import dotenv_values
-
-        startup = self.container(self.documents({}))["args"][0]
-        marker = "python - <<'PY'\n"
-        self.assertIn(marker, startup)
-        script = startup.split(marker, 1)[1].split("\nPY\n", 1)[0]
+    def test_reconciliation_executes_rotations_and_rejects_empty_env_path(self):
+        documents = self.documents({
+            "env": [{"name": "GRAPH_URL", "value": "http://external:8080"}],
+        })
+        container = self.container(documents)
+        self.assertNotIn("GRAPH_PWD", env_by_name(container))
+        script = _reconciliation_script(container)
 
         pod_key = "RAG_TEST_POD_VALUE_7F11"
         file_key = "RAG_TEST_FILE_VALUE_7F11"
+        stale_values = {
+            pod_key: "stale",
+            file_key: "keep",
+            "GRAPH_URL": "http://old-internal:8080",
+            "GRAPH_NAME": "old-graph",
+            "GRAPH_PWD": "stale-local-admin-password",
+            "OPENAI_CHAT_API_KEY": "stale-provider-key",
+            "OPENAI_EXTRACT_API_KEY": "stale-provider-key",
+            "OPENAI_TEXT2GQL_API_KEY": "stale-provider-key",
+            "OPENAI_CHAT_API_BASE": "https://old-provider.invalid/v1",
+            "OPENAI_EXTRACT_API_BASE": "https://old-provider.invalid/v1",
+            "OPENAI_TEXT2GQL_API_BASE": "https://old-provider.invalid/v1",
+            "OPENAI_EMBEDDING_API_BASE": "https://old-embedding.invalid/v1",
+            "COHERE_BASE_URL": "https://old-cohere.invalid/v1/rerank",
+        }
         with tempfile.TemporaryDirectory(prefix="rag-reconcile-") as directory:
             env_path = Path(directory) / ".env"
             env_path.write_text(
-                f"{pod_key}=stale\n{file_key}=keep\n",
+                "".join(f"{key}={value}\n" for key, value in stale_values.items()),
                 encoding="utf-8",
             )
-            environment = os.environ.copy()
-            environment[pod_key] = "fresh"
-            environment.pop(file_key, None)
-            environment["HUGEGRAPH_LLM_ENV_PATH"] = str(env_path)
+            environment = _execution_environment(directory, env_path)
+            for key in stale_values:
+                environment.pop(key, None)
+            environment.update({
+                pod_key: "fresh",
+                "GRAPH_URL": "http://external:8080",
+                "OPENAI_API_KEY": "fresh-provider-key",
+                "OPENAI_BASE_URL": "https://new-provider.invalid/v1",
+                "OPENAI_EMBEDDING_BASE_URL": "https://new-embedding.invalid/v1",
+                "CO_API_URL": "https://new-cohere.invalid/v1/rerank",
+            })
             result = subprocess.run(
                 [sys.executable, "-"],
                 input=script,
@@ -94,8 +168,10 @@ class RagStateMixin:
                 check=False,
             )
             self.assertEqual(0, result.returncode, result.stderr)
-            values = dotenv_values(env_path)
-            self.assertNotIn(pod_key, values)
+            values = _read_env(env_path)
+            removed = set(stale_values) - {file_key}
+            for key in removed:
+                self.assertNotIn(key, values, f"stale managed value {key} survived reconciliation")
             self.assertEqual("keep", values[file_key])
 
             environment["HUGEGRAPH_LLM_ENV_PATH"] = ""
@@ -110,6 +186,38 @@ class RagStateMixin:
             )
             self.assertNotEqual(0, result.returncode)
             self.assertIn("HUGEGRAPH_LLM_ENV_PATH must not be empty", result.stderr)
+
+    def test_reconciliation_preserves_file_owned_settings_when_auto_configure_is_off(self):
+        container = self.container(self.documents({
+            "hugegraph": {"autoConfigure": False},
+        }))
+        script = _reconciliation_script(container)
+        retained = {
+            "GRAPH_URL": "http://operator-owned:8080",
+            "GRAPH_PWD": "operator-owned-password",
+            "OPENAI_CHAT_API_KEY": "operator-owned-provider-key",
+        }
+        with tempfile.TemporaryDirectory(prefix="rag-reconcile-owned-") as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                "".join(f"{key}={value}\n" for key, value in retained.items()),
+                encoding="utf-8",
+            )
+            environment = _execution_environment(directory, env_path)
+            for key in retained:
+                environment.pop(key, None)
+            environment.pop("OPENAI_API_KEY", None)
+            result = subprocess.run(
+                [sys.executable, "-"],
+                input=script,
+                capture_output=True,
+                text=True,
+                env=environment,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(retained, _read_env(env_path))
 
     def test_env_from_is_rendered_and_covered_by_generic_precedence(self):
         documents = self.documents({

@@ -132,10 +132,9 @@ server:
 
 # Network isolation is selected by mode or an explicit enabled override.
 
-# Optional RAG follows this preset only when explicitly enabled. Start with one
-# persistent replica so the default ReadWriteOnce claim works on ordinary
-# StorageClasses. Scale beyond one only after selecting a shared ReadWriteMany
-# claim with rag.persistence.existingClaim or accessModes.
+# Optional RAG follows this preset only when explicitly enabled. The current
+# runtime supports exactly one active replica in every storage mode: RWX makes
+# files shareable but does not coordinate in-process state or concurrent writes.
 rag:
   enabled: false
   replicas: 1

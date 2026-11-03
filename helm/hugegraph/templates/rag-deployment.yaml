@@ -136,9 +136,9 @@ spec:
           args:
             - |
               # HugeGraph AI loads an existing .env into os.environ before
-              # Pydantic reads settings. Remove only keys already supplied by
-              # this Pod (including envFrom Secrets) so the current Kubernetes
-              # environment wins while all other UI/operator edits persist.
+              # Pydantic reads settings. Remove values owned by the current Pod,
+              # by chart graph wiring, or by known upstream provider aliases.
+              # Unrelated UI/operator edits remain persistent.
               umask 007
               python - <<'PY'
               import os
@@ -152,8 +152,47 @@ spec:
               env_path = Path(env_path_value)
               env_path.parent.mkdir(parents=True, exist_ok=True)
               env_path.touch(exist_ok=True)
+
+              managed_keys = set()
+              if "{{ $autoConfigure }}" == "true":
+                  # autoConfigure owns the complete graph connection, including
+                  # an intentionally absent password after switching endpoints.
+                  managed_keys.update({
+                      "GRAPH_URL",
+                      "GRAPH_NAME",
+                      "GRAPH_SPACE",
+                      "GRAPH_USER",
+                      "GRAPH_PWD",
+                  })
+
+              # HugeGraph AI derives these field-specific settings from the
+              # generic environment variables, then may persist the derived
+              # fields. Remove stale derivatives when the generic source is
+              # currently declarative so rotations take effect on restart.
+              derived_keys = {
+                  "OPENAI_API_KEY": {
+                      "OPENAI_CHAT_API_KEY",
+                      "OPENAI_EXTRACT_API_KEY",
+                      "OPENAI_TEXT2GQL_API_KEY",
+                  },
+                  "OPENAI_BASE_URL": {
+                      "OPENAI_CHAT_API_BASE",
+                      "OPENAI_EXTRACT_API_BASE",
+                      "OPENAI_TEXT2GQL_API_BASE",
+                  },
+                  "OPENAI_EMBEDDING_BASE_URL": {
+                      "OPENAI_EMBEDDING_API_BASE",
+                  },
+                  "CO_API_URL": {
+                      "COHERE_BASE_URL",
+                  },
+              }
+              for source, aliases in derived_keys.items():
+                  if source in os.environ:
+                      managed_keys.update(aliases)
+
               for key in dotenv_values(env_path):
-                  if key in os.environ:
+                  if key in os.environ or key in managed_keys:
                       unset_key(str(env_path), key)
               PY
               exec python -m hugegraph_llm.demo.rag_demo.app \

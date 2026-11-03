@@ -153,8 +153,10 @@ the chart does not generate.
 
 At every start, any key present in the current Pod environment—including keys
 loaded by `envFrom`—takes precedence over the same key in the retained `.env`.
-Changing a provider Secret alone does not restart a Pod whose environment was
-already populated, so restart RAG after the Secret changes:
+Generic provider variables also take precedence over the field-specific values
+that HugeGraph AI derives from them. Changing a provider Secret alone does not
+restart a Pod whose environment was already populated, so restart RAG after the
+Secret changes:
 
 ```bash
 kubectl -n hugegraph rollout restart deployment/hugegraph-hugegraph-rag
@@ -204,9 +206,12 @@ an old file from masking a rotated Secret or changed Helm value, the container
 performs one narrow reconciliation before starting the application:
 
 1. Read the configured `.env` file.
-2. Remove only keys that are already present in the current Pod environment.
-3. Leave every other `.env` key unchanged.
-4. Start the native RAG process.
+2. Remove keys that are already present in the current Pod environment.
+3. With `autoConfigure=true`, remove every chart-owned `GRAPH_*` connection key,
+   including an intentionally absent password after an endpoint switch.
+4. When a generic provider variable is present, remove the known field-specific
+   values that HugeGraph AI derives from it.
+5. Leave every other `.env` key unchanged and start the native RAG process.
 
 The result is a simple precedence rule:
 
@@ -214,12 +219,20 @@ The result is a simple precedence rule:
 current Kubernetes env / envFrom  >  retained .env  >  image defaults
 ```
 
+The graph rule models absence as configuration: switching from the chart-managed
+Server to an explicit external `GRAPH_URL` cannot leave the previous local
+administrator password active in the retained file. The provider rule covers the
+current HugeGraph AI aliases for `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+`OPENAI_EMBEDDING_BASE_URL` and `CO_API_URL`. Declare field-specific variables in
+`rag.env` or `envFrom` when separate chat, extraction or text2gql values are
+required; those explicit variables remain authoritative.
+
 This covers the automatically generated graph connection, explicit `rag.env`,
 and arbitrary Secret or ConfigMap keys supplied through `envFrom` without a
-second key registry. UI and operator settings that are not declared in the Pod
-environment remain persistent and externally editable. The application may
-write the current values back during the run; the same reconciliation happens
-before the next start.
+second user-maintained key registry. UI and operator settings that are not owned
+by the chart or an active generic provider variable remain persistent and
+externally editable. The application may write the current values back during
+the run; the same reconciliation happens before the next start.
 
 A custom `HUGEGRAPH_LLM_ENV_PATH` in `rag.env` follows the same rule. It must be
 non-empty and writable; mount persistent storage there when it must survive Pod
