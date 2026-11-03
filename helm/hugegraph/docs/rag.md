@@ -99,7 +99,12 @@ or an explicit `rag.env` entry named `GRAPH_PWD` with a `secretKeyRef`.
 Set `rag.hugegraph.autoConfigure: false` to own the entire graph connection outside
 the chart. With automatic wiring enabled, an endpoint without configured
 credentials receives an explicit empty password so old file credentials cannot
-leak to a different Server.
+leak to a different Server. With `autoConfigure: false`, file credentials remain
+valid for their configured endpoint. The application clears a file password when
+a process-level `GRAPH_URL` switches to a different endpoint without a process
+password; explicitly supply the new endpoint's `GRAPH_PWD` through a Secret (or an
+empty value). When editing the mounted file itself, update its URL and credentials
+together.
 
 ## Persistent resources
 
@@ -124,7 +129,12 @@ only when its data is no longer needed. UI-entered credentials may be stored on
 this volume, so treat it as sensitive. Image upgrades do not overwrite user files.
 
 For disposable deployments, set `rag.persistence.enabled: false`. File changes
-are then lost on container replacement.
+are then lost on container replacement. Switching persistence off or changing
+`rag.persistence.existingClaim` mounts the newly selected storage; the old
+chart-managed PVC is retained, but its `.env`, prompts and indexes are neither
+read nor migrated automatically. Back up and copy the required files to the new
+volume before switching. Re-enabling the original claim exposes its existing
+files again.
 
 ## External Server and deployment options
 

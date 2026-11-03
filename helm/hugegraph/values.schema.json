@@ -204,6 +204,40 @@
                     ]
                   }
                 }
+              },
+              "probes": {
+                "type": "object",
+                "properties": {
+                  "startup": {
+                    "type": "object",
+                    "properties": {
+                      "successThreshold": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  "readiness": {
+                    "type": "object",
+                    "properties": {
+                      "successThreshold": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "liveness": {
+                    "type": "object",
+                    "properties": {
+                      "successThreshold": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1
+                      }
+                    }
+                  }
+                }
               }
             }
           }

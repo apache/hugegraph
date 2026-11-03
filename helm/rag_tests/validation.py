@@ -29,6 +29,8 @@ class RagValidationMixin:
             ({"service": {"type": "ClusterIP", "nodePort": 31001}}, "nodePort"),
             ({"service": {"type": "NodePort", "nodePort": "3100x"}}, "nodePort"),
             ({"service": {"type": "NodePort", "nodePort": "9" * 100}}, "nodePort"),
+            ({"probes": {"startup": {"successThreshold": 2}}}, "startup.successThreshold"),
+            ({"probes": {"liveness": {"successThreshold": 2}}}, "liveness.successThreshold"),
             ({"port": 0}, "rag.port"),
             ({"port": 8001.5}, "rag.port"),
             ({"replicas": 0}, "rag.replicas"),
@@ -106,3 +108,10 @@ class RagValidationMixin:
             self.assertTrue(context["runAsNonRoot"])
             self.assertNotIn("runAsUser", context)
             self.assertNotIn("runAsGroup", context)
+
+    def test_readiness_allows_multiple_successes(self):
+        workload = self.deployment(self.documents({
+            "probes": {"readiness": {"successThreshold": 2}},
+        }))
+        container = pod(workload)["spec"]["containers"][0]
+        self.assertEqual(2, container["readinessProbe"]["successThreshold"])
