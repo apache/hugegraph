@@ -23,7 +23,6 @@
 {{- printf "%s-data" (include "hugegraph.rag.name" . | trunc 58 | trimSuffix "-") -}}
 {{- end }}
 
-
 {{- define "hugegraph.rag.replicas" -}}
 {{- $rag := get .Values "rag" | default dict -}}
 {{- if hasKey $rag "replicas" -}}{{- get $rag "replicas" -}}{{- else -}}1{{- end -}}
@@ -48,10 +47,8 @@
 {{- $service := get $rag "service" | default dict -}}
 {{- if and (hasKey $service "type") (ne (get $service "type" | toString) "<nil>") (ne (get $service "type" | toString) "") -}}
 {{- get $service "type" -}}
-{{- else if eq (.Values.mode | default "easy") "strict" -}}
-ClusterIP
 {{- else -}}
-NodePort
+ClusterIP
 {{- end -}}
 {{- end }}
 
@@ -115,10 +112,6 @@ password
 {{- if or (lt $port 1) (gt $port 65535) -}}
 {{- fail "rag.port must be between 1 and 65535" -}}
 {{- end -}}
-{{- $image := get $rag "image" | default dict -}}
-{{- if not (trim (get $image "repository" | default "")) -}}
-{{- fail "rag.image.repository must not be empty" -}}
-{{- end -}}
 {{- $service := get $rag "service" | default dict -}}
 {{- $serviceType := include "hugegraph.rag.serviceType" . -}}
 {{- if not (has $serviceType (list "ClusterIP" "NodePort" "LoadBalancer")) -}}
@@ -133,12 +126,6 @@ password
 {{- end -}}
 {{- $persistence := get $rag "persistence" | default dict -}}
 {{- if get $persistence "enabled" | default false -}}
-{{- if not (trim (get $persistence "mountPath" | default "")) -}}
-{{- fail "rag.persistence.mountPath must not be empty when persistence is enabled" -}}
-{{- end -}}
-{{- if and (not (get $persistence "existingClaim" | default "")) (not (get $persistence "size" | default "")) -}}
-{{- fail "rag.persistence.size must not be empty when the chart creates the claim" -}}
-{{- end -}}
 {{- $accessModes := get $persistence "accessModes" | default (list "ReadWriteOnce") -}}
 {{- if and (gt $replicas 1) (not (get $persistence "existingClaim" | default "")) (not (has "ReadWriteMany" $accessModes)) -}}
 {{- fail "rag.persistence.accessModes must include ReadWriteMany when the chart creates one claim for multiple RAG replicas; otherwise use an existing shared claim or keep rag.replicas=1" -}}

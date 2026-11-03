@@ -37,6 +37,19 @@ tests:
           path: spec.template.spec.containers[0].image
           value: hugegraph/rag:latest
       - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - python
+            - -m
+            - hugegraph_llm.demo.rag_demo.app
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8001"
+      - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 8001
       - contains:
@@ -57,6 +70,19 @@ tests:
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
             value: /tmp/hugegraph-llm.env
+
+  - it: passes a custom port to the process and Pod contract
+    template: rag-deployment.yaml
+    set:
+      rag.enabled: true
+      rag.port: 9001
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args[3]
+          value: "9001"
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 9001
 
   - it: lets an explicit graph endpoint and Secret replace release wiring
     template: rag-deployment.yaml
@@ -112,14 +138,14 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts[0].mountPath
           value: /home/work/hugegraph-llm/src/hugegraph_llm/resources
 
-  - it: defaults the RAG service to NodePort in easy mode
+  - it: keeps the RAG service internal by default in easy mode
     template: rag-service.yaml
     set:
       rag.enabled: true
     asserts:
       - equal:
           path: spec.type
-          value: NodePort
+          value: ClusterIP
       - equal:
           path: spec.ports[0].port
           value: 8001
@@ -129,7 +155,7 @@ tests:
       - notExists:
           path: spec.ports[0].nodePort
 
-  - it: defaults the RAG service to ClusterIP in strict mode
+  - it: keeps the RAG service internal by default in strict mode
     template: rag-service.yaml
     set:
       mode: strict
@@ -138,6 +164,20 @@ tests:
       - equal:
           path: spec.type
           value: ClusterIP
+
+  - it: permits an explicit NodePort exposure
+    template: rag-service.yaml
+    set:
+      rag.enabled: true
+      rag.service.type: NodePort
+      rag.service.nodePort: 31001
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 31001
 
   - it: creates a retained claim only when persistence is enabled
     template: rag-pvc.yaml

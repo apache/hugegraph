@@ -119,6 +119,15 @@ spec:
         - name: rag
           image: {{ include "hugegraph.rag.image" . | quote }}
           imagePullPolicy: {{ get (get $rag "image" | default dict) "pullPolicy" | default "Always" }}
+          command:
+            - python
+            - -m
+            - hugegraph_llm.demo.rag_demo.app
+          args:
+            - --host
+            - 0.0.0.0
+            - --port
+            - {{ include "hugegraph.rag.port" . | quote }}
           {{- with get $rag "securityContext" }}
           securityContext:
             {{- toYaml . | nindent 12 }}

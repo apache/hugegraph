@@ -70,8 +70,10 @@ rag:
     name: ''
     annotations: {}
     automountServiceAccountToken: false
+  # RAG stays internal by default because the application login is optional.
+  # Select NodePort/LoadBalancer or enable Ingress only with reviewed auth.
   service:
-    type: null
+    type: ClusterIP
     nodePort: null
     annotations: {}
   ingress:

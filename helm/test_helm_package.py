@@ -78,7 +78,8 @@ class HelmPackageTest(unittest.TestCase):
     def test_required_configuration_is_preserved(self):
         required = ("Chart.yaml", "README.md", "values.yaml", "values.schema.json",
                     "values-single.yaml", "values-cluster.yaml", "values-strict.yaml",
-                    "docs/operations.md", "docs/distribution.md", "docs/vermeer.md", "examples/README.md")
+                    "values-rag.yaml", "docs/operations.md", "docs/distribution.md",
+                    "docs/vermeer.md", "docs/rag.md", "examples/README.md")
         for name in required:
             with self.subTest(file=name):
                 self.assertIn(name, self.files.keys())
@@ -142,6 +143,15 @@ class HelmPackageTest(unittest.TestCase):
                                  "Optional Vermeer must reuse its native image for token helpers")
                 self.assertTrue(all(image.startswith(registry + "/") for image in selected))
                 self.assertIn("/go/bin/vermeer-token", rendered)
+
+
+def load_tests(loader, tests, _pattern):
+    """Run the optional RAG contract in the shared packaged-chart CI entrypoint."""
+    from test_helm_rag import RagChartTest, RagSourceContractTest
+
+    tests.addTests(loader.loadTestsFromTestCase(RagSourceContractTest))
+    tests.addTests(loader.loadTestsFromTestCase(RagChartTest))
+    return tests
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ class RagSourceContractTest(unittest.TestCase):
         self.assertTrue(rag["enabled"])
         self.assertEqual("hugegraph/rag", rag["image"]["repository"])
         self.assertEqual(8001, rag["port"])
-        self.assertEqual(8001, rag["service"].get("port", rag["port"]))
+        self.assertEqual("ClusterIP", rag["service"]["type"])
         self.assertEqual(
             "/home/work/hugegraph-llm/src/hugegraph_llm/resources",
             rag["persistence"]["mountPath"],
@@ -65,11 +65,13 @@ class RagSourceContractTest(unittest.TestCase):
         self.assertEqual({"enabled": False, "replicas": 1}, single["rag"])
         self.assertEqual({"enabled": False, "replicas": 2}, cluster["rag"])
 
-    def test_templates_use_named_port_and_release_server_service(self):
+    def test_templates_use_one_process_port_and_release_server_service(self):
         deployment = (CHART / "templates" / "rag-deployment.yaml").read_text(encoding="utf-8")
         service = (CHART / "templates" / "rag-service.yaml").read_text(encoding="utf-8")
         helpers = (CHART / "templates" / "_rag.tpl").read_text(encoding="utf-8")
+        self.assertIn("hugegraph_llm.demo.rag_demo.app", deployment)
         self.assertIn('containerPort: {{ include "hugegraph.rag.port" . }}', deployment)
+        self.assertIn('- {{ include "hugegraph.rag.port" . | quote }}', deployment)
         self.assertIn("targetPort: http", service)
         self.assertIn('include "hugegraph.server.clientUrl"', helpers)
         self.assertIn('trimPrefix "http://"', helpers)
@@ -81,7 +83,7 @@ class RagChartTest(unittest.TestCase):
         if shutil.which("helm") is None:
             raise unittest.SkipTest("Helm is required for rendered chart regression tests")
 
-    def render(self, rag=None, preset=None, mode=None, **values):
+    def render(self, rag=None, preset=None, mode=None, use_profile=True, **values):
         if rag is not None:
             values["rag"] = {"enabled": True, **rag}
         if mode is not None:
@@ -92,7 +94,7 @@ class RagChartTest(unittest.TestCase):
             command = ["helm", "template", "fixture", str(CHART), "--namespace", "graphs"]
             if preset is not None:
                 command.extend(["-f", str(CHART / preset)])
-            if rag is not None:
+            if rag is not None and use_profile:
                 command.extend(["-f", str(CHART / "values-rag.yaml")])
             command.extend(["-f", str(configuration)])
             return subprocess.run(
@@ -103,8 +105,8 @@ class RagChartTest(unittest.TestCase):
                 check=False,
             )
 
-    def documents(self, rag=None, preset=None, mode=None, **values):
-        result = self.render(rag, preset=preset, mode=mode, **values)
+    def documents(self, rag=None, preset=None, mode=None, use_profile=True, **values):
+        result = self.render(rag, preset=preset, mode=mode, use_profile=use_profile, **values)
         self.assertEqual(0, result.returncode, result.stderr)
         return [document for document in yaml.safe_load_all(result.stdout) if document]
 
@@ -117,14 +119,28 @@ class RagChartTest(unittest.TestCase):
         self.assertEqual([], component_resources(documents))
         self.assertFalse(any("-rag" in document["metadata"]["name"] for document in documents))
 
+    def test_bare_enable_uses_consistent_template_defaults(self):
+        documents = self.documents({}, use_profile=False)
+        deployment = self.deployment(documents)
+        container, = pod(deployment)["spec"]["containers"]
+        service, = component_resources(documents, kind="Service")
+        self.assertEqual("hugegraph/rag:latest", container["image"])
+        self.assertEqual(8001, container["ports"][0]["containerPort"])
+        self.assertEqual(["python", "-m", "hugegraph_llm.demo.rag_demo.app"], container["command"])
+        self.assertEqual(["--host", "0.0.0.0", "--port", "8001"], container["args"])
+        self.assertEqual("ClusterIP", service["spec"]["type"])
+
     def test_default_enable_uses_one_consistent_port_and_internal_server(self):
         documents = self.documents({})
         deployment = self.deployment(documents)
         container, = pod(deployment)["spec"]["containers"]
         service, = component_resources(documents, kind="Service")
         self.assertEqual(8001, container["ports"][0]["containerPort"])
+        self.assertEqual(["python", "-m", "hugegraph_llm.demo.rag_demo.app"], container["command"])
+        self.assertEqual(["--host", "0.0.0.0", "--port", "8001"], container["args"])
         self.assertEqual("http", service["spec"]["ports"][0]["targetPort"])
         self.assertEqual(8001, service["spec"]["ports"][0]["port"])
+        self.assertEqual("ClusterIP", service["spec"]["type"])
         environment = env_by_name(container)
         self.assertEqual(
             "fixture-hugegraph-server.graphs.svc:8080",
@@ -137,6 +153,17 @@ class RagChartTest(unittest.TestCase):
         self.assertEqual("password", environment["GRAPH_PWD"]["valueFrom"]["secretKeyRef"]["key"])
         self.assertEqual("/tmp/hugegraph-llm.env", environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
         self.assertEqual("hugegraph/rag:latest", container["image"])
+
+    def test_custom_port_reaches_process_pod_service_and_probes(self):
+        documents = self.documents({"port": 9001})
+        deployment = self.deployment(documents)
+        container, = pod(deployment)["spec"]["containers"]
+        service, = component_resources(documents, kind="Service")
+        self.assertEqual("9001", container["args"][3])
+        self.assertEqual(9001, container["ports"][0]["containerPort"])
+        self.assertEqual(9001, service["spec"]["ports"][0]["port"])
+        for name in ("startupProbe", "readinessProbe", "livenessProbe"):
+            self.assertEqual("http", container[name]["httpGet"]["port"])
 
     def test_single_and_cluster_presets_share_the_same_graph_contract(self):
         cases = (("values-single.yaml", 1), ("values-cluster.yaml", 2))
@@ -152,16 +179,16 @@ class RagChartTest(unittest.TestCase):
                     environment["GRAPH_URL"]["value"],
                 )
 
-    def test_mode_controls_only_the_default_service_exposure(self):
-        expected = {"easy": "NodePort", "strict": "ClusterIP"}
-        for mode, service_type in expected.items():
+    def test_service_stays_internal_unless_exposure_is_explicit(self):
+        for mode in ("easy", "strict"):
             with self.subTest(mode=mode):
                 documents = self.documents({}, mode=mode)
                 service, = component_resources(documents, kind="Service")
-                self.assertEqual(service_type, service["spec"]["type"])
-        documents = self.documents({"service": {"type": "ClusterIP"}}, mode="easy")
+                self.assertEqual("ClusterIP", service["spec"]["type"])
+        documents = self.documents({"service": {"type": "NodePort", "nodePort": 31001}}, mode="easy")
         service, = component_resources(documents, kind="Service")
-        self.assertEqual("ClusterIP", service["spec"]["type"])
+        self.assertEqual("NodePort", service["spec"]["type"])
+        self.assertEqual(31001, service["spec"]["ports"][0]["nodePort"])
 
     def test_user_environment_replaces_automatic_entries(self):
         documents = self.documents({

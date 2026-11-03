@@ -13,8 +13,10 @@ remain independent.
 
 The same RAG template works with both presets because it connects through the
 release-scoped Server Service rather than enumerating Server Pods. The optional
-`values-rag.yaml` overlay is the complete, reviewable switch; `rag.enabled=false`
-removes every RAG object again.
+`values-rag.yaml` overlay is the complete, reviewable profile; `rag.enabled=false`
+removes every RAG object again. A bare `--set rag.enabled=true` also renders with
+safe template defaults, while the overlay adds the recommended non-root and
+resource settings.
 
 ```bash
 # Single PD + Store + Server, plus one RAG Pod
@@ -38,6 +40,10 @@ chart injects:
 - `GRAPH_PWD` from the same Server administrator Secret when Server auth is
   enabled; and
 - a writable `HUGEGRAPH_LLM_ENV_PATH` under `/tmp`.
+
+The chart starts the application's native module explicitly and passes
+`rag.port` to its `--port` argument. The container port, Service and probes use
+the same resolved value.
 
 Any entry in `rag.env` with the same name replaces its automatic counterpart.
 Set `rag.hugegraph.autoConfigure=false` to manage the complete application
@@ -88,20 +94,46 @@ rag:
       key: password
 ```
 
-## Exposure and strict mode
+## Exposure and authentication
 
-In `mode=easy`, the RAG Service inherits `NodePort`. In `mode=strict`, it
-inherits `ClusterIP` and a NetworkPolicy isolates the Pod. Strict mode permits
-DNS and the same-release Server automatically, but does not silently open
-access to public model APIs or an Ingress controller. Add the required peers
-to `rag.networkPolicy.extraIngress` and provider destinations to
+The RAG Service defaults to `ClusterIP` in both `easy` and `strict` modes. This
+is intentionally stricter than the browser-oriented Server and Hubble defaults:
+the current RAG application starts with login disabled and warns that binding to
+a non-loopback address does not provide unified authentication for every HTTP
+API route.
+
+An explicit `rag.service.type` always wins. Ingress remains disabled until
+`rag.ingress.enabled=true`. Treat NodePort, LoadBalancer and Ingress as reviewed
+external-exposure choices. Put the application behind an authenticated reverse
+proxy or another trusted network boundary and apply model-provider spend limits.
+The application's native login can still be enabled for its own UI and guarded
+write paths, but it is not a substitute for an authenticated ingress protecting
+all routes:
+
+```bash
+kubectl -n hugegraph create secret generic rag-login \
+  --from-literal=USER_TOKEN='replace-user-token' \
+  --from-literal=ADMIN_TOKEN='replace-admin-token'
+```
+
+```yaml
+rag:
+  enabled: true
+  env:
+    - name: ENABLE_LOGIN
+      value: "True"
+  envFrom:
+    - secretRef:
+        name: rag-login
+  service:
+    type: NodePort
+```
+
+In `mode=strict`, a NetworkPolicy isolates the Pod. Strict mode permits DNS and
+the same-release Server automatically, but does not silently open access to
+public model APIs or an Ingress controller. Add the required peers to
+`rag.networkPolicy.extraIngress` and provider destinations to
 `rag.networkPolicy.extraEgress` using native Kubernetes NetworkPolicy rules.
-
-An explicit `rag.service.type` always wins over the mode default. Ingress is
-independent and remains disabled until `rag.ingress.enabled=true`. Before exposing
-the demo UI outside a trusted network, review the application login settings and
-model-provider spend controls; the chart does not invent a second RAG credential
-system.
 
 ## Persistence and replicas
 
