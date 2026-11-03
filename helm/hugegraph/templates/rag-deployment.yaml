@@ -146,7 +146,10 @@ spec:
 
               from dotenv import dotenv_values, unset_key
 
-              env_path = Path(os.environ["HUGEGRAPH_LLM_ENV_PATH"])
+              env_path_value = os.environ.get("HUGEGRAPH_LLM_ENV_PATH")
+              if not env_path_value or not env_path_value.strip():
+                  raise SystemExit("HUGEGRAPH_LLM_ENV_PATH must not be empty")
+              env_path = Path(env_path_value)
               env_path.parent.mkdir(parents=True, exist_ok=True)
               env_path.touch(exist_ok=True)
               for key in dotenv_values(env_path):

@@ -106,7 +106,11 @@ password
 {{- $rag := get .Values "rag" | default dict -}}
 {{- $persistence := get $rag "persistence" | default dict -}}
 {{- if and (hasKey $persistence "enabled") (ne (get $persistence "enabled" | toString) "<nil>") -}}
-{{- get $persistence "enabled" -}}
+{{- $enabled := get $persistence "enabled" -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "rag.persistence.enabled must be a boolean or null" -}}
+{{- end -}}
+{{- $enabled -}}
 {{- else -}}
 {{- $global := get .Values "persistence" | default dict -}}
 {{- if and (hasKey $global "enabled") (ne (get $global "enabled" | toString) "<nil>") -}}

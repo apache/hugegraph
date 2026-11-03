@@ -44,6 +44,9 @@
 {{- if ne (get $seccomp "type" | default "" | toString) "RuntimeDefault" -}}
 {{- fail (printf "%s.seccompProfile.type must stay RuntimeDefault" $scope) -}}
 {{- end -}}
+{{- if hasKey $seccomp "localhostProfile" -}}
+{{- fail (printf "%s.seccompProfile.localhostProfile must be unset when type is RuntimeDefault" $scope) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if hasKey $podContext "fsGroup" -}}

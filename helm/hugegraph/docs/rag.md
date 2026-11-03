@@ -24,9 +24,11 @@ The chart derives the complete connection to the Server in the same release:
 - `GRAPH_PWD` comes from the existing Server administrator Secret when Server
   authentication is enabled.
 
-Do not repeat a Server Pod IP, REST port, graph name, graph space or administrator
-Secret for this topology. A custom `rag.port` is also applied consistently to the
-RAG process, container, Service and probes.
+Do not repeat a Server Pod IP, REST port, graph space or administrator Secret for
+this topology. `GRAPH_NAME` cannot be inferred from the Server values and defaults
+to `hugegraph`; set `rag.hugegraph.graphName` when the target graph differs. A
+custom `rag.port` is also applied consistently to the RAG process, container,
+Service and probes.
 
 The supplied overlay keeps the ordinary settings in one reviewed file:
 
@@ -219,8 +221,8 @@ environment remain persistent and externally editable. The application may
 write the current values back during the run; the same reconciliation happens
 before the next start.
 
-A custom `HUGEGRAPH_LLM_ENV_PATH` in `rag.env` follows the same rule. Make that
-path writable and mount persistent storage there when it must survive Pod
+A custom `HUGEGRAPH_LLM_ENV_PATH` in `rag.env` follows the same rule. It must be
+non-empty and writable; mount persistent storage there when it must survive Pod
 replacement.
 
 ### Read and update files from outside the Pod

@@ -45,6 +45,9 @@
 {{- fail "rag.service.nodePort must be an integer" -}}
 {{- end -}}
 {{- $nodePort := int $rawNodePort -}}
+{{- if and (ne $rawNodePort "0") (eq $nodePort 0) -}}
+{{- fail "rag.service.nodePort must fit an integer and be 0/unset or between 1 and 65535" -}}
+{{- end -}}
 {{- if and (ne $nodePort 0) (or (lt $nodePort 1) (gt $nodePort 65535)) -}}
 {{- fail "rag.service.nodePort must be 0/unset or between 1 and 65535" -}}
 {{- end -}}

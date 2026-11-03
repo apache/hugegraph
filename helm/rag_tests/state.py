@@ -16,6 +16,13 @@
 
 """State and network regression coverage for the optional RAG component."""
 
+import importlib.util
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
 from .support import (
     RAG_EPHEMERAL_ENV,
     RAG_MOUNT,
@@ -54,6 +61,55 @@ class RagStateMixin:
             f"{RAG_MOUNT}/demo/config_prompt.yaml",
             environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
         )
+
+    def test_reconciliation_script_executes_and_rejects_empty_env_path(self):
+        if importlib.util.find_spec("dotenv") is None:
+            self.skipTest("python-dotenv is required to execute the rendered reconciliation block")
+        from dotenv import dotenv_values
+
+        startup = self.container(self.documents({}))["args"][0]
+        marker = "python - <<'PY'\n"
+        self.assertIn(marker, startup)
+        script = startup.split(marker, 1)[1].split("\nPY\n", 1)[0]
+
+        pod_key = "RAG_TEST_POD_VALUE_7F11"
+        file_key = "RAG_TEST_FILE_VALUE_7F11"
+        with tempfile.TemporaryDirectory(prefix="rag-reconcile-") as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                f"{pod_key}=stale\n{file_key}=keep\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment[pod_key] = "fresh"
+            environment.pop(file_key, None)
+            environment["HUGEGRAPH_LLM_ENV_PATH"] = str(env_path)
+            result = subprocess.run(
+                [sys.executable, "-"],
+                input=script,
+                capture_output=True,
+                text=True,
+                env=environment,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            values = dotenv_values(env_path)
+            self.assertNotIn(pod_key, values)
+            self.assertEqual("keep", values[file_key])
+
+            environment["HUGEGRAPH_LLM_ENV_PATH"] = ""
+            result = subprocess.run(
+                [sys.executable, "-"],
+                input=script,
+                capture_output=True,
+                text=True,
+                env=environment,
+                timeout=30,
+                check=False,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("HUGEGRAPH_LLM_ENV_PATH must not be empty", result.stderr)
 
     def test_env_from_is_rendered_and_covered_by_generic_precedence(self):
         documents = self.documents({
