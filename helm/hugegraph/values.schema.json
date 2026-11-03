@@ -127,9 +127,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
         "pdReplicas": {
           "oneOf": [
             {

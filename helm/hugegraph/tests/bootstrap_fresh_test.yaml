@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-suite: Experimental bootstrap fresh installs
+suite: Stable bootstrap fresh installs
 templates:
 - bootstrap-configmap.yaml
 - pd-statefulset.yaml
@@ -23,7 +23,6 @@ templates:
 - server-deployment.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: true
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
@@ -180,7 +179,7 @@ tests:
     bootstrap.pdReplicas: 3
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap.pdReplicas must equal pd.replicas on a fresh install
+      errorPattern: bootstrap.pdReplicas must equal pd.replicas without a retained record
 - it: rejects fresh Store1 with a three-Store bootstrap
   template: store-statefulset.yaml
   set:
@@ -189,7 +188,7 @@ tests:
     bootstrap.storeReplicas: 3
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap.storeReplicas must equal store.replicas on a fresh install
+      errorPattern: bootstrap.storeReplicas must equal store.replicas without a retained record
 - it: rejects fresh Store3 with a one-Store bootstrap
   template: store-statefulset.yaml
   set:
@@ -199,7 +198,7 @@ tests:
     bootstrap.initialStoreCount: 1
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap.storeReplicas must equal store.replicas on a fresh install
+      errorPattern: bootstrap.storeReplicas must equal store.replicas without a retained record
 - it: rejects unreachable startup Store threshold
   template: store-statefulset.yaml
   set:

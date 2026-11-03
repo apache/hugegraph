@@ -4,7 +4,7 @@
 # this work for additional information regarding copyright ownership.
 # The ASF licenses this file to You under the Apache License, Version 2.0
 # (the "License"); you may not use this file except in compliance with
-# the License. You may obtain a copy of the License at
+# the License.  You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -15,12 +15,12 @@
 # limitations under the License.
 #
 
-suite: Disabled bootstrap refuses to discard retained live topology
+suite: Retained records do not authorize orphaned PVC recovery
 templates:
+- bootstrap-configmap.yaml
 - pd-statefulset.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: false
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
@@ -32,6 +32,16 @@ release:
   upgrade: true
 kubernetesProvider:
   scheme:
+    v1/ConfigMap:
+      gvr:
+        version: v1
+        resource: configmaps
+      namespaced: true
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     apps/v1/StatefulSet:
       gvr:
         group: apps
@@ -39,26 +49,36 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cluster-bootstrap
+      namespace: NAMESPACE
+      labels:
+        app.kubernetes.io/instance: RELEASE-NAME
+    data:
+      schemaVersion: '1'
+      pdReplicas: '3'
+      storeReplicas: '3'
+      initialStoreCount: '3'
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: store-data-cluster-store-0
+      namespace: NAMESPACE
   - apiVersion: apps/v1
     kind: StatefulSet
     metadata:
-      name: cluster-pd
+      name: unrelated-pd
       namespace: NAMESPACE
-      annotations:
-        hugegraph.apache.org/bootstrap-retained: 'true'
       labels:
-        app.kubernetes.io/name: hugegraph
-        app.kubernetes.io/instance: RELEASE-NAME
+        app.kubernetes.io/instance: unrelated
         app.kubernetes.io/component: pd
     spec:
-      template:
-        spec:
-          containers:
-          - name: pd
-            env: []
+      replicas: '1'
 tests:
-- it: requires bootstrap to remain enabled after the retained marker is recorded
+- it: rejects a retained volume despite matching bootstrap counts
   template: pd-statefulset.yaml
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap.enabled cannot be disabled while the live PD StatefulSet records retained bootstrap topology
+      errorPattern: retained data PVCs exist without a live PD StatefulSet

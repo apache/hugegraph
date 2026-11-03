@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-suite: Experimental bootstrap rejects unsupported record versions
+suite: Stable bootstrap rejects unsupported record versions
 templates:
 - pd-statefulset.yaml
 - store-statefulset.yaml
@@ -23,7 +23,6 @@ templates:
 - bootstrap-configmap.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: true
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
@@ -35,6 +34,11 @@ release:
   upgrade: true
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     v1/ConfigMap:
       gvr:
         version: v1
@@ -47,6 +51,11 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: unrelated-data
+      namespace: NAMESPACE
   - apiVersion: v1
     kind: ConfigMap
     metadata:

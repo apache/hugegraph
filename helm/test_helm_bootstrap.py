@@ -17,8 +17,10 @@
 """Compare whole rendered Pod templates across controlled topology changes."""
 
 from pathlib import Path
+import os
 import re
 import subprocess
+import tempfile
 import unittest
 
 
@@ -27,12 +29,12 @@ CHART = Path(__file__).resolve().parent / "hugegraph"
 
 class BootstrapLifecycleTest(unittest.TestCase):
     def render(self, pd=3, stores=3, initial_pd=3, initial_stores=3, initial_count=3,
-               upgrade=True):
+               upgrade=True, wait_timeout=900):
         values = {
             "fullnameOverride": "cluster",
-            "bootstrap.enabled": "true",
             "pd.replicas": pd,
             "store.replicas": stores,
+            "store.waitTimeoutSeconds": wait_timeout,
             "pd.pdb.minAvailable": pd // 2 + 1,
             "store.pdb.minAvailable": max(stores - 1, 1),
             "pd.auth.existingSecret": "fixture-pd",
@@ -100,6 +102,49 @@ class BootstrapLifecycleTest(unittest.TestCase):
         before = self.render(pd=5, initial_pd=5)
         after = self.render(pd=3, initial_pd=5)
         self.assert_templates_unchanged(before, after)
+
+    def test_initial_single_pd_seed_loss_blocks_store_even_after_pd_growth(self):
+        # Model the supported script boundary, not a running Raft cluster: PD1/PD2
+        # answer successfully but the historical PD0 seed is unavailable.
+        documents = self.render(pd=3, initial_pd=1, wait_timeout=1)
+        lines = documents["store-statefulset.yaml"].splitlines()
+        start = lines.index("              set -eu")
+        script = []
+        for line in lines[start:]:
+            if not line.startswith("              "):
+                break
+            script.append(line[14:])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "curl").write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CURL_CALLS"\n'
+                'case "$*" in *cluster-pd-0.*) exit 1;; *) exit 0;; esac\n')
+            (root / "date").write_text(
+                '#!/bin/sh\nif [ -e "$FAKE_TIME_FILE" ]; then echo 2; '
+                'else touch "$FAKE_TIME_FILE"; echo 0; fi\n')
+            for name in ("curl", "date"):
+                (root / name).chmod(0o755)
+            environment = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                           "CURL_CALLS": str(root / "calls"),
+                           "FAKE_TIME_FILE": str(root / "time")}
+            result = subprocess.run(["sh", "-c", "\n".join(script)], env=environment,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(1, result.returncode)
+            self.assertIn("Timed out", result.stderr)
+            calls = (root / "calls").read_text()
+            self.assertIn("cluster-pd-0.", calls)
+            self.assertNotIn("cluster-pd-1.", calls)
+            self.assertNotIn("cluster-pd-2.", calls)
+
+    def test_removed_switch_cannot_bypass_bootstrap_protection(self):
+        for enabled in ("false", "true"):
+            with self.subTest(old_switch=enabled):
+                result = subprocess.run(
+                    ["helm", "template", "removed-switch", str(CHART),
+                     "--set", "bootstrap.enabled=" + enabled],
+                    capture_output=True, text=True, timeout=300)
+                self.assertNotEqual(0, result.returncode)
+                self.assertRegex(result.stderr.lower(), r"additional propert(?:y|ies).*enabled")
 
     def test_fresh_topologies_bootstrap_the_requested_members(self):
         for count in (1, 3, 5):

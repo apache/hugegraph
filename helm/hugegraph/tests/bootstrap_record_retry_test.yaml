@@ -1,0 +1,107 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Retained record with no live StatefulSet boundary
+templates:
+- bootstrap-configmap.yaml
+- pd-statefulset.yaml
+set:
+  fullnameOverride: cluster
+  pd.auth.existingSecret: fixture-pd
+  server.auth.admin.existingSecret: fixture-admin
+  server.auth.token.existingSecret: fixture-token
+  pd.replicas: 5
+  store.replicas: 3
+  pd.pdb.minAvailable: 3
+  store.pdb.minAvailable: 2
+release:
+  upgrade: true
+kubernetesProvider:
+  scheme:
+    v1/ConfigMap:
+      gvr:
+        version: v1
+        resource: configmaps
+      namespaced: true
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
+    apps/v1/StatefulSet:
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cluster-bootstrap
+      namespace: NAMESPACE
+      labels:
+        app.kubernetes.io/instance: RELEASE-NAME
+    data:
+      schemaVersion: '1'
+      pdReplicas: '3'
+      storeReplicas: '3'
+      initialStoreCount: '3'
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: unrelated-data
+      namespace: NAMESPACE
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: unrelated-pd
+      namespace: NAMESPACE
+      labels:
+        app.kubernetes.io/instance: unrelated
+        app.kubernetes.io/component: pd
+    spec:
+      replicas: '1'
+tests:
+- it: rejects changed desired counts on a retained-record retry with no live PD
+  template: pd-statefulset.yaml
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap retry without a live PD must preserve the recorded PD and Store counts
+- it: accepts a same-count retained-record retry with no old data PVC
+  template: pd-statefulset.yaml
+  set:
+    pd.replicas: 3
+    pd.pdb.minAvailable: 2
+  asserts:
+  - equal:
+      path: spec.replicas
+      value: 3
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: HG_PD_RAFT_PEERS_LIST
+        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
+- it: rejects changed Store counts on retry
+  template: pd-statefulset.yaml
+  set:
+    pd.replicas: 3
+    pd.pdb.minAvailable: 2
+    store.replicas: 4
+  asserts:
+  - failedTemplate:
+      errorPattern: bootstrap retry without a live PD must preserve the recorded PD and Store counts

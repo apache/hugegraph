@@ -16,7 +16,6 @@
 #
 
 {{ include "hugegraph.resolveValues" . }}
-{{- if get (.Values.bootstrap | default dict) "enabled" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,4 +30,3 @@ data:
   pdReplicas: {{ .Values.__hugegraphBootstrap.pdReplicas | quote }}
   storeReplicas: {{ .Values.__hugegraphBootstrap.storeReplicas | quote }}
   initialStoreCount: {{ .Values.__hugegraphBootstrap.initialStoreCount | quote }}
-{{- end }}

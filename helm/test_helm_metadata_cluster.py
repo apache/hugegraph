@@ -91,7 +91,10 @@ class MetadataClusterChartTest(unittest.TestCase):
             (chart / "values.yaml").write_bytes((CHART / "testdata/values-pre-hardening.yaml").read_bytes())
             for upgrade in (False, True):
                 with self.subTest(upgrade=upgrade):
-                    documents = self.documents(chart=chart, upgrade=upgrade)
+                    documents = self.documents(
+                        {"bootstrap": {"pdReplicas": 3, "storeReplicas": 3,
+                                       "initialStoreCount": 3}} if upgrade else None,
+                        chart=chart, upgrade=upgrade)
                     self.assert_namespace(documents, "hg-test")
                     self.assertFalse(any(document["metadata"].get("labels", {}).get(COMPONENT, "")
                                          .startswith("vermeer") for document in documents))

@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-suite: Experimental bootstrap bootstrap_legacy_test.yaml
+suite: Same-topology adoption rejects changed PVC template identity
 templates:
 - pd-statefulset.yaml
 - store-statefulset.yaml
@@ -23,18 +23,23 @@ templates:
 - bootstrap-configmap.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: true
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
   pd.replicas: 3
-  store.replicas: 4
+  store.replicas: 3
   pd.pdb.minAvailable: 2
-  store.pdb.minAvailable: 3
+  store.pdb.minAvailable: 2
+  pd.partition.defaultShardCount: 3
 release:
   upgrade: true
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     v1/ConfigMap:
       gvr:
         version: v1
@@ -47,6 +52,11 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: unrelated-data
+      namespace: NAMESPACE
   - apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -78,9 +88,14 @@ kubernetesProvider:
             - name: HG_PD_RAFT_PEERS_LIST
               value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
             - name: HG_PD_INITIAL_STORE_LIST
-              value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500,cluster-store-3.cluster-store.NAMESPACE.svc:8500
+              value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500
             - name: HG_PD_INITIAL_STORE_COUNT
               value: '3'
+            - name: HG_PD_DATA_PATH
+              value: /hugegraph-pd/pd_data
+            - name: JAVA_OPTS
+              value: -Dpartition.default-shard-count=3
+      serviceName: cluster-pd
   - apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -91,10 +106,10 @@ kubernetesProvider:
         app.kubernetes.io/instance: RELEASE-NAME
         app.kubernetes.io/component: store
     spec:
-      replicas: '4'
+      replicas: '3'
       volumeClaimTemplates:
       - metadata:
-          name: store-data
+          name: old-store-data
       selector:
         matchLabels: *id002
       template:
@@ -104,6 +119,8 @@ kubernetesProvider:
             env:
             - name: HG_STORE_PD_ADDRESS
               value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686
+            - name: HG_STORE_DATA_PATH
+              value: /hugegraph-store/storage
             ports:
             - name: grpc
               containerPort: '8500'
@@ -111,63 +128,10 @@ kubernetesProvider:
               containerPort: '8520'
             - name: raft
               containerPort: '8510'
+      serviceName: cluster-store
 tests:
-- it: retains PD bootstrap inputs
-  template: pd-statefulset.yaml
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: HG_PD_RAFT_PEERS_LIST
-        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
-  - contains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: HG_PD_INITIAL_STORE_LIST
-        value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500,cluster-store-3.cluster-store.NAMESPACE.svc:8500
-  - contains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: HG_PD_INITIAL_STORE_COUNT
-        value: '3'
-- it: retains Store seeds and bootstrap wait quorum
+- it: does not silently create a different Store volume
   template: store-statefulset.yaml
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: HG_STORE_PD_ADDRESS
-        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686
-  - matchRegex:
-      path: spec.template.spec.initContainers[0].command[2]
-      pattern: REQUIRED=2
-  - matchRegex:
-      path: spec.template.spec.initContainers[0].command[2]
-      pattern: cluster-pd-0\.cluster-pd\.NAMESPACE\.svc:8620,cluster-pd-1\.cluster-pd\.NAMESPACE\.svc:8620,cluster-pd-2\.cluster-pd\.NAMESPACE\.svc:8620
-- it: retains Server seeds
-  template: server-deployment.yaml
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: HG_SERVER_PD_PEERS
-        value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686
-- it: records the original topology
-  template: bootstrap-configmap.yaml
-  asserts:
-  - equal:
-      path: data.pdReplicas
-      value: '3'
-  - equal:
-      path: data.storeReplicas
-      value: '4'
-  - equal:
-      path: data.initialStoreCount
-      value: '3'
-- it: refuses a bootstrap pin that conflicts with history
-  template: store-statefulset.yaml
-  set:
-    bootstrap.pdReplicas: 5
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap.pdReplicas cannot change
+      errorPattern: same-topology adoption requires unchanged store PVC template identity

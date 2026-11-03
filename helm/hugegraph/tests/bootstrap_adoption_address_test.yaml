@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-suite: Experimental bootstrap rejects incomplete live initialization
+suite: Stable bootstrap rejects customized existing endpoints
 templates:
 - pd-statefulset.yaml
 - store-statefulset.yaml
@@ -23,18 +23,23 @@ templates:
 - bootstrap-configmap.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: true
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
   pd.replicas: 3
-  store.replicas: 4
+  store.replicas: 3
   pd.pdb.minAvailable: 2
-  store.pdb.minAvailable: 3
+  store.pdb.minAvailable: 2
+  pd.partition.defaultShardCount: 3
 release:
   upgrade: true
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     v1/ConfigMap:
       gvr:
         version: v1
@@ -47,6 +52,11 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: unrelated-data
+      namespace: NAMESPACE
   - apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -77,13 +87,15 @@ kubernetesProvider:
             env:
             - name: HG_PD_RAFT_PEERS_LIST
               value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
-            - name: HG_PD_INITIAL_STORE_LIST
-              value: cluster-store-0.cluster-store.NAMESPACE.svc:8500,cluster-store-1.cluster-store.NAMESPACE.svc:8500,cluster-store-2.cluster-store.NAMESPACE.svc:8500,cluster-store-3.cluster-store.NAMESPACE.svc:8500
             - name: HG_PD_INITIAL_STORE_COUNT
-              valueFrom:
-                configMapKeyRef:
-                  name: custom
-                  key: count
+              value: '3'
+            - name: HG_PD_DATA_PATH
+              value: /hugegraph-pd/pd_data
+            - name: JAVA_OPTS
+              value: -Dpartition.default-shard-count=3
+            - name: HG_PD_INITIAL_STORE_LIST
+              value: custom-store-0:8500,custom-store-1:8500,custom-store-2:8500
+      serviceName: cluster-pd
   - apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -94,7 +106,7 @@ kubernetesProvider:
         app.kubernetes.io/instance: RELEASE-NAME
         app.kubernetes.io/component: store
     spec:
-      replicas: '4'
+      replicas: '3'
       volumeClaimTemplates:
       - metadata:
           name: store-data
@@ -104,6 +116,11 @@ kubernetesProvider:
         spec:
           containers:
           - name: store
+            env:
+            - name: HG_STORE_PD_ADDRESS
+              value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8686,cluster-pd-1.cluster-pd.NAMESPACE.svc:8686,cluster-pd-2.cluster-pd.NAMESPACE.svc:8686
+            - name: HG_STORE_DATA_PATH
+              value: /hugegraph-store/storage
             ports:
             - name: grpc
               containerPort: '8500'
@@ -111,13 +128,10 @@ kubernetesProvider:
               containerPort: '8520'
             - name: raft
               containerPort: '8510'
+      serviceName: cluster-store
 tests:
-- it: does not guess a live valueFrom count even with pins
+- it: requires review instead of rewriting custom Store endpoints
   template: store-statefulset.yaml
-  set:
-    bootstrap.pdReplicas: 3
-    bootstrap.storeReplicas: 4
-    bootstrap.initialStoreCount: 3
   asserts:
   - failedTemplate:
-      errorPattern: bootstrap import requires the existing PD peer list
+      errorPattern: same-topology adoption requires unchanged literal HG_PD_INITIAL_STORE_LIST

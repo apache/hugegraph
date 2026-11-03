@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-suite: Experimental bootstrap bootstrap_pd_growth_test.yaml
+suite: Retained bootstrap inputs during PD growth
 templates:
 - pd-statefulset.yaml
 - store-statefulset.yaml
@@ -23,7 +23,6 @@ templates:
 - bootstrap-configmap.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: true
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
@@ -35,6 +34,11 @@ release:
   upgrade: true
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     v1/ConfigMap:
       gvr:
         version: v1
@@ -47,6 +51,11 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: unrelated-data
+      namespace: NAMESPACE
   - apiVersion: v1
     kind: ConfigMap
     metadata:
@@ -182,13 +191,6 @@ tests:
   asserts:
   - failedTemplate:
       errorPattern: bootstrap.pdReplicas cannot change
-- it: refuses disabling the retained record
-  template: store-statefulset.yaml
-  set:
-    bootstrap.enabled: false
-  asserts:
-  - failedTemplate:
-      errorPattern: bootstrap.enabled cannot be disabled
 - it: validates current PD5 quorum for PDB rather than old PD3 seeds
   template: server-deployment.yaml
   set:

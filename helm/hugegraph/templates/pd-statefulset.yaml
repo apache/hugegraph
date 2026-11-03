@@ -23,10 +23,8 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: pd
-  {{- if get (.Values.bootstrap | default dict) "enabled" }}
   annotations:
     hugegraph.apache.org/bootstrap-retained: "true"
-  {{- end }}
 spec:
   serviceName: {{ include "hugegraph.pd.name" . }}
   replicas: {{ .Values.pd.replicas }}

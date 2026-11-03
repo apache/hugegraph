@@ -164,7 +164,9 @@ class VermeerChartTest(unittest.TestCase):
             for upgrade, registry in ((False, ""), (True, ""), (True, "registry.example.com")):
                 with self.subTest(upgrade=upgrade, registry=registry):
                     documents = self.documents(chart=chart, upgrade=upgrade, deterministic_auth=False,
-                                               **{"global": {"imageRegistry": registry}})
+                                               **{"global": {"imageRegistry": registry},
+                                                  "bootstrap": {"pdReplicas": 3, "storeReplicas": 3,
+                                                                "initialStoreCount": 3}})
                     self.assertEqual([], vermeer_resources(documents))
             values = yaml.safe_load((CHART / "values.yaml").read_text())
             values.pop("mode")

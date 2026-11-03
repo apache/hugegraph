@@ -15,12 +15,11 @@
 # limitations under the License.
 #
 
-suite: Disabled bootstrap keeps the default upgrade path free of ConfigMap reads
+suite: Retained data PVCs require reviewed recovery
 templates:
-- pd-statefulset.yaml
+- bootstrap-configmap.yaml
 set:
   fullnameOverride: cluster
-  bootstrap.enabled: false
   pd.auth.existingSecret: fixture-pd
   server.auth.admin.existingSecret: fixture-admin
   server.auth.token.existingSecret: fixture-token
@@ -28,38 +27,22 @@ set:
   store.replicas: 3
   pd.pdb.minAvailable: 2
   store.pdb.minAvailable: 2
-release:
-  upgrade: true
+  pd.partition.defaultShardCount: 3
 kubernetesProvider:
   scheme:
-    apps/v1/StatefulSet:
+    v1/PersistentVolumeClaim:
       gvr:
-        group: apps
         version: v1
-        resource: statefulsets
+        resource: persistentvolumeclaims
       namespaced: true
   objects:
-  - apiVersion: apps/v1
-    kind: StatefulSet
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
     metadata:
-      name: cluster-pd
+      name: store-data-cluster-store-0
       namespace: NAMESPACE
-      labels:
-        app.kubernetes.io/name: hugegraph
-        app.kubernetes.io/instance: RELEASE-NAME
-        app.kubernetes.io/component: pd
-    spec:
-      template:
-        spec:
-          containers:
-          - name: pd
-            env:
-            - name: HG_PD_RAFT_PEERS_LIST
-              value: cluster-pd-0.cluster-pd.NAMESPACE.svc:8610,cluster-pd-1.cluster-pd.NAMESPACE.svc:8610,cluster-pd-2.cluster-pd.NAMESPACE.svc:8610
 tests:
-- it: renders without a ConfigMap lookup when bootstrap stays disabled
-  template: pd-statefulset.yaml
+- it: rejects a fresh install over retained data without a live PD
   asserts:
-  - equal:
-      path: spec.replicas
-      value: 3
+  - failedTemplate:
+      errorPattern: retained data PVCs exist without a live PD StatefulSet

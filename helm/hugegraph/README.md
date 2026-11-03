@@ -35,10 +35,11 @@ The source installation and configuration examples below assume a repository
 checkout and commands run from its root.
 
 The [stable bootstrap configuration](docs/operations.md#stable-bootstrap-topology)
-separates initialization inputs from node replicas. It is disabled by default
-and requires PD images with separate bootstrap and runtime quorum checks before
-using it for node operations. It does not implement safe node admission or
-retirement by itself.
+always records initialization inputs separately from node replicas. Use a PD
+image with separate bootstrap and runtime quorum checks. PD membership changes,
+Store admission and safe retirement remain manual operations. Growing from one
+Store to three does not change existing data from RF=1 to RF=3; replica policy
+is configured independently with `pd.partition.defaultShardCount`.
 
 ## Install from source and open Hubble
 
