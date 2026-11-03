@@ -179,9 +179,17 @@ when decrypting an existing value.
 
 For non-root deployments, keep the same Hubble UID and ownership of the key
 file across replacements. `fsGroup` can add group permissions on volume mount;
-the startup wrapper restores an existing regular key file to `0600`, as Hubble
-requires owner-only permissions. `fsGroup` alone does not transfer file
-ownership. If `HUBBLE_TEXT2GQL_MASTER_KEY` is supplied from a Secret through
+the startup wrapper attempts to restore an existing regular key file to `0600`,
+as Hubble requires owner-only permissions. If it cannot change the mode, it logs
+a warning and continues starting Hubble. Text2GQL still rejects an insecure or
+unreadable key with HTTP 503; this optional feature must not block the rest of
+the UI. `fsGroup` changes the group, not the file's owning UID. Before intentionally
+changing Hubble's UID, arrange for the existing key to be owned by the new UID
+with mode `0600`, preserving its contents. The Vermeer integration honors an
+explicit Hubble container or Pod `runAsUser`, otherwise using UID `0`; set the UID
+explicitly for custom non-root Hubble images.
+
+If `HUBBLE_TEXT2GQL_MASTER_KEY` is supplied from a Secret through
 `hubble.extraEnv`, Hubble uses that value instead of the file; preserve the same
 Secret value to decrypt existing credentials.
 

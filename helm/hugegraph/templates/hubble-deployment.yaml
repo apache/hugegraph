@@ -153,13 +153,14 @@ spec:
               # fsGroup can widen a persisted key's permissions on volume mount.
               # An environment key takes precedence; otherwise restore owner-only
               # access without creating a key or following a symbolic link.
+              # A Text2GQL key problem must not prevent the rest of Hubble starting.
               if [[ "${HUBBLE_TEXT2GQL_MASTER_KEY:-}" =~ ^[[:space:]]*$ &&
                     ! -L "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" &&
                     -f "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" ]]; then
                 if ! chmod 600 "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}"; then
-                  echo "cannot secure the Text2GQL master key; ensure the file is owned" \
-                       "by the Hubble runAsUser and the data volume is writable" >&2
-                  exit 1
+                  echo "warning: cannot secure the Text2GQL master key; continuing Hubble startup." \
+                       "Text2GQL may be unavailable; ensure the key is owned by the Hubble" \
+                       "runAsUser and the data volume is writable" >&2
                 fi
               fi
               TMP=$(mktemp)

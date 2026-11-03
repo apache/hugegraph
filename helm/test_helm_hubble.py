@@ -54,11 +54,16 @@ class HubbleText2GqlTest(unittest.TestCase):
         if shutil.which("helm") is None:
             raise RuntimeError("Helm is required for the Hubble startup regression")
 
-    def fixture(self, mode="pd", persistence=True, properties="", extra_env=None):
+    def fixture(self, mode="pd", persistence=True, properties="", extra_env=None,
+                vermeer=False, run_as_user=None):
         temporary = tempfile.TemporaryDirectory(prefix="hubble-wrapper-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         values = {"hubble": {"mode": mode, "persistence": {"enabled": persistence}}}
+        if vermeer:
+            values["vermeer"] = {"enabled": True}
+        if run_as_user is not None:
+            values["hubble"]["securityContext"] = {"runAsUser": run_as_user}
         if extra_env is not None:
             values["hubble"]["extraEnv"] = extra_env
         configuration = root / "values.yaml"
@@ -172,17 +177,32 @@ class HubbleText2GqlTest(unittest.TestCase):
         self.assertTrue(key.is_symlink())
         self.assertEqual(0o660, stat.S_IMODE(target.stat().st_mode))
 
-    def test_chmod_failure_stops_before_hubble_starts(self):
-        root, key, container, environment = self.fixture()
-        key.write_bytes(KEY_BYTES)
-        key.chmod(0o660)
-        self.deny_key_chmod(root, environment)
-        result = self.run_wrapper(root, container, environment)
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn("fixture chmod denied", result.stderr)
-        self.assertFalse((root / "started.json").exists())
-        self.assertEqual(0o660, stat.S_IMODE(key.stat().st_mode))
-        self.assertEqual(KEY_BYTES, key.read_bytes())
+    def test_chmod_failure_warns_without_blocking_hubble_startup(self):
+        for mode, vermeer in (("pd", False), ("direct", False), ("pd", True)):
+            with self.subTest(mode=mode, vermeer=vermeer):
+                root, key, container, environment = self.fixture(
+                    mode, properties=KEY_PROPERTY + "data/old.key\n",
+                    vermeer=vermeer, run_as_user=10001)
+                self.assertEqual(10001, container["securityContext"]["runAsUser"])
+                key.write_bytes(KEY_BYTES)
+                key.chmod(0o660)
+                # Simulate a key owned by a former UID without needing root or
+                # changing this test process's identity. Vermeer honors the
+                # explicit UID above; enabling it alone does not select 10001.
+                self.deny_key_chmod(root, environment)
+                result = self.run_wrapper(root, container, environment)
+                self.assert_started(root, result, 0o660)
+                self.assertIn("fixture chmod denied", result.stderr)
+                self.assertIn("warning:", result.stderr)
+                self.assertIn("Text2GQL master key", result.stderr)
+                self.assertIn("continuing Hubble startup", result.stderr)
+                self.assertIn("runAsUser", result.stderr)
+                self.assertEqual(0o660, stat.S_IMODE(key.stat().st_mode))
+                self.assertEqual(KEY_BYTES, key.read_bytes())
+                lines = (root / "conf/hugegraph-hubble.properties").read_text().splitlines()
+                self.assertIn("unrelated.setting=preserved", lines)
+                self.assertEqual([KEY_PROPERTY + str(key)],
+                                 [line for line in lines if line.startswith(KEY_PROPERTY)])
 
 
 if __name__ == "__main__":
