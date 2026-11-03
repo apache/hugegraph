@@ -18,6 +18,10 @@
 suite: Upgrade entry default notice
 templates:
   - NOTES.txt
+set:
+  bootstrap.pdReplicas: 3
+  bootstrap.storeReplicas: 3
+  bootstrap.initialStoreCount: 3
 tests:
   - it: reports both inherited NodePort entries during an easy upgrade
     release:

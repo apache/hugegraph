@@ -226,6 +226,121 @@ Server replicas can be changed routinely; CPU-utilization HPA requires positive
 CPU requests. Store growth still needs volume and shard planning. Use chart
 updates for Store scale changes so Hubble's endpoint list is updated too.
 
+## Stable bootstrap topology
+
+Every installation records its initial PD peer count, Store allowlist count and
+startup Store threshold in an immutable, retained `<fullname>-bootstrap`
+ConfigMap. The Helm caller needs namespace ConfigMap-read and PVC-list permissions.
+There is no enable/disable switch. Bootstrap history is an
+initialization snapshot, not the current Raft voting configuration or a list of
+all admitted Stores. Changing replicas does not perform database member changes,
+approve Pending Stores or prove that a Store can be deleted.
+
+Use PD images with separate bootstrap admission and runtime voting-quorum checks.
+Pin a compatible version or digest: this chart cannot infer that capability from
+an image tag. See the [PD configuration guide](../../../hugegraph-pd/docs/configuration.md).
+
+### New installations and replica policy
+
+On a new installation, empty `bootstrap.pdReplicas`, `bootstrap.storeReplicas`
+and `bootstrap.initialStoreCount` use the requested PD count, Store count and
+Store count. A fresh five-PD installation starts with five initial voters;
+set `pd.pdb.minAvailable=3` when `pd.replicas=5`. The default PDB value `2`
+does not preserve a five-PD majority and is rejected.
+
+Configure voting replica policy independently with
+`pd.partition.defaultShardCount`. With no explicit value, initial Store counts
+below three seed RF=1; counts of three or more seed RF=3. Growing an initialized
+RF=1 cluster from one Store to three preserves RF=1, including existing shard
+groups. Store capacity changes do not migrate data or change the persisted RF.
+An RF change requires a separate database replica-migration operation.
+
+The record supplies initial peer/allowlist inputs, client PD seeds, Store startup
+waiting and the implicit first-bootstrap RF. PDB validation uses the current
+desired PD majority. Crossing the one-PD boundary can change the inherited
+liveness path; pin a compatible `pd.livenessPath` before a controlled operation
+when existing Pod templates must remain unchanged.
+
+### Adopting same-topology test data
+
+Only an unchanged test-cluster topology can be adopted without a record: PD and
+Store counts, persisted RF, StatefulSet/DNS names, ports, PVC bindings and Raft
+identities must match. Automatic migration of older or already changed
+topologies is unsupported. Do not infer original membership from current
+replicas or remove a conflicting record to make an upgrade pass.
+
+1. Stop concurrent Helm/GitOps topology changes and back up the data that must be
+   preserved. Pin component images, names, addresses, storage and replica policy.
+2. Run the read-only `helm/check_bootstrap_adoption.py` preflight manually against
+   the live PD and every Store REST endpoint. It checks observed membership,
+   voting RF, Store state and Kubernetes storage identities. Provide explicit
+   expected counts and RF; keep its output for the post-upgrade comparison.
+3. Upgrade with the same topology and verified `pd.partition.defaultShardCount`.
+   The chart checks live initialization parameters and resource conflicts before
+   creating a record. Missing or mismatched inputs are rejected. Use
+   `--reset-values -f reviewed-values.yaml` if old saved values contain the removed
+   `bootstrap.enabled` key; do not carry that key through `--reuse-values`.
+4. Re-run the preflight with `--before` and the saved report. Compare PD/Store/
+   Server Pod templates, PVC/Store identities and actual Raft members, then read
+   existing graph data and write/read new data. A render or Pod Ready result is
+   not data-upgrade acceptance.
+
+For example, after exposing the authenticated PD and Store REST endpoints with
+reviewed port-forwards, run:
+
+```bash
+python3 helm/check_bootstrap_adoption.py \
+  --namespace hugegraph --release hugegraph --fullname hugegraph \
+  --pd-count 3 --store-count 3 --replica-count 3 \
+  --pd-url http://127.0.0.1:8620 \
+  --store-url http://127.0.0.1:8520 --store-url http://127.0.0.1:8521 \
+  --store-url http://127.0.0.1:8522 > before-adoption.json
+```
+
+Create one port-forward per Store Pod, in ordinal order; verify each forwarding
+target. A load-balanced Service URL cannot establish which Store was checked,
+and Store REST does not directly expose its local persisted Store ID.
+
+Supply HTTP credentials through `HG_ADOPTION_HTTP_USER` and
+`HG_ADOPTION_HTTP_PASSWORD`, not command arguments. The script needs read access
+to its Kubernetes resources; `--help` lists its requirements. It does not create
+port-forwards, modify members or repair mismatches. The preflight is an operator
+step, not an automatic Helm gate, and must be combined with the graph read/write
+checks above. Helm cannot itself prove the live database's committed membership.
+
+### Controlled node changes and recovery limits
+
+Prepare and verify PD membership through the database before scaling PD
+resources. For Store growth, prepare storage and explicitly admit the new
+Pending identity after capacity checks. For Store shrink, set Exiting, wait for
+migration and full recovery, verify actual members exclude the source and its
+local engines are empty, then reduce resources and reconcile Helm. Preserve PVCs
+until the retirement and data checks are complete. Use the detailed sequence in
+[Topology and scheduling](#topology-and-scheduling).
+
+Retained bootstrap history must remain unchanged during these operations. An
+online render rejects conflicting pins; an install that finds retained history
+or an initialized cluster is rejected. Uninstall can retain the record and PVCs.
+Reinstalling against those volumes is a recovery operation requiring review of
+original initialization inputs, actual membership and volume identities; this
+chart does not provide an automatic restore mode. Rollbacks must preserve the
+record and use a chart version that understands it.
+
+Offline upgrades cannot discover retained history. Use `--is-upgrade` and pin all
+three counts from the record. Offline rendering cannot establish that old PVCs
+are safe to reuse. Unattended GitOps topology reconciliation is unsupported;
+suspend competing reconciliation during manual resource steps.
+
+Client discovery and Store startup still use historical PD seeds. An initial
+one-PD cluster expanded to three still waits for PD0; if PD0 fails, PD1/PD2 may
+retain current voting quorum while a new Store cannot start. Likewise, an
+initial five-PD cluster shrunk to three still waits for three of the five seeds;
+one additional failure can block new Stores. Shrinking below the recorded seed
+majority is unsupported. Before any Store restart or addition, verify that the
+recorded seed majority is reachable as well as checking actual PD quorum.
+Dynamic discovery and RF migration are separate work; this chart does not claim
+automatic scaling or failure recovery.
+
 ## Rolling Store updates and recovery
 
 Use `store.updateStrategy.type=OnDelete` for a controlled rollout. Replace one
