@@ -2352,6 +2352,108 @@ public class CloudStorageEventListenerTest {
         }
     }
 
+    /**
+     * Reap A (a close-triggered publish) pauses after its pending check while truncate B of the
+     * same DB fails its purge and stands down on a new SST. A must not complete B's reap: the
+     * remote CURRENT still names A's generation, so B's markers must stay until B's own publish.
+     */
+    @Test
+    public void truncateReap_ofAnEarlierTruncateKeepsALaterTruncatesMarkers() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-reap-race");
+        Path dbDir = tmpRoot.resolve("g20");
+        Files.createDirectories(dbDir);
+        Path sstA = Files.write(dbDir.resolve("000010.sst"), "a".getBytes());
+        Path sstB = Files.write(dbDir.resolve("000020.sst"), "b".getBytes());
+        CountDownLatch reapAListing = new CountDownLatch(1);
+        CountDownLatch resumeReapA = new CountDownLatch(1);
+        AtomicBoolean pauseNextListing = new AtomicBoolean(false);
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider() {
+            @Override
+            public List<String> listFiles(String remoteDirPrefix) throws IOException {
+                List<String> keys = super.listFiles(remoteDirPrefix);
+                if (pauseNextListing.compareAndSet(true, false)) {
+                    reapAListing.countDown();
+                    try {
+                        assertTrue(resumeReapA.await(10, TimeUnit.SECONDS));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return keys;
+            }
+        };
+        provider.putRemoteFile("g20/000001.sst", "cleared".getBytes());
+        AtomicReference<String> liveSst = new AtomicReference<>(sstA.toString());
+        CloudStorageEventListener l = new CloudStorageEventListener(provider,
+                List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(), null,
+                60_000L) {
+            @Override
+            List<LiveSstFile> currentLiveSstFiles(String dbName) {
+                return List.of(new LiveSstFile(liveSst.get(), "default"));
+            }
+
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                try {
+                    Path temp = Files.createTempDirectory("hgstore-test-truncate-race-snap");
+                    String live = Paths.get(liveSst.get()).getFileName().toString();
+                    return new MetadataSnapshot(dbDir.toString(), temp.toString(), "CURRENT",
+                                                "MANIFEST-000030", List.of(), List.of(live));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            boolean uploadMetadataSnapshot(CloudStorageProvider p, String dbName,
+                                           MetadataSnapshot snapshot) {
+                return true;
+            }
+        };
+        ExecutorService closer = Executors.newSingleThreadExecutor();
+        try {
+            // Truncate A fails its purge, then the DB writes again: A's retry stands down.
+            provider.failPurge = true;
+            l.onDBTruncateBegin("g20", dbDir.toString());
+            l.onDBTruncated("g20", dbDir.toString());
+            l.onTableFileCreated("g20", "default", sstA.toString(), Files.size(sstA));
+            waitForCondition(() -> l.hasTruncateReapMarker("g20"),
+                             "truncate A's retry must stand down into a pending reap");
+
+            // A close-triggered publish runs reap A, which pauses after its pending check.
+            pauseNextListing.set(true);
+            Future<Boolean> reapA = closer.submit(() -> l.syncMetadataSnapshotInline(provider,
+                                                                                    "g20"));
+            assertTrue(reapAListing.await(5, TimeUnit.SECONDS), "reap A must reach its listing");
+
+            // Truncate B of the same DB: its purge fails and a new SST makes its retry stand down.
+            l.onDBTruncateBegin("g20", dbDir.toString());
+            l.onDBTruncated("g20", dbDir.toString());
+            liveSst.set(sstB.toString());
+            l.onTableFileCreated("g20", "default", sstB.toString(), Files.size(sstB));
+            waitForCondition(() -> l.hasTruncateReapMarker("g20"),
+                             "truncate B's retry must stand down into its own pending reap");
+
+            resumeReapA.countDown();
+            assertTrue(reapA.get(5, TimeUnit.SECONDS), "A's publish itself succeeded");
+            assertTrue(l.hasPendingTruncateMarker("g20"),
+                       "reap A must not drop truncate B's marker");
+            assertTrue(l.hasTruncateReapMarker("g20"),
+                       "reap A must not drop truncate B's reap marker");
+
+            // B's own post-truncate publish completes B's reap.
+            assertTrue(l.syncMetadataSnapshotInline(provider, "g20"));
+            assertFalse(l.hasPendingTruncateMarker("g20"),
+                        "B's publish and reap drop B's truncate marker");
+            assertFalse(l.hasTruncateReapMarker("g20"));
+        } finally {
+            resumeReapA.countDown();
+            closer.shutdownNow();
+            l.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
     @Test
     public void truncateReap_survivesRestartWithoutPurgingTheLivePrefix() throws Exception {
         Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-reap-restart");
