@@ -47,6 +47,13 @@ runs:
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_package.py' -v
 
+  - name: RAG integration regression
+    shell: 'bash -e {0}'
+    run: |
+      helm lint helm/hugegraph -f helm/hugegraph/values-single.yaml -f helm/hugegraph/values-rag.yaml
+      helm lint helm/hugegraph -f helm/hugegraph/values-cluster.yaml -f helm/hugegraph/values-rag.yaml
+      python3 -m unittest discover -s helm -p 'test_helm_rag.py' -v
+
   - name: SeaTunnel integration regression
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_seatunnel.py' -v

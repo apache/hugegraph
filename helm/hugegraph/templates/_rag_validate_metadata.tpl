@@ -34,8 +34,8 @@
 {{- if not $name -}}
 {{- fail (printf "rag.env[%d].name must not be empty" $index) -}}
 {{- end -}}
-{{- if not (regexMatch `^[-._a-zA-Z][-._a-zA-Z0-9]*$` $name) -}}
-{{- fail (printf "rag.env[%d].name must match [-._a-zA-Z][-._a-zA-Z0-9]* for Kubernetes 1.23 compatibility" $index) -}}
+{{- if not (regexMatch `^[._a-zA-Z][-._a-zA-Z0-9]*$` $name) -}}
+{{- fail (printf "rag.env[%d].name must match [._a-zA-Z][-._a-zA-Z0-9]* for Kubernetes 1.23 compatibility" $index) -}}
 {{- end -}}
 {{- if hasKey $seenEnv $name -}}
 {{- fail (printf "rag.env contains duplicate name %s" $name) -}}

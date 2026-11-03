@@ -41,13 +41,6 @@ rag:
   # embedding and indexing workloads vary widely. Size it for the selected
   # providers and dataset.
   resources: {}
-  initResources:
-    requests:
-      cpu: 10m
-      memory: 16Mi
-    limits:
-      cpu: 100m
-      memory: 64Mi
 
   # Non-root execution, RuntimeDefault seccomp, no added capabilities, disabled
   # privilege escalation and no ServiceAccount token are enforced by templates,
@@ -91,8 +84,8 @@ rag:
 
   # Unset inherits the top-level persistence.enabled value (true by default).
   # The claim stores the editable .env, prompt configuration, indexes and
-  # resource tree. The init container adds missing image files but never
-  # overwrites files already changed on the claim.
+  # resource tree. Missing example assets are read from the image, so startup
+  # needs no seeding. Requires the paired HugeGraph AI configuration refactor.
   persistence:
     enabled:
     existingClaim: ''
@@ -100,7 +93,7 @@ rag:
     storageClassName: ''
     accessModes:
     - ReadWriteOnce
-    mountPath: /home/work/hugegraph-llm/src/hugegraph_llm/resources
+    mountPath: /var/lib/hugegraph-rag
 
   extraVolumes: []
   extraVolumeMounts: []

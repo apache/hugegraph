@@ -36,9 +36,8 @@ class RagBasicMixin:
         self.assertEqual(1, deployment["spec"]["replicas"])
         self.assertEqual("Recreate", deployment["spec"]["strategy"]["type"])
         self.assertEqual(8001, container["ports"][0]["containerPort"])
-        self.assertEqual(["/bin/sh", "-ec"], container["command"])
-        self.assertIn("exec python -m hugegraph_llm.demo.rag_demo.app", container["args"][0])
-        self.assertIn("--host 0.0.0.0 --port \"8001\"", container["args"][0])
+        self.assertEqual(["python", "-m", "hugegraph_llm.demo.rag_demo.app"], container["command"])
+        self.assertEqual(["--host", "0.0.0.0", "--port", "8001"], container["args"])
         self.assertEqual("ClusterIP", service["spec"]["type"])
         self.assertEqual("10Gi", pvc["spec"]["resources"]["requests"]["storage"])
 
@@ -67,7 +66,7 @@ class RagBasicMixin:
         service, = component_resources(documents, kind="Service")
         environment = env_by_name(container)
 
-        self.assertEqual("fixture-hugegraph-server.graphs.svc:8080", environment["GRAPH_URL"]["value"])
+        self.assertEqual("http://fixture-hugegraph-server.graphs.svc:8080", environment["GRAPH_URL"]["value"])
         self.assertEqual("hugegraph", environment["GRAPH_NAME"]["value"])
         self.assertEqual("DEFAULT", environment["GRAPH_SPACE"]["value"])
         self.assertEqual("admin", environment["GRAPH_USER"]["value"])
@@ -80,7 +79,7 @@ class RagBasicMixin:
         documents = self.documents({"port": 9001})
         container = self.container(documents)
         service, = component_resources(documents, kind="Service")
-        self.assertIn('--port "9001"', container["args"][0])
+        self.assertEqual("9001", container["args"][-1])
         self.assertEqual(9001, container["ports"][0]["containerPort"])
         self.assertEqual(9001, service["spec"]["ports"][0]["port"])
         for name in ("startupProbe", "readinessProbe", "livenessProbe"):

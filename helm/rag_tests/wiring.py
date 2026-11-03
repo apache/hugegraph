@@ -28,7 +28,7 @@ class RagWiringMixin:
                 environment = env_by_name(self.container(documents))
                 self.assertEqual(1, deployment["spec"]["replicas"])
                 self.assertEqual(
-                    "fixture-hugegraph-server.graphs.svc:8080",
+                    "http://fixture-hugegraph-server.graphs.svc:8080",
                     environment["GRAPH_URL"]["value"],
                 )
 
@@ -58,7 +58,7 @@ class RagWiringMixin:
         documents = self.documents({"env": [{"name": "GRAPH_URL", "value": "external:8080"}]})
         environment = env_by_name(self.container(documents))
         self.assertEqual("external:8080", environment["GRAPH_URL"]["value"])
-        self.assertNotIn("GRAPH_PWD", environment)
+        self.assertEqual("", environment["GRAPH_PWD"]["value"])
         self.assertNotIn("checksum/hugegraph-auth", pod(self.deployment(documents))["metadata"].get("annotations", {}))
 
     def test_external_server_uses_only_explicit_password_secret(self):
@@ -77,7 +77,7 @@ class RagWiringMixin:
             "autoConfigure": True,
             "url": "http://remote.graphs.svc:8080",
         }})
-        self.assertNotIn("GRAPH_PWD", env_by_name(self.container(documents)))
+        self.assertEqual("", env_by_name(self.container(documents))["GRAPH_PWD"]["value"])
 
     def test_custom_password_secret_defaults_to_password_key(self):
         documents = self.documents({"hugegraph": {

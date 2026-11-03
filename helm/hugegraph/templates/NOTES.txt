@@ -54,6 +54,7 @@ Watch startup (run each command in a separate terminal):
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -w
   kubectl get pvc -n {{ .Release.Namespace }} -w
 {{- $claims := 0 }}
+{{- if and (.Values.rag | default dict).enabled (eq (include "hugegraph.rag.persistenceEnabled" .) "true") }}{{ $claims = add $claims 1 }}{{ end }}
 {{- if .Values.pd.storage.enabled }}{{ $claims = add $claims (int .Values.pd.replicas) }}{{ end }}
 {{- if .Values.store.storage.enabled }}{{ $claims = add $claims (int .Values.store.replicas) }}{{ end }}
 {{- if and $hubbleEnabled .Values.hubble.persistence.enabled }}{{ $claims = add $claims 1 }}{{ end }}
@@ -71,6 +72,14 @@ Store waits for a PD quorum before startup. If a Pod remains in Init, inspect
 its init-container logs and PD readiness; see helm/hugegraph/docs/operations.md#troubleshooting.
 
 Access:
+{{- if (.Values.rag | default dict).enabled }}
+
+  RAG (single instance):
+    Port-forward: kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hugegraph.rag.name" . }} {{ include "hugegraph.rag.port" . }}:{{ include "hugegraph.rag.port" . }}
+    Open http://127.0.0.1:{{ include "hugegraph.rag.port" . }}/
+    External configuration and model credentials: helm/hugegraph/docs/rag.md
+    Configuration changes require a RAG rollout restart. Model credentials are needed for inference.
+{{- end }}
 {{- if $vermeerEnabled }}
 {{- $vName := include "hugegraph.vermeer.masterName" . }}
 

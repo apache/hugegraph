@@ -17,7 +17,7 @@
 
 {{- define "hugegraph.rag.validate.fields" -}}
 {{- $rag := get .Values "rag" | default dict -}}
-{{- $allowedRagKeys := list "enabled" "replicas" "image" "port" "hugegraph" "resources" "initResources" "podSecurityContext" "securityContext" "nodeSelector" "tolerations" "affinity" "topologySpreadConstraints" "priorityClassName" "podAnnotations" "podLabels" "env" "envFrom" "terminationGracePeriodSeconds" "serviceAccount" "service" "ingress" "persistence" "extraVolumes" "extraVolumeMounts" "probes" "networkPolicy" -}}
+{{- $allowedRagKeys := list "enabled" "replicas" "image" "port" "hugegraph" "resources" "podSecurityContext" "securityContext" "nodeSelector" "tolerations" "affinity" "topologySpreadConstraints" "priorityClassName" "podAnnotations" "podLabels" "env" "envFrom" "terminationGracePeriodSeconds" "serviceAccount" "service" "ingress" "persistence" "extraVolumes" "extraVolumeMounts" "probes" "networkPolicy" -}}
 {{- range $key, $_ := $rag -}}
 {{- if not (has $key $allowedRagKeys) -}}
 {{- fail (printf "rag contains unsupported field %s" $key) -}}

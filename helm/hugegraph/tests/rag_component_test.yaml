@@ -51,12 +51,8 @@ tests:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
-      - equal:
-          path: spec.template.spec.initContainers[0].name
-          value: seed-resources
-      - matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "cp -R -n"
+      - notExists:
+          path: spec.template.spec.initContainers
       - equal:
           path: spec.template.spec.containers[0].image
           value: hugegraph/rag:latest
@@ -69,28 +65,23 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].command
           value:
-            - /bin/sh
-            - -ec
-      - matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "if key in os.environ"
-      - matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "unset_key"
-      - matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "--port \"8001\""
+            - python
+            - -m
+            - hugegraph_llm.demo.rag_demo.app
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: ["--host", "0.0.0.0", "--port", "8001"]
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 8001
       - equal:
           path: spec.template.spec.containers[0].volumeMounts[0].mountPath
-          value: /home/work/hugegraph-llm/src/hugegraph_llm/resources
+          value: /var/lib/hugegraph-rag
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: GRAPH_URL
-            value: RELEASE-NAME-hugegraph-server.NAMESPACE.svc:8080
+            value: http://RELEASE-NAME-hugegraph-server.NAMESPACE.svc:8080
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -103,12 +94,12 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
-            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/.env
+            value: /var/lib/hugegraph-rag/.env
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: HUGEGRAPH_LLM_PROMPT_CONFIG_PATH
-            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
+            value: /var/lib/hugegraph-rag/demo/config_prompt.yaml
 
   - it: passes a custom port to the process and Pod contract
     template: rag-deployment.yaml
@@ -116,9 +107,9 @@ tests:
       rag.enabled: true
       rag.port: 9001
     asserts:
-      - matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "--port \"9001\""
+      - equal:
+          path: spec.template.spec.containers[0].args[3]
+          value: "9001"
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 9001

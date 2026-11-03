@@ -145,20 +145,18 @@ class HelmPackageTest(unittest.TestCase):
                 self.assertIn("/go/bin/vermeer-token", rendered)
 
 
-
 def load_tests(loader, tests, pattern):
     """Load the RAG suite only for the narrow packaged-chart CI invocation."""
     if pattern != "test_helm_package.py":
         return tests
 
     try:
-        from test_helm_rag import RagChartTest, RagSourceContractTest
+        from test_helm_rag import RagChartTest
     except ModuleNotFoundError as error:
         if error.name != "test_helm_rag":
             raise
-        from helm.test_helm_rag import RagChartTest, RagSourceContractTest
+        from helm.test_helm_rag import RagChartTest
 
-    tests.addTests(loader.loadTestsFromTestCase(RagSourceContractTest))
     tests.addTests(loader.loadTestsFromTestCase(RagChartTest))
     return tests
 

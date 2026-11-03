@@ -18,7 +18,10 @@
 {{ include "hugegraph.resolveValues" . }}
 {{- $rag := get .Values "rag" | default dict }}
 {{- $persistence := get $rag "persistence" | default dict }}
-{{- $persistenceEnabled := eq (include "hugegraph.rag.persistenceEnabled" .) "true" }}
+{{- $persistenceEnabled := false }}
+{{- if get $rag "enabled" | default false }}
+{{- $persistenceEnabled = eq (include "hugegraph.rag.persistenceEnabled" .) "true" }}
+{{- end }}
 {{- if and (get $rag "enabled" | default false) $persistenceEnabled (not (get $persistence "existingClaim" | default "")) }}
 {{- include "hugegraph.rag.validate" . }}
 apiVersion: v1

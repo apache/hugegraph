@@ -106,97 +106,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if $persistenceEnabled }}
-      initContainers:
-        - name: seed-resources
-          image: {{ include "hugegraph.rag.image" . | quote }}
-          imagePullPolicy: {{ get (get $rag "image" | default dict) "pullPolicy" | default "Always" }}
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              # Preserve operator and UI edits. Image upgrades add only files
-              # that are still missing from the persistent resource directory.
-              # Recursive copy deliberately avoids archive-mode metadata writes
-              # against a CSI volume root that remains owned by root.
-              umask 007
-              cp -R -n /home/work/hugegraph-llm/src/hugegraph_llm/resources/. /data/
-          securityContext:
-            {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
-          resources:
-            {{- toYaml (get $rag "initResources" | default dict) | nindent 12 }}
-          volumeMounts:
-            - name: data
-              mountPath: /data
-      {{- end }}
       containers:
         - name: rag
           image: {{ include "hugegraph.rag.image" . | quote }}
           imagePullPolicy: {{ get (get $rag "image" | default dict) "pullPolicy" | default "Always" }}
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              # HugeGraph AI loads an existing .env into os.environ before
-              # Pydantic reads settings. Remove values owned by the current Pod,
-              # by chart graph wiring, or by known upstream provider aliases.
-              # Unrelated UI/operator edits remain persistent.
-              umask 007
-              python - <<'PY'
-              import os
-              from pathlib import Path
-
-              from dotenv import dotenv_values, unset_key
-
-              env_path_value = os.environ.get("HUGEGRAPH_LLM_ENV_PATH")
-              if not env_path_value or not env_path_value.strip():
-                  raise SystemExit("HUGEGRAPH_LLM_ENV_PATH must not be empty")
-              env_path = Path(env_path_value)
-              env_path.parent.mkdir(parents=True, exist_ok=True)
-              env_path.touch(exist_ok=True)
-
-              managed_keys = set()
-              if "{{ $autoConfigure }}" == "true":
-                  # autoConfigure owns the complete graph connection, including
-                  # an intentionally absent password after switching endpoints.
-                  managed_keys.update({
-                      "GRAPH_URL",
-                      "GRAPH_NAME",
-                      "GRAPH_SPACE",
-                      "GRAPH_USER",
-                      "GRAPH_PWD",
-                  })
-
-              # HugeGraph AI derives these field-specific settings from the
-              # generic environment variables, then may persist the derived
-              # fields. Remove stale derivatives when the generic source is
-              # currently declarative so rotations take effect on restart.
-              derived_keys = {
-                  "OPENAI_API_KEY": {
-                      "OPENAI_CHAT_API_KEY",
-                      "OPENAI_EXTRACT_API_KEY",
-                      "OPENAI_TEXT2GQL_API_KEY",
-                  },
-                  "OPENAI_BASE_URL": {
-                      "OPENAI_CHAT_API_BASE",
-                      "OPENAI_EXTRACT_API_BASE",
-                      "OPENAI_TEXT2GQL_API_BASE",
-                  },
-                  "OPENAI_EMBEDDING_BASE_URL": {
-                      "OPENAI_EMBEDDING_API_BASE",
-                  },
-                  "CO_API_URL": {
-                      "COHERE_BASE_URL",
-                  },
-              }
-              for source, aliases in derived_keys.items():
-                  if source in os.environ:
-                      managed_keys.update(aliases)
-
-              for key in dotenv_values(env_path):
-                  if key in os.environ or key in managed_keys:
-                      unset_key(str(env_path), key)
-              PY
-              exec python -m hugegraph_llm.demo.rag_demo.app \
-                --host 0.0.0.0 --port {{ include "hugegraph.rag.port" . | int | quote }}
+          command: ["python", "-m", "hugegraph_llm.demo.rag_demo.app"]
+          args: ["--host", "0.0.0.0", "--port", {{ include "hugegraph.rag.port" . | int | quote }}]
           securityContext:
             {{- include "hugegraph.rag.securityContext" . | nindent 12 }}
           ports:
@@ -226,6 +141,16 @@ spec:
                 secretKeyRef:
                   name: {{ $passwordSecret | quote }}
                   key: {{ include "hugegraph.rag.passwordSecretKey" . | quote }}
+            {{- end }}
+            {{- if and $autoConfigure (not $injectPassword) (not (hasKey $envNames "GRAPH_PWD")) }}
+            # Explicitly clear a retained password when the selected endpoint
+            # has no configured credential. Absence must not revive old secrets.
+            - name: GRAPH_PWD
+              value: ""
+            {{- end }}
+            {{- if and $persistenceEnabled (not (hasKey $envNames "HUGEGRAPH_LLM_RESOURCE_PATH")) }}
+            - name: HUGEGRAPH_LLM_RESOURCE_PATH
+              value: {{ include "hugegraph.rag.mountPath" . | quote }}
             {{- end }}
             {{- if not (hasKey $envNames "HUGEGRAPH_LLM_ENV_PATH") }}
             - name: HUGEGRAPH_LLM_ENV_PATH

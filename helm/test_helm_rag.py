@@ -20,7 +20,6 @@ import unittest
 
 try:
     from rag_tests.basic import RagBasicMixin
-    from rag_tests.source_contract import RagSourceContractTest
     from rag_tests.state import RagStateMixin
     from rag_tests.support import RagChartBase
     from rag_tests.validation import RagValidationMixin
@@ -29,7 +28,6 @@ except ModuleNotFoundError as error:
     if error.name != "rag_tests":
         raise
     from helm.rag_tests.basic import RagBasicMixin
-    from helm.rag_tests.source_contract import RagSourceContractTest
     from helm.rag_tests.state import RagStateMixin
     from helm.rag_tests.support import RagChartBase
     from helm.rag_tests.validation import RagValidationMixin

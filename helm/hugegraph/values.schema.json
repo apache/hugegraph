@@ -164,6 +164,51 @@
           ]
         }
       }
+    },
+    "rag": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hugegraph": {
+                "type": "object",
+                "properties": {
+                  "autoConfigure": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "persistence": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "definitions": {

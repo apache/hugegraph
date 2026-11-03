@@ -59,7 +59,7 @@ ClusterIP
 {{- if $url -}}
 {{- $url -}}
 {{- else -}}
-{{- include "hugegraph.server.clientUrl" . | trimPrefix "http://" | trimPrefix "https://" -}}
+{{- include "hugegraph.server.clientUrl" . -}}
 {{- end -}}
 {{- end }}
 
@@ -122,7 +122,7 @@ password
 {{- define "hugegraph.rag.mountPath" -}}
 {{- $rag := get .Values "rag" | default dict -}}
 {{- $persistence := get $rag "persistence" | default dict -}}
-{{- get $persistence "mountPath" | default "/home/work/hugegraph-llm/src/hugegraph_llm/resources" -}}
+{{- get $persistence "mountPath" | default "/var/lib/hugegraph-rag" -}}
 {{- end }}
 
 {{- define "hugegraph.rag.envPath" -}}
