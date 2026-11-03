@@ -45,6 +45,8 @@ class RagValidationMixin:
              "extraVolumeMounts"),
             ({"extraVolumes": [{"name": "data", "emptyDir": {}}]},
              "reserved volume name data"),
+            ({"env": [{"name": "BAD=NAME", "value": "x"}]}, "printable ASCII"),
+            ({"env": [{"name": "BAD\tNAME", "value": "x"}]}, "printable ASCII"),
             ({"env": [{"name": "GRAPH_URL", "value": "a"}, {"name": "GRAPH_URL", "value": "b"}]}, "duplicate"),
             ({"persistance": {"enabled": False}}, "persistance"),
         )

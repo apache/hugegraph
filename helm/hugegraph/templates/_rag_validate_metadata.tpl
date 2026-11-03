@@ -34,6 +34,9 @@
 {{- if not $name -}}
 {{- fail (printf "rag.env[%d].name must not be empty" $index) -}}
 {{- end -}}
+{{- if not (regexMatch `^[\x20-\x3c\x3e-\x7e]+$` $name) -}}
+{{- fail (printf "rag.env[%d].name must use printable ASCII characters other than '='" $index) -}}
+{{- end -}}
 {{- if hasKey $seenEnv $name -}}
 {{- fail (printf "rag.env contains duplicate name %s" $name) -}}
 {{- end -}}
