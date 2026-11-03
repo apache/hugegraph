@@ -114,12 +114,14 @@ password
 {{- get $persistence "mountPath" | default "/home/work/hugegraph-llm/src/hugegraph_llm/resources" -}}
 {{- end }}
 
+{{/*
+Keep the generated .env outside the persistent resource tree. HugeGraph AI
+loads an existing .env into os.environ before Pydantic reads the container
+environment, so persisting it would let stale graph/model credentials override
+rotated Kubernetes Secrets after a restart.
+*/}}
 {{- define "hugegraph.rag.envPath" -}}
-{{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
-{{- printf "%s/.env" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
-{{- else -}}
 /tmp/hugegraph-llm.env
-{{- end -}}
 {{- end }}
 
 {{- define "hugegraph.rag.promptConfigPath" -}}
@@ -136,136 +138,3 @@ password
 {{- get $persistence "existingClaim" | default (include "hugegraph.rag.dataName" .) -}}
 {{- end }}
 
-{{- define "hugegraph.rag.podSecurityContext" -}}
-{{- $rag := get .Values "rag" | default dict -}}
-{{- $defaults := dict
-      "runAsNonRoot" true
-      "runAsUser" 1000
-      "runAsGroup" 1000
-      "fsGroup" 1000
-      "fsGroupChangePolicy" "OnRootMismatch"
-      "seccompProfile" (dict "type" "RuntimeDefault") -}}
-{{- $context := mergeOverwrite (deepCopy $defaults) (deepCopy (get $rag "podSecurityContext" | default dict)) -}}
-{{- range $field := list "runAsUser" "runAsGroup" "fsGroup" -}}
-{{- if hasKey $context $field -}}{{- $_ := set $context $field (int (get $context $field)) -}}{{- end -}}
-{{- end -}}
-{{- toYaml $context -}}
-{{- end }}
-
-{{- define "hugegraph.rag.securityContext" -}}
-{{- $rag := get .Values "rag" | default dict -}}
-{{- $defaults := dict
-      "runAsNonRoot" true
-      "runAsUser" 1000
-      "runAsGroup" 1000
-      "allowPrivilegeEscalation" false
-      "capabilities" (dict "drop" (list "ALL"))
-      "seccompProfile" (dict "type" "RuntimeDefault") -}}
-{{- $context := mergeOverwrite (deepCopy $defaults) (deepCopy (get $rag "securityContext" | default dict)) -}}
-{{- range $field := list "runAsUser" "runAsGroup" -}}
-{{- if hasKey $context $field -}}{{- $_ := set $context $field (int (get $context $field)) -}}{{- end -}}
-{{- end -}}
-{{- toYaml $context -}}
-{{- end }}
-
-{{- define "hugegraph.rag.validate" -}}
-{{- $rag := get .Values "rag" | default dict -}}
-{{- if get $rag "enabled" | default false -}}
-{{- $rawReplicas := "1" -}}
-{{- if hasKey $rag "replicas" -}}{{- $rawReplicas = get $rag "replicas" | toString -}}{{- end -}}
-{{- if not (regexMatch "^[0-9]+$" $rawReplicas) -}}
-{{- fail "rag.replicas must be an integer between 1 and 100" -}}
-{{- end -}}
-{{- $replicas := int $rawReplicas -}}
-{{- if or (lt $replicas 1) (gt $replicas 100) -}}
-{{- fail "rag.replicas must be between 1 and 100" -}}
-{{- end -}}
-{{- $rawPort := "8001" -}}
-{{- if hasKey $rag "port" -}}{{- $rawPort = get $rag "port" | toString -}}{{- end -}}
-{{- if not (regexMatch "^[0-9]+$" $rawPort) -}}
-{{- fail "rag.port must be an integer between 1 and 65535" -}}
-{{- end -}}
-{{- $port := int $rawPort -}}
-{{- if or (lt $port 1) (gt $port 65535) -}}
-{{- fail "rag.port must be between 1 and 65535" -}}
-{{- end -}}
-{{- $service := get $rag "service" | default dict -}}
-{{- $serviceType := include "hugegraph.rag.serviceType" . -}}
-{{- if not (has $serviceType (list "ClusterIP" "NodePort" "LoadBalancer")) -}}
-{{- fail "rag.service.type must be ClusterIP, NodePort or LoadBalancer" -}}
-{{- end -}}
-{{- $rawNodePort := get $service "nodePort" | default 0 | toString -}}
-{{- if and (ne $rawNodePort "0") (not (regexMatch "^[0-9]+$" $rawNodePort)) -}}
-{{- fail "rag.service.nodePort must be an integer" -}}
-{{- end -}}
-{{- $nodePort := int $rawNodePort -}}
-{{- if and (ne $nodePort 0) (or (lt $nodePort 1) (gt $nodePort 65535)) -}}
-{{- fail "rag.service.nodePort must be 0/unset or between 1 and 65535" -}}
-{{- end -}}
-{{- if and (ne $nodePort 0) (eq $serviceType "ClusterIP") -}}
-{{- fail "rag.service.nodePort requires service.type NodePort or LoadBalancer" -}}
-{{- end -}}
-{{- $graph := get $rag "hugegraph" | default dict -}}
-{{- $password := get $graph "passwordSecret" | default dict -}}
-{{- if and (trim (get $password "key" | default "")) (not (trim (get $password "name" | default ""))) -}}
-{{- fail "rag.hugegraph.passwordSecret.key requires passwordSecret.name" -}}
-{{- end -}}
-{{- $persistence := get $rag "persistence" | default dict -}}
-{{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
-{{- $mountPath := include "hugegraph.rag.mountPath" . -}}
-{{- if or (not $mountPath) (not (hasPrefix "/" $mountPath)) -}}
-{{- fail "rag.persistence.mountPath must be an absolute path" -}}
-{{- end -}}
-{{- $accessModes := get $persistence "accessModes" | default (list "ReadWriteOnce") -}}
-{{- if and (gt $replicas 1) (not (get $persistence "existingClaim" | default "")) (not (has "ReadWriteMany" $accessModes)) -}}
-{{- fail "rag.persistence.accessModes must include ReadWriteMany when the chart creates one claim for multiple RAG replicas; otherwise use an existing shared claim or keep rag.replicas=1" -}}
-{{- end -}}
-{{- end -}}
-{{- $podContext := get $rag "podSecurityContext" | default dict -}}
-{{- $containerContext := get $rag "securityContext" | default dict -}}
-{{- range $scope, $context := dict "rag.podSecurityContext" $podContext "rag.securityContext" $containerContext -}}
-{{- if and (hasKey $context "runAsNonRoot") (not (get $context "runAsNonRoot")) -}}
-{{- fail (printf "%s.runAsNonRoot must stay true for the HugeGraph RAG image" $scope) -}}
-{{- end -}}
-{{- range $field := list "runAsUser" "runAsGroup" -}}
-{{- if hasKey $context $field -}}
-{{- $raw := get $context $field | toString -}}
-{{- if not (regexMatch "^[1-9][0-9]*$" $raw) -}}
-{{- fail (printf "%s.%s must be a positive integer" $scope $field) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- if hasKey $podContext "fsGroup" -}}
-{{- $rawFsGroup := get $podContext "fsGroup" | toString -}}
-{{- if not (regexMatch "^[1-9][0-9]*$" $rawFsGroup) -}}
-{{- fail "rag.podSecurityContext.fsGroup must be a positive integer" -}}
-{{- end -}}
-{{- end -}}
-{{- if and (hasKey $containerContext "allowPrivilegeEscalation") (get $containerContext "allowPrivilegeEscalation") -}}
-{{- fail "rag.securityContext.allowPrivilegeEscalation must stay false" -}}
-{{- end -}}
-{{- $podLabels := get $rag "podLabels" | default dict -}}
-{{- range $reserved := list "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" -}}
-{{- if hasKey $podLabels $reserved -}}
-{{- fail (printf "rag.podLabels must not set %s because the chart owns workload selectors" $reserved) -}}
-{{- end -}}
-{{- end -}}
-{{- range $key, $_ := get $rag "podAnnotations" | default dict -}}
-{{- if hasPrefix "checksum/" $key -}}
-{{- fail (printf "rag.podAnnotations must not set %s because the chart owns checksum annotations" $key) -}}
-{{- end -}}
-{{- end -}}
-{{- $seenEnv := dict -}}
-{{- range $index, $entry := get $rag "env" | default list -}}
-{{- $name := get $entry "name" | default "" | toString -}}
-{{- if not $name -}}
-{{- fail (printf "rag.env[%d].name must not be empty" $index) -}}
-{{- end -}}
-{{- if hasKey $seenEnv $name -}}
-{{- fail (printf "rag.env contains duplicate name %s" $name) -}}
-{{- end -}}
-{{- $_ := set $seenEnv $name true -}}
-{{- end -}}
-{{- end -}}
-{{- end }}

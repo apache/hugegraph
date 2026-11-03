@@ -23,7 +23,7 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: connects a persistent non-root RAG pod to the same-release Server
+  - it: connects one persistent non-root RAG pod to the same-release Server
     template: rag-deployment.yaml
     set:
       rag.enabled: true
@@ -46,6 +46,12 @@ tests:
           path: spec.template.spec.securityContext.fsGroup
           value: 1000
       - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
           path: spec.template.spec.initContainers[0].name
           value: seed-resources
       - matchRegex:
@@ -54,6 +60,12 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: hugegraph/rag:latest
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.privileged
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
       - equal:
           path: spec.template.spec.containers[0].command
           value:
@@ -90,7 +102,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: HUGEGRAPH_LLM_ENV_PATH
-            value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/.env
+            value: /tmp/hugegraph-llm.env
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -147,7 +159,7 @@ tests:
                 name: rag-credentials
                 key: password
 
-  - it: supports an explicitly disposable RAG pod
+  - it: supports an explicitly disposable RAG pod without creating overlap
     template: rag-deployment.yaml
     set:
       rag.enabled: true
@@ -155,7 +167,7 @@ tests:
     asserts:
       - equal:
           path: spec.strategy.type
-          value: RollingUpdate
+          value: Recreate
       - notExists:
           path: spec.template.spec.initContainers
       - contains:

@@ -33,6 +33,10 @@ rag:
   hugegraph:
     autoConfigure: true
 
+  # The current RAG application is intentionally single-replica: mutable
+  # settings live in one process and prompts/resources are writable. The chart
+  # rejects rag.replicas other than 1 and uses a Recreate deployment strategy.
+
   # The main RAG process has no universal resource profile because model,
   # embedding and indexing workloads vary widely. Size it for the selected
   # providers and dataset.
@@ -45,8 +49,10 @@ rag:
       cpu: 100m
       memory: 64Mi
 
-  # Safe non-root UID/GID/fsGroup 1000 and RuntimeDefault seccomp are built
-  # into the templates, including bare --set rag.enabled=true installs.
+  # Non-root execution, RuntimeDefault seccomp, no added capabilities, disabled
+  # privilege escalation and no ServiceAccount token are enforced by templates,
+  # including bare --set rag.enabled=true installs. UID/GID/fsGroup default to
+  # 1000 and custom values must remain positive non-root IDs.
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -82,7 +88,9 @@ rag:
     tls: []
 
   # Persistence defaults on when RAG is enabled. The claim stores the editable
-  # resource tree, generated .env model/graph settings and prompt YAML. The
+  # resource tree, prompts, schema examples and indexes. The generated .env is
+  # deliberately kept in /tmp so a stale file cannot override rotated graph or
+  # model credentials supplied through Kubernetes Secrets after a restart. The
   # init container adds missing files from a new image but never overwrites
   # files already changed on the claim.
   persistence:

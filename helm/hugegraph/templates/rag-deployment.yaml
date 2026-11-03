@@ -40,8 +40,10 @@ metadata:
     app.kubernetes.io/component: rag
 spec:
   replicas: {{ include "hugegraph.rag.replicas" . | int }}
+  # The application keeps mutable runtime configuration in-process. Recreate
+  # preserves the chart's single-active-pod contract even when persistence is off.
   strategy:
-    type: {{ ternary "Recreate" "RollingUpdate" (and $persistenceEnabled (eq (include "hugegraph.rag.replicas" . | int) 1)) }}
+    type: Recreate
   selector:
     matchLabels:
       {{- include "hugegraph.selectorLabels" . | nindent 6 }}
