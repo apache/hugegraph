@@ -230,6 +230,21 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
      */
     private final Map<String, AtomicLong> dbWriteEpochs = new ConcurrentHashMap<>();
 
+    /**
+     * Prefixes whose truncate purge stood down because the DB wrote again (prefix -> DB name).
+     * The remote CURRENT still points at the cleared generation, so the pending-truncate marker is
+     * kept until a post-truncate publish replaces it and {@link #reapPreTruncateSsts} deletes the
+     * remote SSTs the published MANIFEST does not reference. Mirrored on disk by a reap marker so a
+     * restart reaps instead of purging the prefix, which now holds live post-truncate objects.
+     */
+    private final Map<String, String> truncateReapPending = new ConcurrentHashMap<>();
+
+    /**
+     * Prefixes with a truncate purge still owed whose marker could not be written, so a purge
+     * retry can tell an unpersisted intent from one already completed (marker removed).
+     */
+    private final Set<String> unpersistedTruncatePurges = ConcurrentHashMap.newKeySet();
+
     /** Per-DB metadata-publish failure state used to back off a persistently failing publish. */
     private final Map<String, PublishBackoff> publishBackoffs = new ConcurrentHashMap<>();
 
@@ -373,11 +388,30 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                      + "scheduling deferred purge to prevent stale-data re-hydration.", prefix);
             scheduleDeletePurgeRetry(db, prefix, 1);
         });
+        // A reap marker turns its truncate marker's purge into a reap after the next publish. One
+        // without a truncate marker is left by a crash between the two removals: drop it.
+        scanMarkers(pendingTruncateReapDir(), (db, prefix) -> {
+            if (hasPendingTruncateMarker(prefix)) {
+                truncateReapPending.put(prefix, dbNameOfPrefix(prefix));
+            } else {
+                removeMarker(pendingTruncateReapDir(), prefix);
+            }
+        });
         // Truncate purge intent is also crash-durable via local markers.
         scanMarkers(pendingTruncateDir(), (db, prefix) -> {
+            if (truncateReapPending.containsKey(prefix)) {
+                log.warn("Cloud startup: found pending truncate reap for prefix={} — stale SSTs "
+                         + "are deleted after the DB's next metadata publish, or offline if this "
+                         + "node does not open the DB.", prefix);
+                scheduleOfflineTruncateReap(truncateReapPending.get(prefix), prefix, 1,
+                                            epochOf(prefixEpochs, prefix), false,
+                                            OFFLINE_TRUNCATE_REAP_DELAY_MS);
+                return;
+            }
             log.warn("Cloud startup: found pending truncate marker for prefix={} — scheduling "
                      + "deferred purge retry.", prefix);
-            scheduleTruncatePurgeRetry(db, prefix);
+            // The session name, not the relative path: the retry's write epoch is keyed by it.
+            scheduleTruncatePurgeRetry(dbNameOfPrefix(prefix), prefix);
         });
         // Upload intent is not persisted across restarts, so any staging pin left by the previous
         // process is orphaned; the live SSTs it pinned are re-uploaded by startup backfill.
@@ -651,7 +685,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         }
         boolean truncatePurgeConfirmed = true;
         if (hasPendingTruncateMarker(prefix)) {
-            truncatePurgeConfirmed = tryCompletePendingTruncate(dbName, prefix);
+            truncatePurgeConfirmed = resolvePendingTruncateAtOpen(dbName, prefix);
         }
         if (!startupHydrationEnabled) {
             // Nothing is hydrated, but the DB will upload into this prefix: a leftover tombstone
@@ -696,6 +730,26 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                 dbName, prefix));
     }
 
+    /**
+     * Resolves a pending truncate at open. A pending reap is kept rather than purged: the prefix
+     * holds live post-truncate objects, and the publish in onDBCreated reaps the stale SSTs. The
+     * remote CURRENT may still name the cleared generation, so the open does not hydrate from it.
+     * Taking the prefix lock waits out an offline reap already in progress.
+     */
+    private boolean resolvePendingTruncateAtOpen(String dbName, String prefix) {
+        Object lock = pendingDeleteLocks.computeIfAbsent(prefix, k -> new Object());
+        synchronized (lock) {
+            if (!hasPendingTruncateMarker(prefix)) {
+                return true;
+            }
+            if (isTruncateReapPending(prefix)) {
+                truncateReapPending.put(prefix, dbName);
+                return false;
+            }
+        }
+        return tryCompletePendingTruncate(dbName, prefix);
+    }
+
     /** Best-effort inline purge of a pending truncate at open; re-arms the async retry on failure. */
     private boolean tryCompletePendingTruncate(String dbName, String prefix) {
         Object lock = pendingDeleteLocks.computeIfAbsent(prefix, k -> new Object());
@@ -704,7 +758,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                 return true;
             }
             if (purgeRemotePrefix(provider, dbName, prefix)) {
-                removeMarker(pendingTruncateDir(), prefix);
+                completeTruncatePurge(prefix);
+                clearTruncateReap(prefix);
                 return true;
             }
         }
@@ -911,6 +966,26 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         if (isActivelyTruncating(dbName) || isInTruncationGracePeriod(dbName)) {
             return; // the truncate purge supersedes the publish
         }
+        String reapPrefix = truncateReapPrefixOf(dbName);
+        if (reapPrefix != null) {
+            // A reap runs after a publish, so publish now: a DB that is not reopened on this node
+            // would otherwise never finish it. If that fails, reap offline once the DB is closed.
+            dirtyMetadataDbs.remove(dbName);
+            boolean published = false;
+            try {
+                published = syncMetadataSnapshotInline(provider, dbName);
+            } catch (RuntimeException e) {
+                log.warn("Cloud metadata publish before close failed for db={}: {}",
+                         dbName, e.getMessage());
+            }
+            if (!published || truncateReapPending.containsKey(reapPrefix)) {
+                // After a successful publish the remote metadata is current: reap only SSTs.
+                scheduleOfflineTruncateReap(dbName, reapPrefix, 1,
+                                            epochOf(prefixEpochs, reapPrefix), published,
+                                            TRUNCATE_PURGE_RETRY_BASE_MS);
+            }
+            return;
+        }
         if (!dirtyMetadataDbs.remove(dbName)) {
             return;
         }
@@ -977,6 +1052,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         }
 
         String prefix = dbPrefix(dbPath);
+        clearTruncateReap(prefix);
+        unpersistedTruncatePurges.remove(prefix);
         if (purgeRemotePrefix(provider, dbName, prefix)
             && deleteTombstone(provider, dbName, prefix)) {
             // Remote data and the sibling tombstone are gone: drop the local marker (cleanup done).
@@ -1025,6 +1102,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     @Override
     public void onDBTruncateBegin(String dbName, String dbPath) {
         truncatingDbs.add(dbName);
+        // The new truncate's prefix purge supersedes a reap left by an earlier one.
+        clearTruncateReap(dbPrefix(dbPath));
         syncTracker.clearDb(dbName);
         readMissAttemptTs.entrySet().removeIf(e -> e.getKey().startsWith(dbName + "::"));
         deferredSstDeletes.removeIf(t -> dbName.equals(t.dbName));
@@ -1035,11 +1114,13 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         truncatingDbs.add(dbName);
         try {
             String prefix = dbPrefix(dbPath);
+            unpersistedTruncatePurges.remove(prefix);
             try {
                 writeMarker(pendingTruncateDir(), prefix);
                 log.debug("Cloud pending-truncate marker persisted (fsync'd): db={}, prefix={}",
                           dbName, prefix);
             } catch (IOException e) {
+                unpersistedTruncatePurges.add(prefix);
                 log.error("Cloud truncate marker persist failed for db={}, prefix={}: {} — "
                           + "remote purge intent is not crash-durable until the next successful "
                           + "persist.",
@@ -1047,7 +1128,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
             }
             boolean purged = purgeRemotePrefix(provider, dbName, prefix);
             if (purged) {
-                removeMarker(pendingTruncateDir(), prefix);
+                completeTruncatePurge(prefix);
             }
             if (!purged) {
                 // Do NOT ignore a failed purge: stale remote SST/metadata still describe the
@@ -1071,6 +1152,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     private static final int MAX_TRUNCATE_PURGE_RETRIES = 5;
     /** Base backoff (ms) for truncate-purge retries; doubles each attempt up to a small cap. */
     private static final long TRUNCATE_PURGE_RETRY_BASE_MS = 500L;
+    /** Delay before a startup offline reap, so a DB opened during boot reaps via its publish. */
+    private static final long OFFLINE_TRUNCATE_REAP_DELAY_MS = 60_000L;
 
     /**
      * Retries a failed truncate purge asynchronously with capped exponential backoff. Each attempt
@@ -1100,30 +1183,43 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         try {
             metadataSyncScheduler.schedule(() -> {
                 boolean retryAgain = false;
+                boolean awaitPublish = false;
                 // Same per-prefix lock as the delete purge, so the epoch check and the purge are
                 // atomic with respect to an open/create at this prefix.
                 Object lock = pendingDeleteLocks.computeIfAbsent(prefix, k -> new Object());
                 synchronized (lock) {
-                    if (epochOf(dbWriteEpochs, dbName) != writeEpoch) {
-                        // The DB resumed writing after the truncate: the prefix now holds live
-                        // objects, which a purge would destroy. The stale ones are unreferenced
-                        // by the freshly published CURRENT/MANIFEST, so drop the purge intent
-                        // (also from disk, or a restart would re-drive it).
-                        removeMarker(pendingTruncateDir(), prefix);
-                        log.warn("Cloud truncate purge for db={} abandoned: the DB wrote new data "
-                                 + "after the truncate, so purging prefix '{}' would delete live "
-                                 + "objects.", dbName, prefix);
+                    if (!hasPendingTruncateMarker(prefix)
+                        && !unpersistedTruncatePurges.contains(prefix)) {
+                        // Already completed, e.g. by the purge when the DB opened.
                         return;
                     }
-                    if (purgeRemotePrefix(provider, dbName, prefix)) {
-                        removeMarker(pendingTruncateDir(), prefix);
+                    if (epochOf(dbWriteEpochs, dbName) != writeEpoch
+                        || truncateReapPending.containsKey(prefix)) {
+                        // The DB resumed writing after the truncate: the prefix now holds live
+                        // objects, which a purge would destroy. But the remote CURRENT still
+                        // points at the cleared generation, so a restore before the next publish
+                        // would bring the cleared data back. Keep the marker; the next successful
+                        // publish reaps the SSTs it does not reference and then drops it.
+                        markTruncateReapPending(dbName, prefix);
+                        log.warn("Cloud truncate purge for db={} stood down: the DB wrote new data "
+                                 + "after the truncate, so purging prefix '{}' would delete live "
+                                 + "objects. Unreferenced SSTs are deleted after the next "
+                                 + "metadata publish.", dbName, prefix);
+                        awaitPublish = true;
+                    } else if (purgeRemotePrefix(provider, dbName, prefix)) {
+                        completeTruncatePurge(prefix);
                         log.info("Cloud truncate purge succeeded on retry for db={} (attempt {})",
                                  dbName, attempt);
                     } else {
                         retryAgain = true;
                     }
                 }
-                if (retryAgain) {
+                if (awaitPublish) {
+                    // End the grace window so the post-truncate state is published promptly
+                    // (outside the prefix lock: an inline publish takes the metadata-sync lock).
+                    truncationTimes.remove(dbName);
+                    markMetadataDirty(dbName);
+                } else if (retryAgain) {
                     scheduleTruncatePurgeRetry(dbName, prefix, attempt + 1, writeEpoch);
                 }
             }, delay, TimeUnit.MILLISECONDS);
@@ -1144,6 +1240,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     static final String STAGING_DIR = ".cloud-upload-staging";
     /** Local subdirectory holding pending-remote-truncate purge markers. */
     static final String PENDING_TRUNCATE_DIR = ".cloud-pending-truncate";
+    /** Local subdirectory holding markers for truncate purges replaced by a post-publish reap. */
+    static final String PENDING_TRUNCATE_REAP_DIR = ".cloud-pending-truncate-reap";
     /** Max async retries for a failed delete purge before giving up (logging loudly). */
     private static final int MAX_DELETE_PURGE_RETRIES = 8;
     /** Base backoff (ms) for delete-purge retries; doubles each attempt up to a small cap. */
@@ -1195,6 +1293,198 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
 
     private Path pendingTruncateDir() {
         return Paths.get(primaryDataRoot, PENDING_TRUNCATE_DIR);
+    }
+
+    private Path pendingTruncateReapDir() {
+        return Paths.get(primaryDataRoot, PENDING_TRUNCATE_REAP_DIR);
+    }
+
+    /**
+     * Records that the truncate purge of {@code prefix} is replaced by a reap after the next
+     * publish. The reap marker is best-effort: without it a restart falls back to purging the
+     * prefix, which costs a re-upload of the live set but never resurrects cleared data.
+     */
+    private void markTruncateReapPending(String dbName, String prefix) {
+        truncateReapPending.put(prefix, dbName);
+        try {
+            writeMarker(pendingTruncateReapDir(), prefix);
+        } catch (IOException e) {
+            log.warn("Cloud truncate reap marker persist failed for db={}, prefix={}: {} — a "
+                     + "restart before the reap completes purges the prefix instead.",
+                     dbName, prefix, e.getMessage());
+        }
+    }
+
+    /** Records that the truncate purge owed for {@code prefix} is done (or superseded). */
+    private void completeTruncatePurge(String prefix) {
+        removeMarker(pendingTruncateDir(), prefix);
+        unpersistedTruncatePurges.remove(prefix);
+    }
+
+    /** Drops a pending truncate reap; call after the truncate marker is gone or superseded. */
+    private void clearTruncateReap(String prefix) {
+        truncateReapPending.remove(prefix);
+        removeMarker(pendingTruncateReapDir(), prefix);
+    }
+
+    private boolean isTruncateReapPending(String prefix) {
+        return truncateReapPending.containsKey(prefix) || hasTruncateReapMarker(prefix);
+    }
+
+    private String truncateReapPrefixOf(String dbName) {
+        for (Map.Entry<String, String> e : truncateReapPending.entrySet()) {
+            if (dbName.equals(e.getValue())) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Retries {@link #reapTruncateOffline} with the truncate-purge backoff. {@code prefixEpoch} is
+     * captured at scheduling; an open of the prefix since then hands the reap to its publish.
+     */
+    private void scheduleOfflineTruncateReap(String dbName, String prefix, int attempt,
+                                             long prefixEpoch, boolean keepMetadata,
+                                             long delayMs) {
+        if (attempt > MAX_TRUNCATE_PURGE_RETRIES) {
+            log.error("Cloud offline truncate reap for db={} still incomplete after {} attempt(s) "
+                      + "— prefix '{}' keeps stale SSTs until the DB is next opened here or this "
+                      + "node restarts.", dbName, MAX_TRUNCATE_PURGE_RETRIES, prefix);
+            return;
+        }
+        try {
+            metadataSyncScheduler.schedule(() -> {
+                if (!reapTruncateOffline(dbName, prefix, prefixEpoch, keepMetadata)) {
+                    int exp = Math.min(attempt, 30);
+                    long next = Math.min(TRUNCATE_PURGE_RETRY_BASE_MS * (1L << exp), 8_000L);
+                    scheduleOfflineTruncateReap(dbName, prefix, attempt + 1, prefixEpoch,
+                                                keepMetadata, next);
+                }
+            }, delayMs, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException e) {
+            // Shutting down: both markers stay on disk and the next startup reschedules the reap.
+            log.debug("Cloud offline truncate reap not scheduled for db={}: {}", dbName,
+                      e.getMessage());
+        }
+    }
+
+    /**
+     * Finishes a pending truncate reap for a DB this node does not have open. With no RocksDB
+     * session the live set is unknown, so the local SST files are the keep-set: every other direct
+     * child of the prefix is deleted, including the remote CURRENT/MANIFEST/OPTIONS that may still
+     * describe the cleared generation (the next open republishes them). With {@code keepMetadata}
+     * the remote metadata was published from the post-truncate DB, so only stale SSTs are deleted.
+     * Without a local DB directory nothing is live, so the prefix is purged. Returns {@code true}
+     * when done or handed to the open path, {@code false} to retry.
+     */
+    boolean reapTruncateOffline(String dbName, String prefix, long prefixEpoch,
+                                boolean keepMetadata) {
+        Object lock = pendingDeleteLocks.computeIfAbsent(prefix, k -> new Object());
+        synchronized (lock) {
+            if (epochOf(prefixEpochs, prefix) != prefixEpoch
+                || !truncateReapPending.containsKey(prefix)) {
+                return true;
+            }
+            if (!hasPendingTruncateMarker(prefix)) {
+                clearTruncateReap(prefix);
+                return true;
+            }
+            if (isDbOpen(dbName)) {
+                return false; // still closing
+            }
+            Path dbDir = localDbDirOf(prefix);
+            boolean done = dbDir == null
+                           ? purgeRemotePrefix(provider, dbName, prefix)
+                           : deleteRemoteObjectsMissingLocally(dbName, prefix, dbDir,
+                                                               keepMetadata);
+            if (!done) {
+                return false;
+            }
+            // Truncate marker first, as in reapPreTruncateSsts.
+            completeTruncatePurge(prefix);
+            clearTruncateReap(prefix);
+            syncTracker.clearDb(dbName);
+            if (dbDir == null || !keepMetadata) {
+                // The remote metadata is gone: the next open must publish, not skip as unchanged.
+                lastPublishedMetadataGeneration.remove(dbName);
+            }
+            log.info("Cloud offline truncate reap completed for db={} (prefix={})", dbName, prefix);
+            return true;
+        }
+    }
+
+    private boolean deleteRemoteObjectsMissingLocally(String dbName, String prefix, Path dbDir,
+                                                      boolean keepMetadata) {
+        Set<String> localSsts = new HashSet<>();
+        List<String> remoteKeys;
+        try (Stream<Path> files = Files.list(dbDir)) {
+            files.map(f -> f.getFileName().toString())
+                 .filter(n -> n.endsWith(".sst"))
+                 .forEach(localSsts::add);
+            remoteKeys = provider.listFiles(prefix.endsWith("/") ? prefix : prefix + "/");
+        } catch (IOException e) {
+            log.warn("Cloud offline truncate reap: listing failed for db={}, prefix={}: {}",
+                     dbName, prefix, e.getMessage());
+            return false;
+        }
+        boolean clean = true;
+        for (String remoteKey : remoteKeys) {
+            String base = remoteKey.substring(remoteKey.lastIndexOf('/') + 1);
+            if (localSsts.contains(base) || (keepMetadata && !base.endsWith(".sst"))
+                || !remoteKey.equals(toRelativeKey(joinPath(dbDir.toString(), base)))) {
+                continue; // kept, or not a direct child of this DB directory
+            }
+            try {
+                provider.deleteFile(remoteKey);
+            } catch (Exception e) {
+                clean = false;
+                log.debug("Cloud offline truncate reap: delete failed for {}: {}", remoteKey,
+                          e.getMessage());
+            }
+        }
+        return clean;
+    }
+
+    /** The local DB directory for {@code prefix} under any data root, or {@code null}. */
+    private Path localDbDirOf(String prefix) {
+        String relative;
+        try {
+            relative = stripStoreScope(prefix);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        for (String rootPath : allDataRoots) {
+            Path root = Paths.get(rootPath).toAbsolutePath().normalize();
+            Path dir = root.resolve(relative).normalize();
+            if (dir.startsWith(root) && !dir.equals(root) && Files.isDirectory(dir)) {
+                return dir;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The RocksDB name for a marker prefix found at startup. DB directories are named
+     * {@code <dbName>} or {@code <dbName>_<version>} (see RocksDBSession#findLatestDBPath), and
+     * {@link #inferDbNameFromPrefix} returns the whole relative path, which matches no session.
+     * Package-private for testing.
+     */
+    String dbNameOfPrefix(String prefix) {
+        String relative = inferDbNameFromPrefix(prefix);
+        String base = relative.substring(relative.lastIndexOf('/') + 1);
+        int versionSep = base.indexOf('_');
+        return versionSep > 0 ? base.substring(0, versionSep) : base;
+    }
+
+    /** Whether {@code dbName} has an open session. Package-private as a test seam. */
+    boolean isDbOpen(String dbName) {
+        RocksDBSession session = RocksDBFactory.getInstance().queryGraphDB(dbName);
+        if (session == null) {
+            return false;
+        }
+        session.close();
+        return true;
     }
 
     private static void deleteIfExistsQuietly(Path path, String context) {
@@ -1280,6 +1570,11 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     /** Whether a local pending-remote-truncate marker exists for {@code prefix}. */
     boolean hasPendingTruncateMarker(String prefix) {
         return Files.exists(markerPath(pendingTruncateDir(), prefix));
+    }
+
+    /** Whether a local truncate-reap marker exists for {@code prefix}. */
+    boolean hasTruncateReapMarker(String prefix) {
+        return Files.exists(markerPath(pendingTruncateReapDir(), prefix));
     }
 
     /**
@@ -1788,11 +2083,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         // is absent from dbSessionMap, so every superseded-SST removal is silently skipped and the
         // object leaks in cloud forever (with an endless deferred-delete retry loop).
         String dbName = resolveDbName(dbNameOrPath, filePath);
-        // Skip file deletion during truncation or grace period; the entire DB prefix will be purged anyway
-        if (isActivelyTruncating(dbName) || isInTruncationGracePeriod(dbName)) {
-            log.debug("Skipping delete during truncation: db={}, path={}", dbName, filePath);
-            return;
-        }
+        // Queued even while the DB truncates or is in its grace window: the prefix purge is not
+        // guaranteed (a retry can be abandoned once the DB writes again), and a dropped delete
+        // would leak the object. processDeferredSstDeletes holds truncating DBs until the window
+        // ends; a truncate keeps the DB, so its SST file numbers are not reused.
         if (deferredSstDeletes.add(new DeferredSstDelete(dbName, filePath))) {
             log.debug("Cloud delete queued: db={}, cf={}, path={}", dbName, cfName, filePath);
             updateDeferredSstDeleteWarnState();
@@ -2238,7 +2532,11 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                 return false;
             }
             try {
-                return publishSnapshotWithGenerationCheck(provider, dbName, snapshot);
+                boolean published = publishSnapshotWithGenerationCheck(provider, dbName, snapshot);
+                if (published) {
+                    reapPreTruncateSsts(provider, dbName, snapshot);
+                }
+                return published;
             } finally {
                 snapshot.cleanup();
             }
@@ -2377,6 +2675,72 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     private void uploadMetaFile(CloudStorageProvider provider, String dbDir, String tempDir,
                                 String fileName) throws IOException {
         provider.uploadFile(joinPath(tempDir, fileName), toRelativeKey(joinPath(dbDir, fileName)));
+    }
+
+    /**
+     * Finishes a truncate purge that stood down because the DB wrote again (see
+     * {@link #truncateReapPending}). Runs right after {@code snapshot} was published, under the
+     * metadata-sync lock: deletes every remote SST of the DB that the published MANIFEST does not
+     * reference and the DB no longer holds, then drops the pending-truncate marker. The remote
+     * listing is taken before the live set is read, so a listed SST written after the truncate is
+     * either live (kept) or already superseded. On any failure the marker stays and the next
+     * publish tries again.
+     */
+    private void reapPreTruncateSsts(CloudStorageProvider provider, String dbName,
+                                     MetadataSnapshot snapshot) {
+        String dbDir = snapshot.getDbDir();
+        String prefix = dbPrefix(dbDir);
+        if (!dbName.equals(truncateReapPending.get(prefix))) {
+            return;
+        }
+        List<String> remoteKeys;
+        try {
+            remoteKeys = provider.listFiles(prefix.endsWith("/") ? prefix : prefix + "/");
+        } catch (IOException e) {
+            log.warn("Cloud truncate reap: list failed for db={}, prefix={}: {}",
+                     dbName, prefix, e.getMessage());
+            return;
+        }
+        Set<String> keep = new HashSet<>(snapshot.getSstFileNames());
+        for (LiveSstFile live : currentLiveSstFiles(dbName)) {
+            keep.add(new File(live.getAbsolutePath()).getName());
+        }
+        boolean clean = true;
+        int deleted = 0;
+        for (String remoteKey : remoteKeys) {
+            String base = remoteKey.substring(remoteKey.lastIndexOf('/') + 1);
+            if (!base.endsWith(".sst") || keep.contains(base)) {
+                continue;
+            }
+            String localPath = joinPath(dbDir, base);
+            if (!remoteKey.equals(toRelativeKey(localPath))) {
+                continue; // not a direct child of this DB directory
+            }
+            try {
+                provider.deleteFile(remoteKey);
+                syncTracker.clearConfirmed(dbName, localPath);
+                deleted++;
+            } catch (Exception e) {
+                clean = false;
+                log.debug("Cloud truncate reap: delete failed for {}: {}", remoteKey, e.getMessage());
+            }
+        }
+        if (!clean) {
+            log.warn("Cloud truncate reap incomplete for db={} (prefix={}): marker kept, retried "
+                     + "on the next metadata publish", dbName, prefix);
+            return;
+        }
+        Object lock = pendingDeleteLocks.computeIfAbsent(prefix, k -> new Object());
+        synchronized (lock) {
+            if (truncateReapPending.remove(prefix, dbName)) {
+                // Truncate marker first: a crash between the two must not leave the truncate
+                // marker without its reap marker, or the restart would purge the live prefix.
+                completeTruncatePurge(prefix);
+                removeMarker(pendingTruncateReapDir(), prefix);
+            }
+        }
+        log.info("Cloud truncate reap completed for db={}: deleted {} pre-truncate SST(s)",
+                 dbName, deleted);
     }
 
     /**

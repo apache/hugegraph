@@ -740,16 +740,20 @@ public final class RocksDBFactory {
      * @return live SST files (possibly empty); never {@code null}
      */
     public List<LiveSstFile> getLiveSstFiles(String dbName) {
-        RocksDBSession session = dbSessionMap.get(dbName);
+        // Hold a session reference so a concurrent release or destroy cannot close the DB
+        // underneath the native call (the session also reads under its cf-handle read lock).
+        RocksDBSession session = queryGraphDB(dbName);
         if (session == null) {
             return List.of();
         }
-        RocksDB db = session.getDB();
-        if (db == null) {
-            return List.of();
+        List<LiveFileMetaData> liveFiles;
+        try {
+            liveFiles = session.getLiveFilesMetaData();
+        } finally {
+            session.close();
         }
         List<LiveSstFile> result = new ArrayList<>();
-        for (LiveFileMetaData md : db.getLiveFilesMetaData()) {
+        for (LiveFileMetaData md : liveFiles) {
             String dir = md.path();
             String name = md.fileName();
             if (name == null || !name.endsWith(".sst")) {

@@ -69,8 +69,10 @@ logging:
 # ---------------------------------------------------------------------------
 # Cloud Storage (pluggable provider – disabled by default)
 # ---------------------------------------------------------------------------
-# To enable, set enabled=true and add the desired provider JAR to the
-# classpath (e.g. hg-store-cloud-s3-*.jar for Amazon S3 / S3-compatible).
+# To enable, build the distribution with the opt-in -Ps3-cloud-storage profile (it bundles
+# hg-store-cloud-s3 and the AWS SDK into the node jar) and set enabled=true. The default build
+# ships no provider, and a provider jar added to the launch classpath cannot load (see "Enabling
+# S3 on the stock distribution" in hugegraph-store/README.md).
 #
 # cloud:
 #   storage:

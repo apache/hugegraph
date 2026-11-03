@@ -58,6 +58,7 @@ import org.rocksdb.Env;
 import org.rocksdb.FlushOptions;
 import org.rocksdb.InfoLogLevel;
 import org.rocksdb.IngestExternalFileOptions;
+import org.rocksdb.LiveFileMetaData;
 import org.rocksdb.MutableColumnFamilyOptionsInterface;
 import org.rocksdb.MutableDBOptionsInterface;
 import org.rocksdb.Options;
@@ -848,6 +849,23 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         }
         log.info("saved snapshot into {}, time cost {} ms", snapshotPath,
                  System.currentTimeMillis() - startTime);
+    }
+
+    /**
+     * Returns RocksDB's live-file metadata, or an empty list once the DB is closed. Read under the
+     * cf-handle read lock: shutdown() takes the write lock before closing rocksDB, so the native
+     * handle cannot be closed during the call.
+     */
+    List<LiveFileMetaData> getLiveFilesMetaData() {
+        cfHandleLock.readLock().lock();
+        try {
+            if (this.closed || this.shutdown.get() || this.rocksDB == null) {
+                return Collections.emptyList();
+            }
+            return this.rocksDB.getLiveFilesMetaData();
+        } finally {
+            cfHandleLock.readLock().unlock();
+        }
     }
 
     /**

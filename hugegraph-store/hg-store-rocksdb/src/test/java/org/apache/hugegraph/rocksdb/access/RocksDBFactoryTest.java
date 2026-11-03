@@ -1381,7 +1381,6 @@ public class RocksDBFactoryTest {
     @Test
     public void testGetLiveSstFilesJoinsPathsAndSkipsNonSstEntries() throws Exception {
         String dbName = "livesst-" + System.nanoTime();
-        RocksDB db = mock(RocksDB.class);
         List<LiveFileMetaData> metadata = List.of(
                 liveFile("/data/db", "/000001.sst", "default"),
                 liveFile("/data/db/", "/000002.sst", "default"),
@@ -1389,9 +1388,9 @@ public class RocksDBFactoryTest {
                 liveFile("/data/db/", "000004.sst", "g+v"),
                 liveFile("/data/db", "/MANIFEST-000005", "default"),
                 liveFile("/data/db", null, "default"));
-        when(db.getLiveFilesMetaData()).thenReturn(metadata);
         RocksDBSession session = mock(RocksDBSession.class);
-        when(session.getDB()).thenReturn(db);
+        when(session.clone()).thenReturn(session);
+        when(session.getLiveFilesMetaData()).thenReturn(metadata);
 
         RocksDBFactory factory = RocksDBFactory.getInstance();
         Map<String, RocksDBSession> sessions = sessionMap(factory);
@@ -1406,6 +1405,8 @@ public class RocksDBFactoryTest {
             }
             assertEquals("default", files.get(0).getCfName());
             assertEquals("g+v", files.get(2).getCfName());
+            // The session reference taken for the read is released.
+            verify(session).close();
         } finally {
             sessions.remove(dbName);
         }

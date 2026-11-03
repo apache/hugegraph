@@ -30,9 +30,11 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -2281,16 +2283,41 @@ public class CloudStorageEventListenerTest {
     }
 
     @Test
-    public void truncatePurgeRetry_isAbandonedOnceTheDbWritesAgain() throws Exception {
+    public void truncatePurgeRetry_standsDownAndReapsStaleSstsAfterPostTruncatePublish()
+            throws Exception {
         Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-retry");
         Path dbDir = tmpRoot.resolve("g3");
         Files.createDirectories(dbDir);
         Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
         ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
         provider.putRemoteFile("g3/000001.sst", "stale".getBytes());
-        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
-                provider, List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(),
-                null, 60_000L);
+        AtomicBoolean publishOk = new AtomicBoolean(false);
+        CloudStorageEventListener l = new CloudStorageEventListener(provider,
+                List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(), null,
+                60_000L) {
+            @Override
+            List<LiveSstFile> currentLiveSstFiles(String dbName) {
+                return List.of(new LiveSstFile(newSst.toString(), "default"));
+            }
+
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                try {
+                    Path temp = Files.createTempDirectory("hgstore-test-truncate-snap");
+                    return new MetadataSnapshot(dbDir.toString(), temp.toString(), "CURRENT",
+                                                "MANIFEST-000020", List.of(),
+                                                List.of("000010.sst"));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            boolean uploadMetadataSnapshot(CloudStorageProvider p, String dbName,
+                                           MetadataSnapshot snapshot) {
+                return publishOk.get();
+            }
+        };
         try {
             provider.failPurge = true;
             l.onDBTruncated("g3", dbDir.toString());
@@ -2301,10 +2328,392 @@ public class CloudStorageEventListenerTest {
             provider.failPurge = false;
             provider.putRemoteFile("g3/000010.sst", "new".getBytes());
 
-            waitForCondition(() -> !l.hasPendingTruncateMarker("g3"),
-                             "abandoned retry must drop the pending-truncate marker");
+            // Standing down ends the grace window well before it would lapse on its own.
+            waitForCondition(() -> !l.isInTruncationGracePeriodForTest("g3"),
+                             "the retry must stand down once the DB writes again");
             assertTrue(provider.remoteFiles.containsKey("g3/000010.sst"),
                        "A truncate purge retry must not delete objects written after the truncate");
+            assertTrue(l.hasPendingTruncateMarker("g3"),
+                       "the marker must survive until a post-truncate publish succeeds");
+
+            assertFalse(l.syncMetadataSnapshotInline(provider, "g3"));
+            assertTrue(provider.deletes.isEmpty(), "nothing is reaped before a publish succeeds");
+            assertTrue(l.hasPendingTruncateMarker("g3"));
+
+            publishOk.set(true);
+            assertTrue(l.syncMetadataSnapshotInline(provider, "g3"));
+            assertEquals(List.of("g3/000001.sst"), provider.deletes,
+                         "only the SST the published MANIFEST does not reference is reaped");
+            assertFalse(l.hasPendingTruncateMarker("g3"),
+                        "the marker is dropped once the stale SSTs are reaped");
+        } finally {
+            l.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void truncateReap_survivesRestartWithoutPurgingTheLivePrefix() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-reap-restart");
+        Path dbDir = tmpRoot.resolve("g9");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g9/000001.sst", "stale".getBytes());
+        AtomicBoolean publishOk = new AtomicBoolean(false);
+        CloudStorageEventListener first =
+                newReapListener(provider, tmpRoot, dbDir, newSst, publishOk);
+        try {
+            provider.failPurge = true;
+            first.onDBTruncated("g9", dbDir.toString());
+            first.onTableFileCreated("g9", "default", newSst.toString(), Files.size(newSst));
+            provider.failPurge = false;
+            provider.putRemoteFile("g9/000010.sst", "new".getBytes());
+            waitForCondition(() -> !first.isInTruncationGracePeriodForTest("g9"),
+                             "the retry must stand down once the DB writes again");
+            assertTrue(first.hasTruncateReapMarker("g9"), "the reap must be persisted");
+        } finally {
+            first.close();
+        }
+
+        // Restart: neither the startup scan nor the open may purge the live prefix.
+        CloudStorageEventListener second =
+                newReapListener(provider, tmpRoot, dbDir, newSst, publishOk);
+        try {
+            second.onDBOpening("g9", dbDir.toString());
+            Thread.sleep(1_000L); // past the first truncate-retry backoff
+            assertTrue(provider.deletes.isEmpty(), "a restart must not purge the prefix");
+            assertTrue(provider.remoteFiles.containsKey("g9/000010.sst"));
+            assertTrue(second.hasPendingTruncateMarker("g9"));
+
+            publishOk.set(true);
+            assertTrue(second.syncMetadataSnapshotInline(provider, "g9"));
+            assertEquals(List.of("g9/000001.sst"), provider.deletes,
+                         "the post-restart publish reaps only the stale SST");
+            assertFalse(second.hasPendingTruncateMarker("g9"));
+            assertFalse(second.hasTruncateReapMarker("g9"));
+        } finally {
+            second.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    /** Truncates {@code db} with a failing purge, writes again, and waits for the stand-down. */
+    private void standDownTruncatePurge(CloudStorageEventListener l,
+                                        ToggleablePurgeProvider provider, String db,
+                                        Path dbDir, Path newSst) throws Exception {
+        provider.failPurge = true;
+        l.onDBTruncated(db, dbDir.toString());
+        l.onTableFileCreated(db, "default", newSst.toString(), Files.size(newSst));
+        provider.failPurge = false;
+        provider.putRemoteFile(db + "/" + newSst.getFileName(), "new".getBytes());
+        waitForCondition(() -> !l.isInTruncationGracePeriodForTest(db),
+                         "the retry must stand down once the DB writes again");
+        assertTrue(l.hasTruncateReapMarker(db));
+    }
+
+    @Test
+    public void offlineTruncateReap_keepsLocalSstsAndDropsStaleObjectsAndMetadata()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-offline-reap");
+        Path dbDir = tmpRoot.resolve("g10");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g10/000001.sst", "stale".getBytes());
+        provider.putRemoteFile("g10/CURRENT", "MANIFEST-000005\n".getBytes());
+        provider.putRemoteFile("g10/MANIFEST-000005", "old".getBytes());
+        AtomicBoolean publishOk = new AtomicBoolean(false);
+        CloudStorageEventListener first =
+                newReapListener(provider, tmpRoot, dbDir, newSst, publishOk);
+        try {
+            standDownTruncatePurge(first, provider, "g10", dbDir, newSst);
+        } finally {
+            first.close();
+        }
+
+        AtomicBoolean dbOpen = new AtomicBoolean(true);
+        CloudStorageEventListener second =
+                newReapListener(provider, tmpRoot, dbDir, newSst, publishOk, dbOpen);
+        try {
+            assertFalse(second.reapTruncateOffline("g10", "g10", 0L, false),
+                        "an open DB is retried, not reaped offline");
+            assertTrue(provider.deletes.isEmpty());
+
+            dbOpen.set(false);
+            assertTrue(second.reapTruncateOffline("g10", "g10", 0L, false));
+            assertEquals(Set.of("g10/000001.sst", "g10/CURRENT", "g10/MANIFEST-000005"),
+                         new HashSet<>(provider.deletes),
+                         "every remote object except the local SSTs is removed");
+            assertFalse(second.hasPendingTruncateMarker("g10"));
+            assertFalse(second.hasTruncateReapMarker("g10"));
+        } finally {
+            second.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void offlineTruncateReap_keepsPublishedMetadataWhenAskedTo() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-offline-reap-keepmeta");
+        Path dbDir = tmpRoot.resolve("g14");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g14/000001.sst", "stale".getBytes());
+        provider.putRemoteFile("g14/CURRENT", "MANIFEST-000020\n".getBytes());
+        provider.putRemoteFile("g14/MANIFEST-000020", "new".getBytes());
+        CloudStorageEventListener l =
+                newReapListener(provider, tmpRoot, dbDir, newSst, new AtomicBoolean(false));
+        try {
+            standDownTruncatePurge(l, provider, "g14", dbDir, newSst);
+            // Scheduled after a publish at close succeeded: the remote metadata is current.
+            assertTrue(l.reapTruncateOffline("g14", "g14", 0L, true));
+            assertEquals(List.of("g14/000001.sst"), provider.deletes,
+                         "only the stale SST is removed; the published metadata stays");
+            assertTrue(provider.remoteFiles.containsKey("g14/CURRENT"));
+            assertFalse(l.hasPendingTruncateMarker("g14"));
+            assertFalse(l.hasTruncateReapMarker("g14"));
+        } finally {
+            l.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void startupTruncatePurgeRetry_standsDownAfterTheOpenPurged() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-startup-truncate-retry");
+        // Real layout: the session is named "00015" while its prefix is "db/00015".
+        Path dbDir = tmpRoot.resolve("db").resolve("00015");
+        Files.createDirectories(dbDir);
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("db/00015/000001.sst", "stale".getBytes());
+        CloudStorageEventListener first = CloudStorageTestFactory.newListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(),
+                null, 60_000L);
+        try {
+            provider.failPurge = true;
+            first.onDBTruncated("00015", dbDir.toString());
+            assertTrue(first.hasPendingTruncateMarker("db/00015"));
+        } finally {
+            first.close();
+        }
+
+        provider.failPurge = false;
+        CloudStorageEventListener second = CloudStorageTestFactory.newListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(),
+                null, 60_000L);
+        try {
+            // The open purges inline, then the DB writes again before the startup retry fires.
+            second.onDBOpening("00015", dbDir.toString());
+            assertFalse(second.hasPendingTruncateMarker("db/00015"));
+            provider.putRemoteFile("db/00015/000010.sst", "new".getBytes());
+            Thread.sleep(1_500L); // past the first truncate-retry backoff
+
+            assertTrue(provider.remoteFiles.containsKey("db/00015/000010.sst"),
+                       "a completed purge must not be re-run over the live prefix");
+            assertFalse(second.hasTruncateReapMarker("db/00015"),
+                        "a completed purge must not turn into a reap");
+        } finally {
+            second.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void truncatePurgeRetry_runsWhenTheMarkerCouldNotBeWritten() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-nomarker");
+        Path dbDir = tmpRoot.resolve("g16");
+        Files.createDirectories(dbDir);
+        // A file where the marker directory belongs makes every marker write fail.
+        Files.write(tmpRoot.resolve(CloudStorageEventListener.PENDING_TRUNCATE_DIR), new byte[0]);
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g16/000001.sst", "stale".getBytes());
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(),
+                null, 60_000L);
+        try {
+            provider.failPurge = true;
+            l.onDBTruncated("g16", dbDir.toString());
+            assertFalse(l.hasPendingTruncateMarker("g16"));
+            provider.failPurge = false;
+            waitForCondition(() -> !provider.remoteFiles.containsKey("g16/000001.sst"),
+                             "the retry must still purge when the marker was never written");
+        } finally {
+            l.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void dbNameOfPrefix_matchesTheRocksDbSessionName() {
+        assertEquals("00010", listener.dbNameOfPrefix("db/00010"));
+        assertEquals("00010", listener.dbNameOfPrefix("db/00010_7"));
+        assertEquals("hgstore-metadata", listener.dbNameOfPrefix("hgstore-metadata"));
+    }
+
+    @Test
+    public void offlineTruncateReap_purgesThePrefixWhenTheLocalDbIsGone() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-offline-reap-gone");
+        Path dbDir = tmpRoot.resolve("g11");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g11/000001.sst", "stale".getBytes());
+        CloudStorageEventListener first =
+                newReapListener(provider, tmpRoot, dbDir, newSst, new AtomicBoolean(false));
+        try {
+            standDownTruncatePurge(first, provider, "g11", dbDir, newSst);
+        } finally {
+            first.close();
+        }
+        deleteRecursively(dbDir.toFile());
+
+        CloudStorageEventListener second =
+                newReapListener(provider, tmpRoot, dbDir, newSst, new AtomicBoolean(false));
+        try {
+            assertTrue(second.reapTruncateOffline("g11", "g11", 0L, false));
+            assertTrue(provider.remoteFiles.keySet().stream().noneMatch(k -> k.startsWith("g11/")),
+                       "with no local DB nothing is live, so the prefix is purged");
+            assertFalse(second.hasPendingTruncateMarker("g11"));
+            assertFalse(second.hasTruncateReapMarker("g11"));
+        } finally {
+            second.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void offlineTruncateReap_standsDownOnceTheDbIsOpened() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-offline-reap-open");
+        Path dbDir = tmpRoot.resolve("g12");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g12/000001.sst", "stale".getBytes());
+        CloudStorageEventListener first =
+                newReapListener(provider, tmpRoot, dbDir, newSst, new AtomicBoolean(false));
+        try {
+            standDownTruncatePurge(first, provider, "g12", dbDir, newSst);
+        } finally {
+            first.close();
+        }
+
+        CloudStorageEventListener second =
+                newReapListener(provider, tmpRoot, dbDir, newSst, new AtomicBoolean(false));
+        try {
+            second.onDBOpening("g12", dbDir.toString());
+            assertTrue(second.reapTruncateOffline("g12", "g12", 0L, false),
+                       "an open since scheduling hands the reap to the open's publish");
+            assertTrue(provider.deletes.isEmpty());
+            assertTrue(second.hasPendingTruncateMarker("g12"));
+            assertTrue(second.hasTruncateReapMarker("g12"));
+        } finally {
+            second.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void onDBClosing_publishesAndReapsAPendingTruncateReap() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-close-reap");
+        Path dbDir = tmpRoot.resolve("g13");
+        Files.createDirectories(dbDir);
+        Path newSst = Files.write(dbDir.resolve("000010.sst"), "new".getBytes());
+        ToggleablePurgeProvider provider = new ToggleablePurgeProvider();
+        provider.putRemoteFile("g13/000001.sst", "stale".getBytes());
+        AtomicBoolean publishOk = new AtomicBoolean(false);
+        CloudStorageEventListener l = newReapListener(provider, tmpRoot, dbDir, newSst, publishOk);
+        try {
+            standDownTruncatePurge(l, provider, "g13", dbDir, newSst);
+            publishOk.set(true);
+            l.onDBClosing("g13");
+            assertEquals(List.of("g13/000001.sst"), provider.deletes);
+            assertFalse(l.hasPendingTruncateMarker("g13"));
+            assertFalse(l.hasTruncateReapMarker("g13"));
+        } finally {
+            l.close();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    private static CloudStorageEventListener newReapListener(CloudStorageProvider provider,
+                                                             Path tmpRoot, Path dbDir,
+                                                             Path liveSst,
+                                                             AtomicBoolean publishOk) {
+        return newReapListener(provider, tmpRoot, dbDir, liveSst, publishOk,
+                               new AtomicBoolean(false));
+    }
+
+    private static CloudStorageEventListener newReapListener(CloudStorageProvider provider,
+                                                             Path tmpRoot, Path dbDir,
+                                                             Path liveSst,
+                                                             AtomicBoolean publishOk,
+                                                             AtomicBoolean dbOpen) {
+        return new CloudStorageEventListener(provider, List.of(tmpRoot.toString()), false, 0L,
+                                             null, new CloudSyncTracker(), null, 60_000L) {
+            @Override
+            boolean isDbOpen(String dbName) {
+                return dbOpen.get();
+            }
+
+            @Override
+            List<LiveSstFile> currentLiveSstFiles(String dbName) {
+                return List.of(new LiveSstFile(liveSst.toString(), "default"));
+            }
+
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                try {
+                    Path temp = Files.createTempDirectory("hgstore-test-truncate-snap");
+                    return new MetadataSnapshot(dbDir.toString(), temp.toString(), "CURRENT",
+                                                "MANIFEST-000020", List.of(),
+                                                List.of(liveSst.getFileName().toString()));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            boolean uploadMetadataSnapshot(CloudStorageProvider p, String dbName,
+                                           MetadataSnapshot snapshot) {
+                return publishOk.get();
+            }
+        };
+    }
+
+    @Test
+    public void onTableFileDeleted_queuesDeleteDuringTruncationGracePeriod() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-truncate-delete");
+        Path dbDir = tmpRoot.resolve("g8");
+        Files.createDirectories(dbDir);
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageEventListener l = new CloudStorageEventListener(provider,
+                List.of(tmpRoot.toString()), false, 0L, null, new CloudSyncTracker(), null,
+                60_000L) {
+            @Override
+            List<LiveSstFile> currentLiveSstFiles(String dbName) {
+                return List.of();
+            }
+
+            @Override
+            boolean syncMetadataSnapshotInline(CloudStorageProvider p, String dbName) {
+                return true;
+            }
+        };
+        try {
+            l.onDBTruncateBegin("g8", dbDir.toString());
+            l.onDBTruncated("g8", dbDir.toString());
+            assertTrue(l.isInTruncationGracePeriodForTest("g8"));
+
+            l.onTableFileDeleted("g8", "default", dbDir.resolve("000005.sst").toString());
+            l.processDeferredSstDeletes();
+            assertFalse(provider.deletes.contains("g8/000005.sst"),
+                        "the delete is held while the DB is in its grace window");
+
+            // The 5 s grace window lapses; the queued delete then runs instead of leaking.
+            waitForCondition(() -> provider.deletes.contains("g8/000005.sst"), 10_000L,
+                             "a delete queued in the grace window must run after it ends");
         } finally {
             l.close();
             deleteRecursively(tmpRoot.toFile());

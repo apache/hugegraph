@@ -33,7 +33,8 @@
 
     <description>
         S3 cloud storage provider plugin for HugeGraph Store.
-        Add this JAR to the classpath and set cloud.storage.provider=s3 to enable S3 offload.
+        Bundled into the hg-store-node jar by the opt-in -Ps3-cloud-storage build profile; set
+        cloud.storage.provider=s3 to enable S3 offload. A copy on the launch classpath cannot load.
     </description>
 
     <properties>
