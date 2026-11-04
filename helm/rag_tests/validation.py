@@ -49,6 +49,9 @@ class RagValidationMixin:
             ({"probes": {"readiness": {"periodSeconds": "5"}}}, "readiness.periodSeconds"),
             ({"probes": {"startup": {"successThreshold": 2}}}, "startup.successThreshold"),
             ({"probes": {"liveness": {"successThreshold": 2}}}, "liveness.successThreshold"),
+            ({"terminationGracePeriodSeconds": -10}, "terminationGracePeriodSeconds"),
+            ({"probes": {"readiness": {"path": "health"}}}, "readiness.path"),
+            ({"probes": {"startup": {"path": ""}}}, "startup.path"),
             ({"port": 0}, "rag.port"),
             ({"port": 8001.5}, "rag.port"),
             ({"replicas": 0}, "rag.replicas"),
@@ -136,9 +139,12 @@ class RagValidationMixin:
 
     def test_partial_probe_options_keep_defaults(self):
         workload = self.deployment(self.documents({
-            "probes": {"readiness": {"initialDelaySeconds": 0, "periodSeconds": 1}},
+            "probes": {"readiness": {"path": "/health", "initialDelaySeconds": 0, "periodSeconds": 1}},
+            "terminationGracePeriodSeconds": 0,
         }, use_profile=False))
+        self.assertEqual(0, pod(workload)["spec"]["terminationGracePeriodSeconds"])
         probe = pod(workload)["spec"]["containers"][0]["readinessProbe"]
+        self.assertEqual("/health", probe["httpGet"]["path"])
         self.assertEqual(0, probe["initialDelaySeconds"])
         self.assertEqual(1, probe["periodSeconds"])
         self.assertGreaterEqual(probe["failureThreshold"], 1)

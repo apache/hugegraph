@@ -256,6 +256,10 @@
                     "type": "boolean"
                   }
                 }
+              },
+              "terminationGracePeriodSeconds": {
+                "type": "integer",
+                "minimum": 0
               }
             }
           }
@@ -560,7 +564,8 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^/"
         },
         "periodSeconds": {
           "$ref": "#/definitions/probe/properties/periodSeconds"

@@ -51,8 +51,9 @@ When a process override changes a graph, model or vector endpoint, supply its
 matching credentials in the deployment. Credentials for another file endpoint
 are ignored with a warning; equivalent endpoints keep their file credentials.
 Startup does not modify `.env` or rewrite an existing prompt file. UI saves write
-only changed settings, and reject changes to environment-managed fields. Injected
-Secrets and derived defaults are not copied into `.env`.
+changed settings and the target paired with a newly saved user credential; they
+reject changes to environment-managed fields. Injected Secrets and unrelated
+derived defaults are not copied into `.env`.
 
 Change deployment configuration outside the container, then restart RAG:
 
@@ -172,3 +173,12 @@ In strict mode, NetworkPolicy permits DNS and the same-release Server. Configure
 model-provider destinations and the ingress controller through
 `rag.networkPolicy.extraEgress` and `extraIngress`. Enforcement requires a
 NetworkPolicy-capable CNI.
+
+RAG probe paths must start with `/`; `terminationGracePeriodSeconds` must be a
+non-negative integer. Partial probe overrides keep the remaining defaults.
+A process alias such as `OPENAI_BASE_URL` overrides a specific value in the file;
+specific names win over aliases within the same source. A process endpoint
+without a stored credential leaves credential input editable. Saving a user
+credential also records its effective target for future pairing checks; managed
+keys are never exported. LiteLLM models participate in target ownership because
+their prefixes select the provider.
