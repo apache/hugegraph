@@ -34,6 +34,13 @@ use `latest` images; pin component `image.digest` values when needed.
 The source installation and configuration examples below assume a repository
 checkout and commands run from its root.
 
+The [stable bootstrap configuration](docs/operations.md#stable-bootstrap-topology)
+always records initialization inputs separately from node replicas. Use a PD
+image with separate bootstrap and runtime quorum checks. PD membership changes,
+Store admission and safe retirement remain manual operations. Growing from one
+Store to three does not change existing data from RF=1 to RF=3; replica policy
+is configured independently with `pd.partition.defaultShardCount`.
+
 ## Install from source and open Hubble
 
 ```bash

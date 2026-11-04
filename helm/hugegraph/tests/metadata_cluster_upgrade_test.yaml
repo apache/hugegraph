@@ -18,8 +18,17 @@
 suite: Metadata namespace changes protect existing Server metadata
 templates:
   - server-deployment.yaml
+set:
+  bootstrap.pdReplicas: 3
+  bootstrap.storeReplicas: 3
+  bootstrap.initialStoreCount: 3
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     "apps/v1/Deployment":
       gvr:
         group: apps
@@ -33,6 +42,11 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: unrelated-data
+        namespace: NAMESPACE
     - apiVersion: apps/v1
       kind: StatefulSet
       metadata:

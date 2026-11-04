@@ -214,6 +214,126 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         assertEquals(1, third.closes);
     }
 
+    @Test
+    public void testMultiListCloseFailureStillClosesRemainingSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        RowIterator third = singleRow(3);
+        IllegalStateException firstFailure = new IllegalStateException("first close failed");
+        IllegalStateException thirdFailure = new IllegalStateException("third close failed");
+        first.closeFailure = firstFailure;
+        third.closeFailure = thirdFailure;
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second, third));
+
+        assertSame(firstFailure, assertThrows(IllegalStateException.class, iterator::close));
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertEquals(1, third.closes);
+        assertEquals(List.of(thirdFailure), Arrays.asList(firstFailure.getSuppressed()));
+        assertTrue(iterator.getIterators().isEmpty());
+        assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void testMultiListCloseFailureDuringIterationStillClosesRemainingSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        IllegalStateException firstFailure = new IllegalStateException("first close failed");
+        IllegalStateException secondFailure = new IllegalStateException("second close failed");
+        first.closeFailure = firstFailure;
+        second.closeFailure = secondFailure;
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second));
+        assertTrue(iterator.hasNext());
+
+        assertSame(firstFailure, assertThrows(IllegalStateException.class, iterator::close));
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertEquals(List.of(secondFailure), Arrays.asList(firstFailure.getSuppressed()));
+        assertTrue(iterator.getIterators().isEmpty());
+    }
+
+    @Test
+    public void testMultiListCloseErrorStillClosesRemainingSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        RowIterator third = singleRow(3);
+        LinkageError firstError = new LinkageError("first close failed");
+        IllegalStateException secondFailure = new IllegalStateException("second close failed");
+        first.closeError = firstError;
+        second.closeFailure = secondFailure;
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second, third));
+
+        assertSame(firstError, assertThrows(LinkageError.class, iterator::close));
+
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertEquals(1, third.closes);
+        assertEquals(List.of(secondFailure), Arrays.asList(firstError.getSuppressed()));
+        assertTrue(iterator.getIterators().isEmpty());
+
+        iterator.close();
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+        assertEquals(1, third.closes);
+    }
+
+    @Test
+    public void testMultiListNextWithoutHasNext() {
+        MultiListIterator iterator = new MultiListIterator(List.of(singleRow(1), singleRow(2)));
+
+        assertEquals(1, (int) iterator.<BackendColumn>next().name[0]);
+        assertEquals(2, (int) iterator.<BackendColumn>next().name[0]);
+        assertThrows(NoSuchElementException.class, iterator::next);
+
+        assertThrows(NoSuchElementException.class, new MultiListIterator()::next);
+    }
+
+    @Test
+    public void testMultiListProbesAdvancingSourceOncePerRow() {
+        MultiListIterator iterator = new MultiListIterator(List.of(
+                new AdvancingIterator(List.of(BackendColumn.of(new byte[]{1}, new byte[]{11}),
+                                              BackendColumn.of(new byte[]{2}, new byte[]{12}))),
+                new AdvancingIterator(List.of(BackendColumn.of(new byte[]{3}, new byte[]{13})))));
+
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.isValid());
+        assertEquals(1, (int) iterator.<BackendColumn>next().name[0]);
+        assertEquals(2, (int) iterator.<BackendColumn>next().name[0]);
+        assertTrue(iterator.hasNext());
+        assertEquals(3, (int) iterator.<BackendColumn>next().name[0]);
+        assertFalse(iterator.hasNext());
+        assertTrue(iterator.isValid());
+        assertThrows(NoSuchElementException.class, iterator::next);
+    }
+
+    @Test
+    public void testMultiListCloseDuringIterationStopsProbingSources() {
+        RowIterator first = singleRow(1);
+        RowIterator second = singleRow(2);
+        MultiListIterator iterator = new MultiListIterator(List.of(first, second));
+        assertTrue(iterator.hasNext());
+        int firstProbes = first.probes;
+        int secondProbes = second.probes;
+
+        iterator.close();
+
+        assertFalse(iterator.hasNext());
+        assertFalse(iterator.isValid());
+        assertEquals(firstProbes, first.probes);
+        assertEquals(secondProbes, second.probes);
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+
+        assertThrows(NoSuchElementException.class, iterator::next);
+        iterator.close();
+        assertEquals(firstProbes, first.probes);
+        assertEquals(1, first.closes);
+        assertEquals(1, second.closes);
+    }
+
     @Test(timeout = 5000)
     public void testUnionUniqueStreamDoesNotLoseRecordsBetweenSingleRecordBatches() throws Exception {
         assertSingleRecordBatches(FilterKind.UNION_UNIQUE);
@@ -375,6 +495,7 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
         private int closes;
         private int probes;
         private RuntimeException closeFailure;
+        private Error closeError;
 
         private RowIterator(List<BackendColumn> rows) {
             this.rows = rows.iterator();
@@ -407,6 +528,49 @@ public class FilterIteratorContractTest extends AggregativeQueryTestSupport {
             if (this.closeFailure != null) {
                 throw this.closeFailure;
             }
+            if (this.closeError != null) {
+                throw this.closeError;
+            }
+        }
+    }
+
+    /**
+     * models the dedup iterators before #3424: hasNext() pulls the next row and replaces
+     * the pending one, so a second hasNext() before next() skips a row
+     */
+    private static class AdvancingIterator implements ScanIterator {
+
+        private final Iterator<BackendColumn> rows;
+        private BackendColumn current;
+
+        private AdvancingIterator(List<BackendColumn> rows) {
+            this.rows = rows.iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            this.current = this.rows.hasNext() ? this.rows.next() : null;
+            return this.current != null;
+        }
+
+        @Override
+        public boolean isValid() {
+            return this.current != null;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public <T> T next() {
+            if (this.current == null) {
+                throw new NoSuchElementException();
+            }
+            BackendColumn row = this.current;
+            this.current = null;
+            return (T) row;
+        }
+
+        @Override
+        public void close() {
         }
     }
 }
