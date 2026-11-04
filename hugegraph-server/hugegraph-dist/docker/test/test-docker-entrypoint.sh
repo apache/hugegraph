@@ -897,6 +897,42 @@ install_enable_auth "${dup_upgrade_dir}"
     cmp conf/rest-server.properties "${test_dir}/dup-after-first"
 )
 
+# Two different classes are not a duplicate to collapse.  They are the state
+# that boots REST and Gremlin on different authenticators: this reader takes
+# the first definition and the yaml reader takes the last, so neither file looks
+# wrong on its own while the two servers enforce different classes.  There is
+# no collapse that keeps what the operator configured, so the run is refused and
+# the file is left exactly as it was found.
+dup_conflict_dir="${test_dir}/duplicate-conflict"
+mkdir -p "${dup_conflict_dir}/bin" "${dup_conflict_dir}/conf/graphs"
+install_enable_auth "${dup_conflict_dir}"
+(
+    cd "${dup_conflict_dir}" || exit 1
+    printf '%s\n' \
+        'restserver.url=http://127.0.0.1:8080' \
+        'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        'auth.authenticator=org.apache.hugegraph.auth.ConfigAuthenticator' \
+        > conf/rest-server.properties
+    printf '%s\n' 'authentication: {' \
+        '  authenticator: org.apache.hugegraph.auth.ConfigAuthenticator,' \
+        '}' > conf/gremlin-server.yaml
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy' \
+        > conf/graphs/hugegraph.properties
+    unset AUTHENTICATOR_CLASS
+    if ./bin/enable-auth.sh 2> "${test_dir}/conflict-err"; then
+        echo "enable-auth.sh must refuse definitions that name different classes" >&2
+        exit 1
+    fi
+    grep -q 'different values' "${test_dir}/conflict-err" || {
+        echo "the refusal did not say which key disagrees" >&2
+        cat "${test_dir}/conflict-err" >&2
+        exit 1
+    }
+    # A refused run must not pick a side: both definitions are still there.
+    assert_line_count 2 '^auth\.authenticator=' conf/rest-server.properties
+    grep -q '^restserver\.url=http://127\.0\.0\.1:8080$' conf/rest-server.properties
+)
+
 # A copy-back that fails part way must not leave a truncated config.  The
 # shell's `>` truncates the destination before cat writes a byte, so
 # props.awk snapshots the original first and puts it back.  The snapshot

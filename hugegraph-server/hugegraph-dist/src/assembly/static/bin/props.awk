@@ -48,6 +48,13 @@
 #       print how many logical definitions K has, `0` when it has none, so a
 #       caller can tell "answered once" from "answered three times".  Exits 2
 #       on an unreadable file, like the other modes.
+#   PROPS_MODE=conflict  PROPS_KEY=K PROPS_FILE=F
+#       print `1` when K's definitions disagree on a non-empty value, else `0`.
+#       A key repeated with the same value -- an older image appending its
+#       default on every restart -- is a duplicate to collapse; two different
+#       classes are not, because this reader takes the first definition while
+#       the yaml reader beside it takes the last, so the two servers would
+#       enforce different authenticators.  The caller refuses on `1`.
 #
 # Grammar implemented (java.util.Properties line reader + the
 # first-definition-wins rule Configuration.getString applies):
@@ -448,6 +455,26 @@ function props_count(file, key,    b, n) {
     print n
 }
 
+# Whether K's definitions name different non-empty values.  The empty string is
+# not a value here: an older image's `auth.authenticator=` beside a real class
+# is a duplicate to drop, not a disagreement, because the class is what the
+# server reads either way.  Two real classes are a disagreement, and which one
+# wins depends on the reader, so the caller has to ask the operator.
+function props_conflict(file, key,    b, n, seen, v) {
+    props_load(file)
+    n = 0
+    split("", seen)
+    for (b = 1; b <= NBLOCK; b++) {
+        if (BTYPE[b] != "entry" || BKEY[b] != key) continue
+        v = unescape(BVAL[b])
+        if (v == "" || (v in seen)) continue
+        seen[v] = 1
+        n++
+        if (n > 1) return 1
+    }
+    return 0
+}
+
 BEGIN {
     mode = ENVIRON["PROPS_MODE"]
     key = ENVIRON["PROPS_KEY"]
@@ -461,7 +488,9 @@ BEGIN {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
     } else if (mode == "count") {
         props_count(file, key)
+    } else if (mode == "conflict") {
+        print props_conflict(file, key)
     } else {
-        die("PROPS_MODE must be get, set or count")
+        die("PROPS_MODE must be get, set, count or conflict")
     }
 }
