@@ -486,8 +486,8 @@ hubble:
     digest: ""
     pullPolicy: Always
   port: 8088
-  # Keeps Hubble's per-instance H2 metadata across Pod replacement; see the
-  # README's Hubble section for the single-replica and H2 constraints.
+  # Keeps Hubble's per-instance H2 metadata and Text2GQL master key across Pod
+  # replacement; see docs/operations.md for storage and upgrade notes.
   # size and storageClassName apply at install time only; the PVC is kept
   # on helm uninstall.
   persistence:
@@ -497,7 +497,8 @@ hubble:
     storageClassName: ""
   resources: {}
   # When persistence is enabled and the pod runs as non-root, set a matching
-  # fsGroup here so H2 can write /hubble-data.
+  # fsGroup here so H2 can write /hubble-data. Keep runAsUser stable so Hubble
+  # still owns its existing Text2GQL master-key file after Pod replacement.
   podSecurityContext: {}
   securityContext:
     allowPrivilegeEscalation: false

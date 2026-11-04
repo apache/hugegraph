@@ -67,6 +67,10 @@ runs:
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_bootstrap_adoption.py' -v
 
+  - name: Hubble startup regression
+    shell: 'bash -e {0}'
+    run: python3 -m unittest discover -s helm -p 'test_helm_hubble.py' -v
+
   - name: helm unittest
     shell: 'bash -e {0}'
     run: |

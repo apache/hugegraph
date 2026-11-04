@@ -150,6 +150,19 @@ spec:
                 exit 1
               fi
               {{- end }}
+              # fsGroup can widen a persisted key's permissions on volume mount.
+              # An environment key takes precedence; otherwise restore owner-only
+              # access without creating a key or following a symbolic link.
+              # A Text2GQL key problem must not prevent the rest of Hubble starting.
+              if [[ "${HUBBLE_TEXT2GQL_MASTER_KEY:-}" =~ ^[[:space:]]*$ &&
+                    ! -L "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" &&
+                    -f "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" ]]; then
+                if ! chmod 600 "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}"; then
+                  echo "warning: cannot secure the Text2GQL master key; continuing Hubble startup." \
+                       "Text2GQL may be unavailable; ensure the key is owned by the Hubble" \
+                       "runAsUser and the data volume is writable" >&2
+                fi
+              fi
               TMP=$(mktemp)
               FOUND_PD_ENABLED=false
               {{- if $pdMode }}
@@ -210,6 +223,9 @@ spec:
                     printf 'server.host=0.0.0.0\n' >>"${TMP}"
                     FOUND_SERVER_HOST=true
                     ;;
+                  text2gql.shared.master_key_file=*)
+                    # Discard stale defaults and write the managed path once below.
+                    ;;
                   {{- if $customPort }}
                   hubble.port=*)
                     printf 'hubble.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
@@ -267,6 +283,9 @@ spec:
               if [[ "${FOUND_SERVER_HOST}" == false ]]; then
                 printf 'server.host=0.0.0.0\n' >>"${TMP}"
               fi
+              # The image default (data/text2gql-master.key, relative to /hubble)
+              # is outside the data volume; keep the key next to the H2 database.
+              printf 'text2gql.shared.master_key_file=%s\n' "${HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE}" >>"${TMP}"
               {{- if $customPort }}
               if [[ "${FOUND_HUBBLE_PORT}" == false ]]; then
                 printf 'hubble.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
@@ -286,6 +305,8 @@ spec:
               value: {{ if $vermeerEnabled }}{{ printf "http://%s:%v" (include "hugegraph.vermeer.masterName" .) .Values.vermeer.master.httpPort | quote }}{{ else }}""{{ end }}
             - name: HG_HUBBLE_VERMEER_TOKEN_FILE
               value: {{ if $vermeerEnabled }}"/var/run/hugegraph/vermeer/token"{{ else }}""{{ end }}
+            - name: HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE
+              value: "/hubble-data/text2gql-master.key"
             {{- if $pdMode }}
             - name: HG_HUBBLE_PD_PEERS
               value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
