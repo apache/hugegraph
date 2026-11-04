@@ -47,6 +47,9 @@ A generic process key overrides file credentials for the official OpenAI endpoin
 or an endpoint also configured through the process environment. A custom endpoint
 configured only in `.env` keeps its paired file key; an active OpenAI role without
 that key is rejected rather than forwarding the generic process key.
+When a process override changes a graph, model or vector endpoint, supply its
+matching credentials in the deployment. Credentials for another file endpoint
+are ignored with a warning; equivalent endpoints keep their file credentials.
 Startup does not modify `.env` or rewrite an existing prompt file. UI saves write
 only changed settings, and reject changes to environment-managed fields. Injected
 Secrets and derived defaults are not copied into `.env`.

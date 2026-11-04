@@ -20,15 +20,16 @@ from .support import RAG_MOUNT, component_resources, pod
 
 
 class RagValidationMixin:
-    def test_boolean_resource_switches_accept_true_and_false(self):
-        for enabled in (False, True):
-            with self.subTest(enabled=enabled):
+    def test_boolean_resource_switches_control_their_own_resources(self):
+        for service_account, ingress in ((False, False), (False, True), (True, False), (True, True)):
+            with self.subTest(serviceAccount=service_account, ingress=ingress):
                 documents = self.documents({
-                    "serviceAccount": {"create": enabled},
-                    "ingress": {"enabled": enabled},
+                    "serviceAccount": {"create": service_account},
+                    "ingress": {"enabled": ingress},
                 })
-                for kind in ("ServiceAccount", "Ingress"):
-                    self.assertEqual(int(enabled), len(component_resources(documents, kind=kind)))
+                expected = {"ServiceAccount": int(service_account), "Ingress": int(ingress)}
+                for kind, count in expected.items():
+                    self.assertEqual(count, len(component_resources(documents, kind=kind)))
 
     def test_invalid_contracts_fail_before_render(self):
         invalid = (

@@ -46,6 +46,7 @@ class RagStateMixin:
         )
         mount, = [item for item in container["volumeMounts"] if item["name"] == "data"]
         self.assertEqual(mount_path, mount["mountPath"])
+        self.assertEqual(mount_path, environment["HUGEGRAPH_LLM_RESOURCE_PATH"]["value"])
 
     def test_persistence_can_be_disabled_for_disposable_runs(self):
         documents = self.documents({"persistence": {"enabled": False}})
@@ -117,8 +118,9 @@ class RagStateMixin:
             "Internal Server egress must remain scoped to the REST port",
         )
         for rule in egress:
-            if rule.get("to"):
+            if rule in server_rules:
                 continue
+            self.assertFalse(rule.get("to"), "Only the scoped Server rule may name destination peers")
             ports = {(item.get("protocol"), item.get("port")) for item in rule.get("ports", [])}
             self.assertEqual(
                 {("UDP", 53), ("TCP", 53)},
@@ -137,8 +139,7 @@ class RagStateMixin:
             for peer in rule.get("to", [])
         ))
         for rule in policy["spec"]["egress"]:
-            if rule.get("to"):
-                continue
+            self.assertFalse(rule.get("to"), "Without a Server peer, only the DNS rule may be rendered")
             ports = {(item.get("protocol"), item.get("port")) for item in rule.get("ports", [])}
             self.assertEqual({("UDP", 53), ("TCP", 53)}, ports)
 
