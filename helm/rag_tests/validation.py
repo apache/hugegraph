@@ -42,6 +42,11 @@ class RagValidationMixin:
             ({"service": {"type": "ClusterIP", "nodePort": 31001}}, "nodePort"),
             ({"service": {"type": "NodePort", "nodePort": "3100x"}}, "nodePort"),
             ({"service": {"type": "NodePort", "nodePort": "9" * 100}}, "nodePort"),
+            ({"probes": {"liveness": {"periodSeconds": -5}}}, "liveness.periodSeconds"),
+            ({"probes": {"startup": {"failureThreshold": 0}}}, "startup.failureThreshold"),
+            ({"probes": {"readiness": {"timeoutSeconds": 0}}}, "readiness.timeoutSeconds"),
+            ({"probes": {"startup": {"initialDelaySeconds": -1}}}, "startup.initialDelaySeconds"),
+            ({"probes": {"readiness": {"periodSeconds": "5"}}}, "readiness.periodSeconds"),
             ({"probes": {"startup": {"successThreshold": 2}}}, "startup.successThreshold"),
             ({"probes": {"liveness": {"successThreshold": 2}}}, "liveness.successThreshold"),
             ({"port": 0}, "rag.port"),
@@ -128,3 +133,12 @@ class RagValidationMixin:
         }))
         container = pod(workload)["spec"]["containers"][0]
         self.assertEqual(2, container["readinessProbe"]["successThreshold"])
+
+    def test_partial_probe_options_keep_defaults(self):
+        workload = self.deployment(self.documents({
+            "probes": {"readiness": {"initialDelaySeconds": 0, "periodSeconds": 1}},
+        }, use_profile=False))
+        probe = pod(workload)["spec"]["containers"][0]["readinessProbe"]
+        self.assertEqual(0, probe["initialDelaySeconds"])
+        self.assertEqual(1, probe["periodSeconds"])
+        self.assertGreaterEqual(probe["failureThreshold"], 1)

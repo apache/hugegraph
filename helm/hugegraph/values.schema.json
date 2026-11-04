@@ -209,33 +209,35 @@
                 "type": "object",
                 "properties": {
                   "startup": {
-                    "type": "object",
-                    "properties": {
-                      "successThreshold": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/ragProbe"
+                      },
+                      {
+                        "properties": {
+                          "successThreshold": {
+                            "maximum": 1
+                          }
+                        }
                       }
-                    }
+                    ]
                   },
                   "readiness": {
-                    "type": "object",
-                    "properties": {
-                      "successThreshold": {
-                        "type": "integer",
-                        "minimum": 1
-                      }
-                    }
+                    "$ref": "#/definitions/ragProbe"
                   },
                   "liveness": {
-                    "type": "object",
-                    "properties": {
-                      "successThreshold": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/ragProbe"
+                      },
+                      {
+                        "properties": {
+                          "successThreshold": {
+                            "maximum": 1
+                          }
+                        }
                       }
-                    }
+                    ]
                   }
                 }
               },
@@ -551,6 +553,29 @@
         "successThreshold": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "ragProbe": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "periodSeconds": {
+          "$ref": "#/definitions/probe/properties/periodSeconds"
+        },
+        "failureThreshold": {
+          "$ref": "#/definitions/probe/properties/failureThreshold"
+        },
+        "timeoutSeconds": {
+          "$ref": "#/definitions/probe/properties/timeoutSeconds"
+        },
+        "initialDelaySeconds": {
+          "$ref": "#/definitions/probe/properties/initialDelaySeconds"
+        },
+        "successThreshold": {
+          "$ref": "#/definitions/probe/properties/successThreshold"
         }
       }
     },
