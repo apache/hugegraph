@@ -53,8 +53,8 @@ rag:
   priorityClassName: ''
   podAnnotations: {}
   podLabels: {}
-  # Explicit env/envFrom values automatically take precedence over matching
-  # keys in the retained .env file on every Pod start.
+  # env/envFrom provide bootstrap defaults ahead of .env. Application-saved
+  # connections in settings.yaml survive upgrades and take precedence.
   env: []
   envFrom: []
   terminationGracePeriodSeconds: 30

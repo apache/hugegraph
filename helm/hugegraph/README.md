@@ -189,6 +189,9 @@ Vermeer adds separate Master and Worker data claims: two in standalone mode,
 or one Master claim plus one per Worker in cluster mode. Its storage flags
 inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and-recovery).
 
+Hubble persists its Text2GQL master key alongside H2. Existing releases may
+need a one-time API-key re-entry; see [Text2GQL credentials](docs/operations.md#hubble-text2gql-credentials).
+
 ### PD metadata namespace
 
 `metadataCluster` defaults to `hg-test`, preserving the namespace used by existing

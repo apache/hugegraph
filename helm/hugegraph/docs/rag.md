@@ -35,35 +35,46 @@ reverse proxy: the application's login does not protect every HTTP route.
 
 ## Configuration ownership
 
-The application reads configuration with this precedence:
+The web UI/API manages model connections. Deployment values are bootstrap
+fallbacks; a saved complete connection takes precedence across restarts/upgrades:
 
 ```text
-process environment / Secret > mounted .env > application defaults
+saved settings.yaml > process environment / Secret > mounted .env > application defaults
 ```
 
-Within one source, a field-specific provider setting overrides its generic key.
-For example, `OPENAI_CHAT_API_KEY` overrides `OPENAI_API_KEY` in the same source.
-A generic process key overrides file credentials for the official OpenAI endpoint
-or an endpoint also configured through the process environment. A custom endpoint
-configured only in `.env` keeps its paired file key; an active OpenAI role without
-that key is rejected rather than forwarding the generic process key.
-When a process override changes a graph, model or vector endpoint, supply its
-matching credentials in the deployment. Credentials for another file endpoint
-are ignored with a warning; equivalent endpoints keep their file credentials.
-Startup does not modify `.env` or rewrite an existing prompt file. UI saves write
-changed settings and the target paired with a newly saved user credential; they
-reject changes to environment-managed fields. Injected Secrets and unrelated
-derived defaults are not copied into `.env`.
+Within one deployment source, a field-specific setting wins over its generic
+alias. Supply the provider, destination, model and key together in that source;
+the application does not combine a higher-priority connection with a lower-priority
+file's credentials. Helm only mounts files and injects defaults; it does not
+rewrite, migrate or reconcile the application's saved settings.
 
-Change deployment configuration outside the container, then restart RAG:
+**Save configuration** validates and saves without contacting the model service.
+**Test saved connection** is separate; a failed test leaves the saved connection
+intact. Saved keys never appear in input fields. Blank/omitted key input keeps the
+existing key; use **Clear API key** to remove it. A destination change (including
+LiteLLM routing model changes) requires a new key or explicit clear.
+Information extraction and Text2GQL dynamically use Chat until independently
+configured; **Use Chat connection** restores inheritance. Embedding/reranker stay
+separate. Login/tokens and Thin API write opt-in remain deployment controls.
+
+Saved application connections live in `settings.yaml` on the writable RAG PVC.
+Changing Helm defaults does not replace them. Edit that file offline and restart,
+or delete the relevant connection group to return to deployment defaults.
+Do not edit the file while an application save is in progress. Startup does not
+modify `.env`, saved settings or prompt files. Normal requests do not persist
+request prompts. Only explicit saves/index generation require writable storage.
+
+Deployment file/Secret changes require a restart:
 
 ```bash
 kubectl -n hugegraph rollout restart deployment/hugegraph-hugegraph-rag
 ```
 
-There is no automatic hot reload. Secret changes require a restart too. An online
-Helm upgrade observes an explicit graph password Secret's resource version;
-offline/GitOps rendering requires an explicit rollout trigger or changed annotation.
+There is no automatic file hot reload. An online Helm upgrade observes an explicit
+graph password Secret's resource version; offline/GitOps rendering requires an
+explicit rollout trigger or changed annotation. A previously saved graph connection
+also takes precedence; update it through its configuration entry or remove its
+saved group before relying on changed deployment defaults.
 
 ## Mount configuration without entering the container
 
@@ -99,8 +110,9 @@ rag:
 The prompt file is operator-owned; edit its source and apply the ConfigMap rather
 than saving it through the UI. The application can also read a mounted `.env`:
 mount its Secret at a separate path and set `HUGEGRAPH_LLM_ENV_PATH` to that file.
-A read-only `.env` is supported at startup; UI/API saves require a writable file.
-Keep configuration mounts separate from the writable resource directory.
+A read-only `.env` remains supported while model UI/API saves go to the writable
+`settings.yaml` on the resource PVC. Keep bootstrap mounts separate from that
+writable directory; a read-only prompt itself still cannot be saved through the UI.
 
 Automatic graph settings are explicit environment entries and take precedence over
 `envFrom`. To replace the automatic password use `rag.hugegraph.passwordSecret`
@@ -119,7 +131,7 @@ together.
 
 A StorageClass is required by default. RAG inherits `persistence.enabled` unless
 `rag.persistence.enabled` is explicitly set. Its PVC is mounted at
-`/var/lib/hugegraph-rag`; the application uses this directory for `.env`,
+`/var/lib/hugegraph-rag`; the application uses this directory for `settings.yaml`, optional bootstrap `.env`,
 `demo/config_prompt.yaml`, indexes and generated resources. Missing bundled
 examples are read directly from the image; startup does not copy resources or
 generate configuration files. Explicit saves and index generation need a writable
@@ -132,7 +144,7 @@ for a mode still depends on the cluster and storage driver. Decimal kilo uses
 lowercase `k` (such as `"100k"`); binary kilo uses `Ki` (`"100Ki"`). Bare uppercase
 `K` is not a valid Kubernetes suffix.
 
-Explicit `HUGEGRAPH_LLM_ENV_PATH` and `HUGEGRAPH_LLM_PROMPT_CONFIG_PATH` overrides
+Explicit `HUGEGRAPH_LLM_SETTINGS_PATH`, `HUGEGRAPH_LLM_ENV_PATH` and `HUGEGRAPH_LLM_PROMPT_CONFIG_PATH` overrides
 can point to separate configuration mounts. For an existing externally managed
 volume, set `rag.persistence.existingClaim` to a string (quote numeric names such
 as `"123"`). Mount that volume in an administrative
@@ -147,7 +159,7 @@ this volume, so treat it as sensitive. Image upgrades do not overwrite user file
 For disposable deployments, set `rag.persistence.enabled: false`. File changes
 are then lost on container replacement. Switching persistence off or changing
 `rag.persistence.existingClaim` mounts the newly selected storage; the old
-chart-managed PVC is retained, but its `.env`, prompts and indexes are neither
+chart-managed PVC is retained, but its `settings.yaml`, `.env`, prompts and indexes are neither
 read nor migrated automatically. Back up and copy the required files to the new
 volume before switching. Re-enabling the original claim exposes its existing
 files again.
@@ -183,10 +195,12 @@ NetworkPolicy-capable CNI.
 
 RAG probe paths must start with `/`; `terminationGracePeriodSeconds` must be a
 non-negative integer. Partial probe overrides keep the remaining defaults.
-A process alias such as `OPENAI_BASE_URL` overrides a specific value in the file;
-specific names win over aliases within the same source. Only credentials injected through the process are read-only. When a process
-endpoint invalidates an old file credential, the application clears it on load;
-the user can enter a replacement credential for the new target. Saving a user
-credential also records its effective target for future pairing checks; managed
-keys are never exported. LiteLLM models participate in target ownership because
-their prefixes select the provider.
+
+Application settings contain user-saved credentials. New files use mode 0600;
+existing permissions are preserved. Restrict PVC/backup access. Prefer a writable
+directory/PVC: ordinary saves use atomic replacement; a writable single-file bind
+mount uses an in-place fallback on `EBUSY`, which cannot guarantee atomicity if
+interrupted. This does not affect read-only bootstrap Secret/ConfigMap mounts.
+
+See the paired AI PR's [application configuration guide](https://github.com/hugegraph/hugegraph-ai/blob/refactor/external-rag-config/hugegraph-llm/config.md)
+for API examples, complete saved connection groups and restore-default behavior.
