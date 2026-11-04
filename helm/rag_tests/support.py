@@ -17,6 +17,7 @@
 """Regression coverage for the optional HugeGraph RAG Helm component."""
 
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import tempfile
@@ -63,7 +64,9 @@ class RagChartBase(unittest.TestCase):
             values["mode"] = mode
         with tempfile.TemporaryDirectory(prefix="rag-values-") as directory:
             configuration = Path(directory) / "values.yaml"
-            configuration.write_text(yaml.safe_dump(values), encoding="utf-8")
+            # JSON is valid YAML and preserves string types such as "1e9"
+            # across Python YAML 1.1 and Helm YAML 1.2 parsers.
+            configuration.write_text(json.dumps(values), encoding="utf-8")
             command = ["helm", "template", "fixture", str(CHART), "--namespace", "graphs"]
             if preset is not None:
                 command.extend(["-f", str(CHART / preset)])

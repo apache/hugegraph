@@ -74,6 +74,12 @@ class RagValidationMixin:
             ({"serviceAccount": {"automountServiceAccountToken": True}}, "automountServiceAccountToken"),
             ({"hugegraph": {"passwordSecret": {"key": "password"}}}, "passwordSecret.name"),
             ({"persistence": {"enabled": 1}}, "persistence.enabled"),
+            ({"persistence": {"size": "abc"}}, "persistence.size"),
+            ({"persistence": {"size": "-1Gi"}}, "persistence.size"),
+            ({"persistence": {"size": "0Gi"}}, "persistence.size"),
+            ({"persistence": {"size": "1e"}}, "persistence.size"),
+            ({"persistence": {"accessModes": ["ReadWriteSome"]}}, "accessModes"),
+            ({"persistence": {"accessModes": "ReadWriteOnce"}}, "accessModes"),
             ({"persistence": {"mountPath": "relative/path"}}, "mountPath"),
             ({"extraVolumeMounts": [{"name": "other", "mountPath": RAG_MOUNT}]},
              "extraVolumeMounts"),
@@ -148,3 +154,18 @@ class RagValidationMixin:
         self.assertEqual(0, probe["initialDelaySeconds"])
         self.assertEqual(1, probe["periodSeconds"])
         self.assertGreaterEqual(probe["failureThreshold"], 1)
+
+    def test_pvc_quantities_and_access_modes_preserve_supported_values(self):
+        for size, access_modes in (
+            ("10Gi", ["ReadWriteOnce"]),
+            ("1.5Gi", ["ReadWriteMany"]),
+            ("500M", ["ReadOnlyMany"]),
+            ("1e9", ["ReadWriteOncePod"]),
+            ("1000", ["ReadWriteOnce"]),
+            (".5Gi", ["ReadWriteOnce", "ReadOnlyMany"]),
+        ):
+            with self.subTest(size=size, access_modes=access_modes):
+                documents = self.documents({"persistence": {"size": size, "accessModes": access_modes}})
+                claim, = component_resources(documents, kind="PersistentVolumeClaim")
+                self.assertEqual(size, claim["spec"]["resources"]["requests"]["storage"])
+                self.assertEqual(access_modes, claim["spec"]["accessModes"])

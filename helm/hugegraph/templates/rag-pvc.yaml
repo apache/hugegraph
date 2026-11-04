@@ -44,5 +44,5 @@ spec:
   {{- end }}
   resources:
     requests:
-      storage: {{ get $persistence "size" | default "10Gi" }}
+      storage: {{ get $persistence "size" | default "10Gi" | quote }}
 {{- end }}

@@ -125,6 +125,10 @@ examples are read directly from the image; startup does not copy resources or
 generate configuration files. Explicit saves and index generation need a writable
 resource directory.
 Changing `rag.persistence.mountPath` moves the complete resource root.
+`rag.persistence.size` must be a positive Kubernetes storage quantity, such as
+`"10Gi"`, `"500M"` or `"1e9"` (quote numeric-looking quantities). Access modes must be a non-empty list of
+`ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany` or `ReadWriteOncePod`; support
+for a mode still depends on the cluster and storage driver.
 
 Explicit `HUGEGRAPH_LLM_ENV_PATH` and `HUGEGRAPH_LLM_PROMPT_CONFIG_PATH` overrides
 can point to separate configuration mounts. For an existing externally managed
