@@ -205,9 +205,9 @@
                   },
                   "size": {
                     "type": "string",
-                    "pattern": "^\\+?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+|[numkKMGTPE]|[KMGTPE]i)?$",
+                    "pattern": "^\\+?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+|[numkMGTPE]|[KMGTPE]i)?$",
                     "not": {
-                      "pattern": "^\\+?0*(\\.0*)?([eE][+-]?[0-9]+|[numkKMGTPE]|[KMGTPE]i)?$"
+                      "pattern": "^\\+?0*(\\.0*)?([eE][+-]?[0-9]+|[numkMGTPE]|[KMGTPE]i)?$"
                     }
                   },
                   "accessModes": {
@@ -222,6 +222,9 @@
                         "ReadWriteOncePod"
                       ]
                     }
+                  },
+                  "existingClaim": {
+                    "type": "string"
                   }
                 }
               },

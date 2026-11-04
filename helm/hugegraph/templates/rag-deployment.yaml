@@ -205,7 +205,7 @@ spec:
         {{- if $persistenceEnabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "hugegraph.rag.claimName" . }}
+            claimName: {{ include "hugegraph.rag.claimName" . | quote }}
         {{- end }}
         {{- with get $rag "extraVolumes" }}
         {{- toYaml . | nindent 8 }}

@@ -75,6 +75,9 @@ class RagValidationMixin:
             ({"hugegraph": {"passwordSecret": {"key": "password"}}}, "passwordSecret.name"),
             ({"persistence": {"enabled": 1}}, "persistence.enabled"),
             ({"persistence": {"size": "abc"}}, "persistence.size"),
+            ({"persistence": {"size": "100K"}}, "persistence.size"),
+            ({"persistence": {"existingClaim": 123}}, "existingClaim"),
+            ({"persistence": {"existingClaim": True}}, "existingClaim"),
             ({"persistence": {"size": "-1Gi"}}, "persistence.size"),
             ({"persistence": {"size": "0Gi"}}, "persistence.size"),
             ({"persistence": {"size": "1e"}}, "persistence.size"),
@@ -160,6 +163,8 @@ class RagValidationMixin:
             ("10Gi", ["ReadWriteOnce"]),
             ("1.5Gi", ["ReadWriteMany"]),
             ("500M", ["ReadOnlyMany"]),
+            ("100k", ["ReadWriteOnce"]),
+            ("100Ki", ["ReadWriteOnce"]),
             ("1e9", ["ReadWriteOncePod"]),
             ("1000", ["ReadWriteOnce"]),
             (".5Gi", ["ReadWriteOnce", "ReadOnlyMany"]),
@@ -169,3 +174,12 @@ class RagValidationMixin:
                 claim, = component_resources(documents, kind="PersistentVolumeClaim")
                 self.assertEqual(size, claim["spec"]["resources"]["requests"]["storage"])
                 self.assertEqual(access_modes, claim["spec"]["accessModes"])
+
+    def test_existing_claim_names_remain_strings(self):
+        for name in ("123", "external-rag-data"):
+            with self.subTest(name=name):
+                documents = self.documents({"persistence": {"existingClaim": name}})
+                self.assertEqual([], component_resources(documents, kind="PersistentVolumeClaim"))
+                volumes = pod(self.deployment(documents))["spec"]["volumes"]
+                data, = [volume for volume in volumes if volume["name"] == "data"]
+                self.assertEqual(name, data["persistentVolumeClaim"]["claimName"])

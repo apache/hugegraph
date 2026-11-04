@@ -128,11 +128,14 @@ Changing `rag.persistence.mountPath` moves the complete resource root.
 `rag.persistence.size` must be a positive Kubernetes storage quantity, such as
 `"10Gi"`, `"500M"` or `"1e9"` (quote numeric-looking quantities). Access modes must be a non-empty list of
 `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany` or `ReadWriteOncePod`; support
-for a mode still depends on the cluster and storage driver.
+for a mode still depends on the cluster and storage driver. Decimal kilo uses
+lowercase `k` (such as `"100k"`); binary kilo uses `Ki` (`"100Ki"`). Bare uppercase
+`K` is not a valid Kubernetes suffix.
 
 Explicit `HUGEGRAPH_LLM_ENV_PATH` and `HUGEGRAPH_LLM_PROMPT_CONFIG_PATH` overrides
 can point to separate configuration mounts. For an existing externally managed
-volume, set `rag.persistence.existingClaim`. Mount that volume in an administrative
+volume, set `rag.persistence.existingClaim` to a string (quote numeric names such
+as `"123"`). Mount that volume in an administrative
 job or manage its backing storage to edit files without a shell in the RAG Pod.
 UI saves to writable configuration files survive container replacement.
 
@@ -181,8 +184,9 @@ NetworkPolicy-capable CNI.
 RAG probe paths must start with `/`; `terminationGracePeriodSeconds` must be a
 non-negative integer. Partial probe overrides keep the remaining defaults.
 A process alias such as `OPENAI_BASE_URL` overrides a specific value in the file;
-specific names win over aliases within the same source. A process endpoint
-without a stored credential leaves credential input editable. Saving a user
+specific names win over aliases within the same source. Only credentials injected through the process are read-only. When a process
+endpoint invalidates an old file credential, the application clears it on load;
+the user can enter a replacement credential for the new target. Saving a user
 credential also records its effective target for future pairing checks; managed
 keys are never exported. LiteLLM models participate in target ownership because
 their prefixes select the provider.
