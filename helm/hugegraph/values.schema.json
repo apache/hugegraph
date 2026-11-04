@@ -238,6 +238,22 @@
                     }
                   }
                 }
+              },
+              "serviceAccount": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "ingress": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }

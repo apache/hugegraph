@@ -16,13 +16,25 @@
 
 """Validation regression coverage for the optional RAG component."""
 
-from .support import RAG_MOUNT, pod
+from .support import RAG_MOUNT, component_resources, pod
 
 
 class RagValidationMixin:
+    def test_boolean_resource_switches_accept_true_and_false(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                documents = self.documents({
+                    "serviceAccount": {"create": enabled},
+                    "ingress": {"enabled": enabled},
+                })
+                for kind in ("ServiceAccount", "Ingress"):
+                    self.assertEqual(int(enabled), len(component_resources(documents, kind=kind)))
+
     def test_invalid_contracts_fail_before_render(self):
         invalid = (
             ({"enabled": "false"}, "enabled"),
+            ({"serviceAccount": {"create": "false"}}, "serviceAccount.create"),
+            ({"ingress": {"enabled": "false"}}, "ingress.enabled"),
             ({"hugegraph": {"autoConfigure": "false"}}, "autoConfigure"),
             ({"env": [{"name": "-BAD", "value": "x"}]}, "rag.env"),
             ({"service": {"type": "ExternalName"}}, "service.type"),

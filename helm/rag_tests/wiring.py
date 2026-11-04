@@ -91,4 +91,3 @@ class RagWiringMixin:
         documents = self.documents({}, server={"auth": {"admin": {"key": "admin-password"}}})
         password = env_by_name(self.container(documents))["GRAPH_PWD"]["valueFrom"]["secretKeyRef"]
         self.assertEqual("admin-password", password["key"])
-

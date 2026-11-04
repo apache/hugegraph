@@ -5,8 +5,10 @@ independent of whether HugeGraph uses one PD/Store/Server or a distributed clust
 RAG remains a single process with a persistent resource directory.
 
 > This refactor requires [HugeGraph AI PR #96](https://github.com/hugegraph/hugegraph-ai/pull/96) in the
-> `latest`/1.8 image. Publish that image before using this chart revision. The chart
-> no longer patches application configuration at startup.
+> `latest`/1.8 image. Merge #96 and publish and validate that image before merging
+> or enabling this chart revision. Until then, this chart change remains blocked
+> on that release; an older `latest` image is not supported. The chart no longer
+> patches application configuration at startup.
 
 ## Start and open RAG
 
@@ -40,8 +42,11 @@ process environment / Secret > mounted .env > application defaults
 ```
 
 Within one source, a field-specific provider setting overrides its generic key.
-For example, `OPENAI_CHAT_API_KEY` overrides `OPENAI_API_KEY` in the same source,
-but a generic process key overrides stale field-specific values in `.env`.
+For example, `OPENAI_CHAT_API_KEY` overrides `OPENAI_API_KEY` in the same source.
+A generic process key overrides file credentials for the official OpenAI endpoint
+or an endpoint also configured through the process environment. A custom endpoint
+configured only in `.env` keeps its paired file key; an active OpenAI role without
+that key is rejected rather than forwarding the generic process key.
 Startup does not modify `.env` or rewrite an existing prompt file. UI saves write
 only changed settings, and reject changes to environment-managed fields. Injected
 Secrets and derived defaults are not copied into `.env`.
