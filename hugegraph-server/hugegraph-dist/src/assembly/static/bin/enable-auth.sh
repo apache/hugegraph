@@ -103,6 +103,19 @@ props_count() {
     printf '%s' "${value}"
 }
 
+# Whether a key's repeated definitions disagree on a non-empty value.  `count`
+# cannot tell an older image's identical leftovers from two different classes,
+# and that difference decides between collapsing and refusing.
+props_conflict() {
+    local status=0 value
+    value=$(PROPS_MODE=conflict PROPS_KEY="$1" PROPS_FILE="$2" \
+        awk -f "${PROPS_AWK}" /dev/null) || status=$?
+    if (( status > 0 )); then
+        fail "cannot read $2"
+    fi
+    printf '%s' "${value}"
+}
+
 # Collapse a key to its first definition, dropping the rest, keeping the bytes
 # the server has already been reading.  Going through props_set with a value
 # from props_get is not the same thing: props_get decodes, and a decoded value
@@ -166,6 +179,18 @@ ensure_rest_prop() {
     local definitions
     definitions=$(props_count "$1" "$3") || fail "cannot read $3"
     if (( definitions > 1 )); then
+        # `$5` marks the key the yaml side also reads.  Only there is a repeated
+        # definition with different values something other than a legacy
+        # duplicate: this reader keeps the first and the yaml reader keeps the
+        # last, so the two servers would enforce different authenticators and
+        # neither file looks wrong on its own.  No collapse keeps what the
+        # operator configured, so refuse and name the file.  A key only this
+        # file carries, like auth.graph_store, has one reader and collapses.
+        if [[ "${5:-}" == "1" && "$(props_conflict "$1" "$3")" == "1" ]]; then
+            fail "$3 defines $1 more than once with different values; the" \
+                "properties reader keeps the first and gremlin-server.yaml keeps" \
+                "the last, so keep a single definition"
+        fi
         props_keep_first "$1" "$3"
     fi
     return 0
@@ -357,7 +382,7 @@ if [[ "${GREMLIN_AUTH}" == "none" ]]; then
 fi
 
 ensure_rest_prop "auth.authenticator" "${AUTHENTICATOR_CLASS}" \
-    "${CONF}/${REST_SERVER_CONF}" "${REST_AUTHENTICATOR}"
+    "${CONF}/${REST_SERVER_CONF}" "${REST_AUTHENTICATOR}" 1
 ensure_rest_prop "auth.graph_store" "hugegraph" \
     "${CONF}/${REST_SERVER_CONF}" "${REST_GRAPH_STORE}"
 
