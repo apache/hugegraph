@@ -36,30 +36,35 @@ reverse proxy: the application's login does not protect every HTTP route.
 ## Configuration ownership
 
 The web UI/API manages model connections. Deployment values are bootstrap
-fallbacks; a saved complete connection takes precedence across restarts/upgrades:
+fallbacks; saved connection fields take precedence across restarts/upgrades:
 
 ```text
 saved settings.yaml > process environment / Secret > mounted .env > application defaults
 ```
 
-Within one deployment source, a field-specific setting wins over its generic
-alias. Supply the provider, destination, model and key together in that source;
-the application does not combine a higher-priority connection with a lower-priority
-file's credentials. Helm only mounts files and injects defaults; it does not
-rewrite, migrate or reconcile the application's saved settings.
+Deployment sources can be combined: for example, put the model URL and name in
+a mounted `.env` and the key in a Secret. Within one source, a field-specific
+setting wins over its generic alias. Helm only mounts files and injects defaults;
+the application resolves their priority and saves its own settings.
 
 **Save configuration** validates and saves without contacting the model service.
 **Test saved connection** is separate; a failed test leaves the saved connection
 intact. Saved keys never appear in input fields. Blank/omitted key input keeps the
-existing key; use **Clear API key** to remove it. A destination change (including
-LiteLLM routing model changes) requires a new key or explicit clear.
+existing key; use **Clear API key** to remove it. For a connection with an existing
+key, changing the model service URL requires a new key or explicit clear; changing
+the model at the same URL keeps the key. OpenAI-compatible services and Ollama are
+supported. Model requests use the service's default temperature.
 Information extraction and Text2GQL dynamically use Chat until independently
 configured; **Use Chat connection** restores inheritance. Embedding/reranker stay
 separate. Login/tokens and Thin API write opt-in remain deployment controls.
 
 Saved application connections live in `settings.yaml` on the writable RAG PVC.
-Changing Helm defaults does not replace them. Edit that file offline and restart,
-or delete the relevant connection group to return to deployment defaults.
+Changing Helm defaults does not replace saved connection fields. When a key is
+injected from a Secret as an environment variable and the user saves without
+replacing it, the application keeps a reference to that variable rather than
+copying the value.
+Edit the file offline and restart, or delete the relevant connection group to
+return to deployment defaults.
 Do not edit the file while an application save is in progress. Startup does not
 modify `.env`, saved settings or prompt files. Normal requests do not persist
 request prompts. Only explicit saves/index generation require writable storage.
@@ -72,9 +77,9 @@ kubectl -n hugegraph rollout restart deployment/hugegraph-hugegraph-rag
 
 There is no automatic file hot reload. An online Helm upgrade observes an explicit
 graph password Secret's resource version; offline/GitOps rendering requires an
-explicit rollout trigger or changed annotation. A previously saved graph connection
-also takes precedence; update it through its configuration entry or remove its
-saved group before relying on changed deployment defaults.
+explicit rollout trigger or changed annotation. Saved graph connection fields keep
+their values; a password still referencing a Secret follows its updated value after
+the restart. Update a user-saved password through its configuration entry.
 
 ## Mount configuration without entering the container
 
@@ -156,13 +161,10 @@ when RAG is disabled or the release is uninstalled; remove the claim explicitly
 only when its data is no longer needed. UI-entered credentials may be stored on
 this volume, so treat it as sensitive. Image upgrades do not overwrite user files.
 
-For disposable deployments, set `rag.persistence.enabled: false`. File changes
-are then lost on container replacement. Switching persistence off or changing
-`rag.persistence.existingClaim` mounts the newly selected storage; the old
-chart-managed PVC is retained, but its `settings.yaml`, `.env`, prompts and indexes are neither
-read nor migrated automatically. Back up and copy the required files to the new
-volume before switching. Re-enabling the original claim exposes its existing
-files again.
+For disposable deployments, set `rag.persistence.enabled: false`; file changes
+are then lost on container replacement. Changing or disabling the PVC does not
+automatically copy existing settings, prompts or indexes to the new storage.
+Back up any files you need before switching.
 
 ## External Server and deployment options
 
