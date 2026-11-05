@@ -1135,14 +1135,32 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
 
         @Override
         public void clearOlapTable(Id id) {
-            String name = this.olapTableName(id);
-            RocksDBTable table = this.table(name);
-            RocksDBSessions db = this.db(HugeType.OLAP);
-            if (!db.existsTable(table.table())) {
-                throw new HugeException("Not exist table '%s''", name);
+            Lock writeLock = this.storeLock().writeLock();
+            writeLock.lock();
+            try {
+                String name = this.olapTableName(id);
+                RocksDBTable table = this.table(name);
+                RocksDBSessions db = this.db(HugeType.OLAP);
+                if (!db.existsTable(table.table())) {
+                    throw new HugeException("Not exist table '%s''", name);
+                }
+                if (super.toplingProvider) {
+                    // Keep the CF owner alive. Use only the clearing thread's
+                    // lease so pending writes cannot be committed by clearTables.
+                    RocksDBSessions.Session session = (RocksDBSessions.Session) db.useSession();
+                    try {
+                        session.reset();
+                        db.clearTables(Collections.singletonList(table.table()));
+                    } finally {
+                        db.close();
+                    }
+                } else {
+                    this.dropTable(db, table.table());
+                    this.createTable(db, table.table());
+                }
+            } finally {
+                writeLock.unlock();
             }
-            this.dropTable(db, table.table());
-            this.createTable(db, table.table());
         }
 
         @Override
