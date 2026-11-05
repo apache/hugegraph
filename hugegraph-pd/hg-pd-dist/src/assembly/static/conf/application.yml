@@ -75,6 +75,11 @@ pd:
   initial-store-count: 1
   # The initial store list, grpc IP: grpc port, the store in the list is automatically activated
   initial-store-list: 127.0.0.1:8500
+  # Move partition leaders back toward an even spread across stores on a timer.
+  # A run is skipped while max - min leaders per store is at or below max-skew.
+  balance-leader-enable: false
+  balance-leader-interval: 300
+  balance-leader-max-skew: 2
 
 raft:
   # The address of the local raft service

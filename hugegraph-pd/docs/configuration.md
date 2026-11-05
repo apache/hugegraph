@@ -184,6 +184,9 @@ pd:
   initial-store-count: 1            # Bootstrap gate while no shard groups exist
   min-store-count: 0                # First-bootstrap seed for the persisted placement floor
   initial-store-list: 127.0.0.1:8500  # Auto-activated stores
+  balance-leader-enable: false      # Periodic partition leader balancing
+  balance-leader-interval: 300      # Seconds between leader balance checks
+  balance-leader-max-skew: 2        # Tolerated leader count spread across stores
 ```
 
 | Parameter | Type | Default | Description |
@@ -193,6 +196,9 @@ pd:
 | `pd.initial-store-count` | Integer | `1` | Required live Store count while no shard groups exist. It does not disable existing voting majorities after bootstrap. |
 | `pd.min-store-count` | Integer | `0` | First-bootstrap seed for persisted `PDConfig.min_store_count`, an extra eligible-Store floor for new placement and drain preflight. Existing persisted configuration takes precedence. Zero means no extra floor beyond the desired replica count. |
 | `pd.initial-store-list` | String | `127.0.0.1:8500` | Comma-separated list of Store gRPC addresses to auto-activate on startup. Useful for bootstrapping. |
+| `pd.balance-leader-enable` | Boolean | `false` | Run partition leader balancing periodically on the PD leader. When off, leaders move back only through a manual call: `/v1/task/balanceLeaders`, `/v1/balanceLeaders` or the `balanceLeaders` gRPC call. |
+| `pd.balance-leader-interval` | Integer | `300` | Seconds between periodic leader balance checks. A check plans transfers only when this much time has passed since the last plan, including a manual `balanceLeaders` call. Only read when `pd.balance-leader-enable` is `true`. Must be positive; otherwise PD logs a warning and does not run periodic balancing. |
+| `pd.balance-leader-max-skew` | Integer | `2` | A check balances leaders only when the most leaders on one store minus the fewest on another exceeds this value, and the leaders are not already where the balancer would put them (uneven shard placement can leave its best spread above this value). Must be `0` or more; otherwise PD logs a warning and does not run periodic balancing. |
 
 **Production Recommendations**:
 - `pd.data-path`: Use dedicated SSD with at least 50GB free space
@@ -203,6 +209,25 @@ pd:
   - Production: `1800` (30 minutes) to reduce overhead
   - Large clusters: `3600` (1 hour)
 - `pd.initial-store-count`: Set to expected initial store count (e.g., `3` for 3 stores)
+- `pd.balance-leader-enable`: After a Store restarts, its raft groups keep the leaders they elected
+  on the surviving Stores. Enable this so PD moves leaders back without a manual `balanceLeaders`
+  call. A check is skipped while any shard group is not in the `Normal` state, has sent no
+  partition heartbeat in the last 30 seconds, or has a replica that is not a Leader or Follower (a
+  membership change in progress); while a Store that holds a shard is not in the active-store list,
+  which it leaves `store.keepAlive-timeout` after its last heartbeat; and while a split, move or
+  shard balance task is running. A planned transfer is not sent if this PD is no longer the leader,
+  if its shard group changed after the check, if the target Store's persisted state is not `Up`
+  (for example `Exiting` while PD drains it, though it stays in the active-store list), or if the
+  target's applied index trails the leader's by more than an estimated 1000 entries. The indexes
+  come from each Store's last heartbeat, and a transfer is not sent when the target's or the leader
+  Store's heartbeat is more than 60 seconds old (two Store heartbeats). PD estimates the leader's
+  index at the time of the target's report from its average rate since an earlier heartbeat of the
+  same leader Store, which it keeps across checks that see the same heartbeat; when there is no
+  such sample, PD compares the indexes as reported. The leader stays where it is until a later
+  check. The estimate is best effort, not a strict bound: a write burst late in the interval can
+  keep a caught-up Store waiting for later checks, and a burst early in it can let a Store that
+  fell behind through, in which case JRaft ends the transfer after its timeout and the old leader
+  takes writes again.
 
 #### Store bootstrap, placement and runtime quorum
 
