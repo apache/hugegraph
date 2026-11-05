@@ -49,33 +49,36 @@ services:
       retries: 10
 
   ranger:
-    # Built from the stock apache/ranger:2.4.0 image with the thin
+    # Built from the stock apache/ranger:2.9.0 image (on a Java 17 JRE) with the thin
     # hugegraph-ranger-plugin jar baked onto Ranger Admin's classpath, so the
     # policy editor's resource autocomplete and "Test Connection" work out of
     # the box. See Dockerfile.ranger.
     build:
       context: ../..
       dockerfile: docker/hgRangerIntegration/Dockerfile.ranger
-    image: ranger-hugegraph-local:2.4.0
+    image: ranger-hugegraph-local:2.9.0
+    # Local-only tag: build it instead of trying to pull it from a registry.
+    pull_policy: build
     container_name: ranger
     depends_on:
       ranger-db:
         condition: service_healthy
       ranger-solr:
         condition: service_healthy
+    # Read by the image's /home/ranger/scripts/ranger.sh on first start; the DB
+    # host/name and the Solr audit URL come from its bundled install.properties
+    # (ranger-db, ranger, http://ranger-solr:8983/solr/ranger_audits).
+    # RANGER_DB_PASSWORD is also used as the Ranger Admin UI password for "admin".
     environment:
-      RANGER_ADMIN_DB_HOST: ranger-db
-      RANGER_ADMIN_DB_NAME: ranger
-      RANGER_ADMIN_DB_USER: rangeradmin
-      RANGER_ADMIN_DB_PASS: rangeradmin
-      RANGER_ADMIN_DB_ROOT_USER: postgres
-      RANGER_ADMIN_DB_ROOT_PASS: rangeradmin
-      RANGER_ADMIN_HTTP_PORT: "6080"
-      RANGER_AUDIT_SOLR_URLS: "http://ranger-solr:8983/solr/ranger_audits"
+      POSTGRES_PASSWORD: rangeradmin
+      RANGER_DB_USER: rangeradmin
+      RANGER_DB_PASSWORD: "rangerR0cks!"
     ports:
       - "6080:6080"
+    # login.jsp is static and answers 200 even when Admin has no database, so
+    # probe an authenticated, DB-backed API instead.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --server-response -O/dev/null http://localhost:6080/login.jsp 2>&1 | grep -q '200 OK' || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O/dev/null --auth-no-challenge --user=admin --password='rangerR0cks!' http://localhost:6080/service/public/v2/api/servicedef/name/hdfs || exit 1"]
       interval: 15s
       start_period: 180s
       retries: 20
@@ -84,7 +87,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/hgRangerIntegration/Dockerfile.hugegraph
-    image: hugegraph-ranger-local:1.7.0
+    image: hugegraph-ranger-local:latest
+    pull_policy: build
     container_name: hugegraph
     depends_on:
       ranger:

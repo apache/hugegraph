@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Maven 3.5+ and Java 11+
+- Maven 3.5+ and Java 17
 - HugeGraph source cloned, on branch `RangerPlugin`
 
 ---
@@ -17,7 +17,7 @@
 mvn package -pl hugegraph-server/hugegraph-dist -am -DskipTests -Dwith-ranger-plugin
 ```
 
-`-Dwith-ranger-plugin` bundles the shaded `hugegraph-ranger-plugin-1.7.0-plugin.jar`
+`-Dwith-ranger-plugin` bundles the shaded `hugegraph-ranger-plugin-<version>-plugin.jar`
 (the one with Ranger's runtime deps, not the ~44 KB thin jar) directly into the
 distribution's `lib/`. There's nothing to build or mount by hand — `docker compose up`
 (Step 2 below) does it all.
@@ -41,7 +41,7 @@ If you want to build the distribution standalone (outside Docker) — e.g. to in
 mvn clean package -pl hugegraph-server/hugegraph-dist -am -DskipTests -Dwith-ranger-plugin
 ```
 
-This produces `hugegraph-server/apache-hugegraph-server-1.7.0/` with the plugin already
+This produces `hugegraph-server/apache-hugegraph-server-<version>/` with the plugin already
 in `lib/`.
 
 ---
@@ -53,25 +53,32 @@ The `docker-compose.yml` defines the stack with 4 services:
 **Services:**
 - `ranger-db` — PostgreSQL 14 (Ranger Admin metadata store)
 - `ranger-solr` — Solr 8.11 (audit backend for Ranger Admin)
-- `ranger` — Apache Ranger 2.4.0 (policy server), built from `Dockerfile.ranger`
-- `hugegraph` — HugeGraph 1.7.0 (graph database with Ranger plugin)
+- `ranger` — Apache Ranger 2.9.0 on Java 17 (policy server), built from `Dockerfile.ranger`
+- `hugegraph` — HugeGraph built from this checkout (graph database with Ranger plugin)
 
 **Key files:**
 - `Dockerfile.hugegraph` — builds HugeGraph with Ranger plugin, audit directory
-- `Dockerfile.ranger` — Ranger Admin with the thin plugin jar baked onto its classpath
+- `Dockerfile.ranger` — Ranger Admin on Java 17 with the thin plugin jar baked onto its classpath
 - `ranger-hugegraph-security.xml` — plugin-side Ranger config
 - `rest-server.properties` — HugeGraph REST server config
 - `solr-init.sh` — creates the `ranger_audits` Solr core on startup
 
-The Ranger Admin password is `rangerR0cks!` — hardcoded in the image's `install.properties`.
+The Ranger Admin password is `rangerR0cks!`: the `apache/ranger:2.9.0` image uses
+`RANGER_DB_PASSWORD` from `docker-compose.yml` for the `admin` login as well as the DB user.
+
+> **Test stack only:** `Dockerfile.ranger` sets
+> `ranger.admin.allow.unauthenticated.download.access=true`, so the HugeGraph plugin can
+> download policies without Ranger credentials. Ranger 2.9 rejects that by default
+> (`Unauthenticated access not allowed` in the HugeGraph log). Production deployments must
+> authenticate the plugin to Ranger Admin (Kerberos or JWT) instead.
 
 ---
 
 ## Step 3 — Start the Stack
 
 ```bash
-# Start the full stack
-docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d 
+# Start the full stack (builds the hugegraph and ranger images from source on first run)
+docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d
 ```
 
 The Solr and Ranger Admin containers take a few minutes to initialise. Check status:
@@ -111,18 +118,47 @@ curl -s -u admin:rangerR0cks! \
 
 Expected: HTTP 200 with a JSON body containing `"name": "hugegraph"`.
 
-If you see `service def with the name[hugegraph] already exists` the definition is already registered — skip to 5b.
+If you see `service def with the name[hugegraph] already exists` the definition is already registered — continue with 4b.
 
-### 4b. Verify Ranger Admin can load the plugin class
+### 4b. Create a HugeGraph service instance
+
+```bash
+curl -s -u admin:rangerR0cks! \
+  -X POST http://localhost:6080/service/plugins/services \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "hugegraph",
+    "displayName": "HugeGraph",
+    "description": "Local HugeGraph test instance",
+    "type": "hugegraph",
+    "isEnabled": true,
+    "configs": {
+      "username": "admin",
+      "password": "admin",
+      "hugegraph.url": "http://hugegraph:8080"
+    }
+  }'
+```
+
+Expected: HTTP 200 with a JSON body containing `"id"`. Confirm:
+```bash
+curl -s -u admin:rangerR0cks! \
+  http://localhost:6080/service/plugins/services/name/hugegraph | python3 -m json.tool | grep '"id"'
+```
+
+### 4c. Verify Ranger Admin can load the plugin class
 
 Nothing to deploy. `Dockerfile.ranger` bakes the thin `hugegraph-ranger-plugin` jar into
 the Ranger image under
 `ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph/`, which is where Ranger Admin
 looks for a service definition's `implClass`. That class, `RangerHugeGraphService`,
 backs both the **Test Connection** button and the policy editor's **resource
-autocomplete** (Graph Space -> Graph -> Resource Type -> Label).
+autocomplete** (Graph Space -> Graph -> Resource Type -> Label). Both log in to HugeGraph
+with the service's `username`/`password`; **Test Connection** lists the graphs of the
+`DEFAULT` graphspace and fails if HugeGraph rejects those credentials (HTTP 401/403).
 
-Confirm it with the exact call the autocomplete makes:
+Confirm it with the exact call the autocomplete makes. `lookupResource/hugegraph` takes
+the service *instance* name from step 4b, so run that step first:
 
 ```bash
 curl -s -u admin:rangerR0cks! \
@@ -132,6 +168,9 @@ curl -s -u admin:rangerR0cks! \
 ```
 
 Expected: `["hugegraph"]`.
+
+If it returns `"service" is null`, the `hugegraph` service instance does not exist yet —
+run step 4b.
 
 If it returns `[]`:
 
@@ -158,32 +197,6 @@ docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build ra
 Resource fields are plain text inputs, so an empty autocomplete never blocks policy
 creation: you can always type `DEFAULT`, `hugegraph`, `vertex` and so on by hand.
 
-### 4c. Create a HugeGraph service instance
-
-```bash
-curl -s -u admin:rangerR0cks! \
-  -X POST http://localhost:6080/service/plugins/services \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "hugegraph",
-    "displayName": "HugeGraph",
-    "description": "Local HugeGraph test instance",
-    "type": "hugegraph",
-    "isEnabled": true,
-    "configs": {
-      "username": "admin",
-      "password": "admin",
-      "hugegraph.url": "http://hugegraph:8080"
-    }
-  }'
-```
-
-Expected: HTTP 200 with a JSON body containing `"id"`. Confirm:
-```bash
-curl -s -u admin:rangerR0cks! \
-  http://localhost:6080/service/plugins/services/name/hugegraph | python3 -m json.tool | grep '"id"'
-```
-
 ---
 
 ## Step 5 — Create Test Users in HugeGraph
@@ -205,6 +218,25 @@ curl -u admin:admin \
 ---
 
 ## Step 6 — Create Ranger Policies
+
+Ranger only accepts policies for users it knows about. Without this, the policy below
+is rejected with `User name: bob specified in policy does not exist in ranger admin`,
+and every login by `bob` or `alice` then fails with `Authentication failed` because
+Ranger grants them nothing. Register both users in Ranger Admin first:
+
+```bash
+for u in bob alice; do
+  curl -s -u admin:rangerR0cks! \
+    -X POST http://localhost:6080/service/xusers/secure/users \
+    -H "Content-Type: application/json" \
+    -d "{\"name\": \"$u\", \"firstName\": \"$u\", \"password\": \"${u}Ranger1\",
+         \"userRoleList\": [\"ROLE_USER\"], \"status\": 1}" | grep -o '"name":"[^"]*"'
+done
+```
+
+Expected: `"name":"bob"` and `"name":"alice"`. These Ranger-side passwords only satisfy
+Ranger's password rules and are never used; HugeGraph still checks `bobpass` and
+`alicepass` from Step 5.
 
 > **Important:** Ranger rejects two separate policies with overlapping resource patterns
 > (`graphspace/*`, `graph/*`, etc. match the same space). Bob, Alice, and HugeGraph's
@@ -754,13 +786,14 @@ Two layers of audit configuration prevent Solr errors:
 ### 1. Ranger Admin audit (docker-compose.yml + solr-init.sh)
 
 Ranger Admin audits to the `ranger-solr` service. `solr-init.sh` creates the
-`ranger_audits` core on startup and the `ranger` service points at it via
-`RANGER_AUDIT_SOLR_URLS=http://ranger-solr:8983/solr/ranger_audits`. The compose
+`ranger_audits` core on startup. The `apache/ranger:2.9.0` image's bundled
+`install.properties` already points Ranger Admin at it
+(`audit_solr_urls=http://ranger-solr:8983/solr/ranger_audits`). The compose
 healthcheck gates Ranger Admin on that core existing, which is what prevents the
 `Error running solr query` failures.
 
-`Dockerfile.ranger` only adds the HugeGraph plugin jar to Ranger Admin's classpath; it
-does not touch audit configuration.
+`Dockerfile.ranger` adds the HugeGraph plugin jar to Ranger Admin's classpath and
+switches it to a Java 17 runtime; it does not touch audit configuration.
 
 ### 2. HugeGraph plugin audit (ranger-hugegraph-security.xml)
 
@@ -783,12 +816,14 @@ The HugeGraph Ranger plugin is configured to log audit events to a local file:
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Error running solr query` / `IOException: ranger-solr:8983` in Ranger Admin logs | The `ranger_audits` Solr core is missing, so Ranger Admin cannot write audits | Check `docker compose -f docker/hgRangerIntegration/docker-compose.yml logs ranger-solr` for `solr-init.sh` errors, then recreate the stack: `docker compose -f docker/hgRangerIntegration/docker-compose.yml down -v && docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build` |
+| `Authentication failed` (HTTP 401) for `bob`/`alice` although the password is right | Ranger grants the user nothing, usually because the Step 6 policy was rejected with `User name: bob specified in policy does not exist in ranger admin` | Register the users in Ranger (start of Step 6), re-run the policy `curl`, then wait ~30 s for the policy refresh |
+| `Error getting policies ... "Unauthenticated access not allowed"` in the HugeGraph log; Ranger policies have no effect | Ranger Admin rejects anonymous policy downloads, so the plugin runs without policies | The `ranger` image must include the `allow.unauthenticated.download.access` patch from `Dockerfile.ranger`: rebuild it and recreate the container (`docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build --force-recreate ranger`), then restart `hugegraph` |
 | `ClassNotFoundException: RangerHugeGraphAuthenticator` or `NoClassDefFoundError: org/apache/hadoop/conf/Configuration` | Image built without `-Dwith-ranger-plugin`, or with a stale cached layer | Confirm the jar is in the container: `docker exec hugegraph ls lib/ \| grep ranger`. If missing, rebuild: `docker compose -f docker/hgRangerIntegration/docker-compose.yml build --no-cache hugegraph` |
 | All users denied after Ranger Admin restart | Policy cache missing | Check `/tmp/ranger/cache/hugegraph/` exists and is writable |
 | Policy changes not taking effect | Poll interval not elapsed | Default is 30 s; reduce `ranger.plugin.hugegraph.policy.pollIntervalMs` for testing |
-| `no service found with name[hugegraph]` when creating a policy | Service instance was never created because `implClass` blocked it | Deploy the plugin JAR per step 4b (or clear `implClass`), then redo step 4c |
-| Policy editor shows no Graph Space / Graph / Resource Type suggestions | Ranger Admin cannot call `RangerHugeGraphService.lookupResource()` — either `implClass` is empty or the plugin JAR is not on Ranger Admin's classpath | Complete step 4b and confirm the `lookupResource` curl there returns `["hugegraph"]`. Resource fields are free-text, so you can always type values manually |
-| Code changes have no effect after `docker compose up -d --build hugegraph` (old jar still running) | `Dockerfile.hugegraph` declares `VOLUME /hugegraph-server`, so the whole server dir — including `lib/` — is an anonymous volume that Compose **reuses** when it recreates the container. The rebuilt image is ignored. | Confirm with `docker exec hugegraph ls -l /hugegraph-server/lib/ \| grep ranger` and compare against the image: `docker run --rm --entrypoint sh hugegraph-ranger-local:1.7.0 -c 'ls -l lib/ \| grep ranger'`. Fix by recreating the volume: `docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build --renew-anon-volumes hugegraph` — note this **wipes the graph data**, so re-run Steps 5-6. To keep the data, `docker cp` the new jar into `/hugegraph-server/lib/` and `docker restart hugegraph` instead |
+| `no service found with name[hugegraph]` when creating a policy | Service instance was never created because `implClass` blocked it | Check the plugin JAR per step 4c (or clear `implClass`), then redo step 4b |
+| Policy editor shows no Graph Space / Graph / Resource Type suggestions | Ranger Admin cannot call `RangerHugeGraphService.lookupResource()` — either `implClass` is empty or the plugin JAR is not on Ranger Admin's classpath | Complete step 4c and confirm the `lookupResource` curl there returns `["hugegraph"]`. Resource fields are free-text, so you can always type values manually |
+| Code changes have no effect after `docker compose up -d --build hugegraph` (old jar still running) | `Dockerfile.hugegraph` declares `VOLUME /hugegraph-server`, so the whole server dir — including `lib/` — is an anonymous volume that Compose **reuses** when it recreates the container. The rebuilt image is ignored. | Confirm with `docker exec hugegraph ls -l /hugegraph-server/lib/ \| grep ranger` and compare against the image: `docker run --rm --entrypoint sh hugegraph-ranger-local:latest -c 'ls -l lib/ \| grep ranger'`. Fix by recreating the volume: `docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build --renew-anon-volumes hugegraph` — note this **wipes the graph data**, so re-run Steps 5-6. To keep the data, `docker cp` the new jar into `/hugegraph-server/lib/` and `docker restart hugegraph` instead |
 | Ranger Admin returns 401 | Wrong password | Ranger Admin password is `rangerR0cks!` — hardcoded in the image, not overridable via env var |
 | HugeGraph container exits immediately | Bad `rest-server.properties` mount | Run `docker logs hugegraph` and check for config parse errors |
 | Ranger Admin slow to start | DB initialisation takes time | The `start_period` is 180 s — wait up to 3 min before assuming a failure |

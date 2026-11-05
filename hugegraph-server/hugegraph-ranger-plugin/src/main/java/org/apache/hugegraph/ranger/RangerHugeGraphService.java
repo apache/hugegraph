@@ -36,6 +36,7 @@ import java.util.TreeSet;
 
 import org.apache.ranger.plugin.service.RangerBaseService;
 import org.apache.ranger.plugin.service.ResourceLookupContext;
+import org.apache.ranger.plugin.util.PasswordUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -100,14 +101,16 @@ public class RangerHugeGraphService extends RangerBaseService {
     }
 
     /**
-     * Tests connectivity to HugeGraph by making a GET request to /versions.
-     * Called by Ranger Admin's "Test Connection" button.
+     * Tests connectivity and the configured credentials by listing the graphs
+     * of the DEFAULT graphspace, the same authenticated call the graph lookup
+     * makes. Called by Ranger Admin's "Test Connection" button. A public
+     * endpoint such as /versions would succeed with any credentials.
      */
     @Override
     public HashMap<String, Object> validateConfig() throws Exception {
         HashMap<String, Object> result = new HashMap<>();
 
-        String testUrl = baseUrl() + "/versions";
+        String testUrl = baseUrl() + "/graphspaces/" + DEFAULT_GRAPHSPACE + "/graphs";
         LOG.info("Testing connection to HugeGraph at {}", testUrl);
 
         try {
@@ -119,12 +122,15 @@ public class RangerHugeGraphService extends RangerBaseService {
                 conn.disconnect();
             }
 
-            // 401/403 mean HugeGraph is up but rejected the configured
-            // credentials — the endpoint is still reachable.
-            if (code == 200 || code == 401 || code == 403) {
+            if (code == 200) {
                 result.put("connectivityStatus", true);
                 result.put("message", "Connected to HugeGraph (HTTP " + code + ")");
                 LOG.info("HugeGraph connection test succeeded (HTTP {})", code);
+            } else if (code == 401 || code == 403) {
+                result.put("connectivityStatus", false);
+                result.put("message", "HugeGraph rejected the configured username/password (HTTP " +
+                                      code + " from " + testUrl + ")");
+                LOG.warn("HugeGraph connection test failed: credentials rejected (HTTP {})", code);
             } else {
                 result.put("connectivityStatus", false);
                 result.put("message", "Unexpected HTTP " + code + " from " + testUrl);
@@ -258,7 +264,7 @@ public class RangerHugeGraphService extends RangerBaseService {
         conn.setRequestProperty("Accept", "application/json");
 
         String username = configValue(CONFIG_USERNAME, null);
-        String password = configValue(CONFIG_PASSWORD, null);
+        String password = decryptPassword(configValue(CONFIG_PASSWORD, null));
         if (username != null && !username.isEmpty()) {
             String creds = username + ":" + (password == null ? "" : password);
             String encoded = Base64.getEncoder().encodeToString(
@@ -266,6 +272,24 @@ public class RangerHugeGraphService extends RangerBaseService {
             conn.setRequestProperty("Authorization", "Basic " + encoded);
         }
         return conn;
+    }
+
+    /**
+     * Ranger Admin hands service implementations the password re-encrypted
+     * (ServiceMgr -> RangerServiceService.getConfigsWithDecryptedPassword), so
+     * it must be decrypted before use, as Ranger's own lookup clients do. A
+     * value that is not encrypted (e.g. typed into a test config) is used as is.
+     */
+    private static String decryptPassword(String password) {
+        if (password == null || password.isEmpty()) {
+            return password;
+        }
+        try {
+            return PasswordUtils.decryptPassword(password);
+        } catch (Exception e) {
+            LOG.debug("Password is not Ranger-encrypted, using it as given: {}", e.toString());
+            return password;
+        }
     }
 
     private static String readBody(InputStream in) throws IOException {

@@ -38,7 +38,7 @@ import org.apache.hugegraph.auth.ResourceType;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
 import org.apache.hugegraph.auth.UserWithRole;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.util.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

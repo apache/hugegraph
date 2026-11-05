@@ -111,12 +111,12 @@ public class ResourceObject<V> {
      */
     public String label() {
         if (this.type.isSchema()) {
-            return ((Nameable) this.operated).name();
+            return ((Namifiable) this.operated).name();
         } else if (this.type.isGraph()) {
             if (this.operated instanceof HugeElement) {
                 return ((HugeElement) this.operated).label();
             }
-            return ((Nameable) this.operated).name();
+            return ((Namifiable) this.operated).name();
         }
         return "*";
     }

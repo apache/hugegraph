@@ -34,11 +34,9 @@
     <description>Apache Ranger authorization plugin for HugeGraph</description>
 
     <properties>
-        <ranger.version>2.4.0</ranger.version>
-        <!-- Ranger Admin runs Java 8; compile to class file 52 so the plugin
-             JAR loads on both HugeGraph (Java 11) and Ranger Admin (Java 8). -->
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
+        <!-- Keep in step with the apache/ranger base image in
+             docker/hgRangerIntegration/Dockerfile.ranger. -->
+        <ranger.version>2.9.0</ranger.version>
     </properties>
 
     <dependencies>
@@ -68,6 +66,24 @@
                 <exclusion>
                     <groupId>org.apache.hadoop</groupId>
                     <artifactId>hadoop-auth</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Since Ranger 2.7 the audit destinations are separate artifacts;
+             ranger-plugins-common only brings ranger-audit-core (file
+             destination). Needed for xasecure.audit.destination.solr. -->
+        <dependency>
+            <groupId>org.apache.ranger</groupId>
+            <artifactId>ranger-audit-dest-solr</artifactId>
+            <version>${ranger.version}</version>
+            <exclusions>
+                <!-- It declares slf4j-api 2.x directly, which would win over
+                     HugeGraph's 1.7 line and get shaded into lib/; SLF4J 2.x
+                     ignores the log4j-slf4j-impl binding and turns all server
+                     logging into NOP. solrj 8.x only needs the 1.7 API. -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -114,7 +130,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.4.1</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
