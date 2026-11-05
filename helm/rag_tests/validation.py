@@ -83,6 +83,9 @@ class RagValidationMixin:
             ({"persistence": {"size": "1e"}}, "persistence.size"),
             ({"persistence": {"accessModes": ["ReadWriteSome"]}}, "accessModes"),
             ({"persistence": {"accessModes": "ReadWriteOnce"}}, "accessModes"),
+            ({"persistence": {
+                "accessModes": ["ReadWriteOncePod", "ReadWriteOnce"],
+            }}, "ReadWriteOncePod"),
             ({"persistence": {"mountPath": "relative/path"}}, "mountPath"),
             ({"extraVolumeMounts": [{"name": "other", "mountPath": RAG_MOUNT}]},
              "extraVolumeMounts"),
