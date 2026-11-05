@@ -118,7 +118,8 @@ suite-selection and required-check policy.
 PR selection uses the cumulative diff against the checked-out merge commit's base. A source
 PR followed by a documentation-only commit still tests the cumulative source changes.
 Preflight verifies that the event merge commit's second parent matches the current PR head.
-A stale PR head fails preflight. Target-branch advancement alone does not invalidate a run.
+A stale PR head, a changed target branch, or a target branch whose history no longer contains
+the tested base fails preflight. Target-branch advancement alone does not invalidate a run.
 Plans and selection summaries describe this run; previous results are never reused.
 
 A new PR head or master push cancels the previous automatic run for that PR or master ref,

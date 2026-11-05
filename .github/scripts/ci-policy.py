@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from urllib.parse import quote
 
 MAINLINE = {"server", "commons", "struct", "pd", "store", "hstore", "cluster", "docker", "helm",
             "dependency_license", "macos", "security", "distributed_smoke"}
@@ -289,8 +290,13 @@ def require_current_pr(plan, fetch):
     if (live.get("state") != "open" or live["head"]["sha"] != plan["head"]
             or live["head"]["repo"]["full_name"] != plan["source"]
             or live["head"]["ref"] != plan["branch"]
-            or live["base"]["repo"]["full_name"] != plan["repository"]):
+            or live["base"]["repo"]["full_name"] != plan["repository"]
+            or live["base"]["ref"] != plan["target"]):
         raise StaleInputError("PR inputs changed; refresh the branch and start a new PR run")
+    # Target advancement is fine; a force-pushed target no longer contains the tested base.
+    compare = fetch(f"repos/{plan['repository']}/compare/{plan['base']}...{quote(plan['target'])}")
+    if compare["status"] not in {"ahead", "identical"}:
+        raise StaleInputError("PR target history changed; start a new PR run")
 
 
 def create_plan(project, event, repository, fetch=api, event_name=None):
@@ -298,7 +304,7 @@ def create_plan(project, event, repository, fetch=api, event_name=None):
         "pull_request" if "pull_request" in event else "push")
     paths = []
     plan = {"schema": 1, "project": project, "repository": repository, "pr": 0,
-            "source": repository, "branch": "", "base": "", "head": git("rev-parse", "HEAD"),
+            "source": repository, "branch": "", "target": "", "base": "", "head": git("rev-parse", "HEAD"),
             "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD"), "event": event_name}
     try:
         pr = event.get("pull_request")
@@ -308,10 +314,11 @@ def create_plan(project, event, repository, fetch=api, event_name=None):
             plan["pr"] = pr["number"]
             try:
                 plan.update(source=pr["head"]["repo"]["full_name"], base=pr["base"]["sha"],
-                            head=pr["head"]["sha"], branch=pr["head"]["ref"])
+                            head=pr["head"]["sha"], branch=pr["head"]["ref"], target=pr["base"]["ref"])
             except (KeyError, TypeError) as error:
                 raise StaleInputError("PR event lacks required input identity") from error
-            if not all(isinstance(plan[key], str) and plan[key] for key in ("source", "base", "head", "branch")):
+            if not all(isinstance(plan[key], str) and plan[key]
+                       for key in ("source", "base", "head", "branch", "target")):
                 raise StaleInputError("PR event has an empty input identity")
             parents = git("show", "-s", "--format=%P", plan["testedMergeSHA"]).split()
             if (plan["testedMergeSHA"] != os.environ.get("GITHUB_SHA")
