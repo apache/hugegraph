@@ -48,7 +48,9 @@ class RagBasicMixin:
         data_mount, = [mount for mount in container["volumeMounts"] if mount["name"] == "data"]
         self.assertEqual(RAG_MOUNT, data_mount["mountPath"])
 
-        pod_security = pod(deployment)["spec"]["securityContext"]
+        pod_spec = pod(deployment)["spec"]
+        self.assertFalse(pod_spec["enableServiceLinks"])
+        pod_security = pod_spec["securityContext"]
         self.assertTrue(pod_security["runAsNonRoot"])
         self.assertEqual(1000, pod_security["runAsUser"])
         self.assertEqual(1000, pod_security["runAsGroup"])
@@ -57,7 +59,7 @@ class RagBasicMixin:
         self.assertFalse(container["securityContext"]["privileged"])
         self.assertFalse(container["securityContext"]["allowPrivilegeEscalation"])
         self.assertEqual(["ALL"], container["securityContext"]["capabilities"]["drop"])
-        self.assertFalse(pod(deployment)["spec"]["automountServiceAccountToken"])
+        self.assertFalse(pod_spec["automountServiceAccountToken"])
 
         environment = env_by_name(container)
         self.assertEqual(RAG_MOUNT, environment["HUGEGRAPH_LLM_RESOURCE_PATH"]["value"])

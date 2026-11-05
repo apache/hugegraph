@@ -67,6 +67,9 @@ spec:
         {{- with get $rag "podAnnotations" }}{{ toYaml . | nindent 8 }}{{- end }}
       {{- end }}
     spec:
+      # Kubernetes Service links can overwrite typed application settings such
+      # as QDRANT_PORT and MILVUS_PORT with tcp://... discovery placeholders.
+      enableServiceLinks: false
       {{- $serviceAccount := get $rag "serviceAccount" | default dict }}
       {{- $serviceAccountCreate := true }}
       {{- if hasKey $serviceAccount "create" }}{{- $serviceAccountCreate = get $serviceAccount "create" }}{{- end }}
