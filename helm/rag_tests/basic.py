@@ -39,7 +39,12 @@ class RagBasicMixin:
         self.assertEqual(["python", "-m", "hugegraph_llm.demo.rag_demo.app"], container["command"])
         self.assertEqual(["--host", "0.0.0.0", "--port", "8001"], container["args"])
         self.assertEqual("ClusterIP", service["spec"]["type"])
+        self.assertEqual("http", service["spec"]["ports"][0]["targetPort"])
         self.assertEqual("10Gi", pvc["spec"]["resources"]["requests"]["storage"])
+        self.assertEqual(["ReadWriteOnce"], pvc["spec"]["accessModes"])
+        self.assertEqual("keep", pvc["metadata"]["annotations"]["helm.sh/resource-policy"])
+        data_mount, = [mount for mount in container["volumeMounts"] if mount["name"] == "data"]
+        self.assertEqual(RAG_MOUNT, data_mount["mountPath"])
 
         pod_security = pod(deployment)["spec"]["securityContext"]
         self.assertTrue(pod_security["runAsNonRoot"])
