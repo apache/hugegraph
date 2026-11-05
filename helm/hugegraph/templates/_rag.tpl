@@ -23,11 +23,6 @@
 {{- printf "%s-data" (include "hugegraph.rag.name" . | trunc 58 | trimSuffix "-") -}}
 {{- end }}
 
-{{- define "hugegraph.rag.replicas" -}}
-{{- $rag := get .Values "rag" | default dict -}}
-{{- if hasKey $rag "replicas" -}}{{- get $rag "replicas" -}}{{- else -}}1{{- end -}}
-{{- end }}
-
 {{- define "hugegraph.rag.port" -}}
 {{- $rag := get .Values "rag" | default dict -}}
 {{- if hasKey $rag "port" -}}{{- get $rag "port" -}}{{- else -}}8001{{- end -}}

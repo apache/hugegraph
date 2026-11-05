@@ -17,15 +17,6 @@
 
 {{- define "hugegraph.rag.validate.runtime" -}}
 {{- $rag := get .Values "rag" | default dict -}}
-{{- $rawReplicas := "1" -}}
-{{- if hasKey $rag "replicas" -}}{{- $rawReplicas = get $rag "replicas" | toString -}}{{- end -}}
-{{- if not (regexMatch "^[0-9]+$" $rawReplicas) -}}
-{{- fail "rag.replicas must be the integer 1" -}}
-{{- end -}}
-{{- $replicas := int $rawReplicas -}}
-{{- if ne $replicas 1 -}}
-{{- fail "rag.replicas must be 1: the current HugeGraph RAG runtime keeps mutable configuration in one process and one writable resource tree, so multi-replica deployment is not supported" -}}
-{{- end -}}
 {{- $rawPort := "8001" -}}
 {{- if hasKey $rag "port" -}}{{- $rawPort = get $rag "port" | toString -}}{{- end -}}
 {{- if not (regexMatch "^[0-9]+$" $rawPort) -}}

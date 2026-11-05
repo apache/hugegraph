@@ -78,6 +78,7 @@ class RagValidationMixin:
             ({"persistence": {"size": "100K"}}, "persistence.size"),
             ({"persistence": {"existingClaim": 123}}, "existingClaim"),
             ({"persistence": {"existingClaim": True}}, "existingClaim"),
+            ({"persistence": {"storageClassName": 123}}, "storageClassName"),
             ({"persistence": {"size": "-1Gi"}}, "persistence.size"),
             ({"persistence": {"size": "0Gi"}}, "persistence.size"),
             ({"persistence": {"size": "1e"}}, "persistence.size"),
@@ -102,6 +103,16 @@ class RagValidationMixin:
                 result = self.render(values)
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn(expected.replace("/", "."), result.stderr.replace("/", "."))
+
+    def test_storage_class_name_values_render_as_strings(self):
+        for storage_class, expected in (("", None), ("-", ""), ("123", "123"), ("fast", "fast")):
+            with self.subTest(storageClassName=storage_class):
+                documents = self.documents({"persistence": {"storageClassName": storage_class}})
+                claim, = component_resources(documents, kind="PersistentVolumeClaim")
+                if expected is None:
+                    self.assertNotIn("storageClassName", claim["spec"])
+                else:
+                    self.assertEqual(expected, claim["spec"]["storageClassName"])
 
     def test_reserved_data_volume_and_mount_path_are_available_when_persistence_is_off(self):
         documents = self.documents({

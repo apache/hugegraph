@@ -39,7 +39,7 @@ metadata:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: rag
 spec:
-  replicas: {{ include "hugegraph.rag.replicas" . | int }}
+  replicas: 1
   # The application keeps mutable runtime configuration in-process. Recreate
   # preserves the chart's single-active-pod contract even when persistence is off.
   strategy:

@@ -186,6 +186,10 @@
           },
           "then": {
             "properties": {
+              "replicas": {
+                "type": "integer",
+                "const": 1
+              },
               "hugegraph": {
                 "type": "object",
                 "properties": {
@@ -197,6 +201,9 @@
               "persistence": {
                 "type": "object",
                 "properties": {
+                  "storageClassName": {
+                    "type": "string"
+                  },
                   "enabled": {
                     "type": [
                       "boolean",

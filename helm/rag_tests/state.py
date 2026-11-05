@@ -16,6 +16,8 @@
 
 """State and network regression coverage for the optional RAG component."""
 
+import yaml
+
 from .support import (
     RAG_EPHEMERAL_ENV, RAG_MOUNT, component_resources, env_by_name, pod,
 )
@@ -81,7 +83,13 @@ class RagStateMixin:
             with self.subTest(persistence=persistence):
                 result = self.render({"replicas": 2, "persistence": persistence})
                 self.assertNotEqual(0, result.returncode)
-                self.assertIn("rag.replicas", result.stderr)
+                self.assertIn("rag.replicas", result.stderr.replace("/", "."))
+
+    def test_single_replica_remains_fixed_without_schema_validation(self):
+        result = self.render({"replicas": 2}, skip_schema_validation=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        documents = [document for document in yaml.safe_load_all(result.stdout) if document]
+        self.assertEqual(1, self.deployment(documents)["spec"]["replicas"])
 
     def test_strict_network_policy_allows_only_scoped_server_and_dns_rules(self):
         documents = self.documents({}, mode="strict")

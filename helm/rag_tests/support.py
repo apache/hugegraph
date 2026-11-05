@@ -57,7 +57,7 @@ class RagChartBase(unittest.TestCase):
         if shutil.which("helm") is None:
             raise unittest.SkipTest("Helm is required for rendered chart regression tests")
 
-    def render(self, rag=None, preset=None, mode=None, use_profile=True, **values):
+    def render(self, rag=None, preset=None, mode=None, use_profile=True, skip_schema_validation=False, **values):
         if rag is not None:
             values["rag"] = {"enabled": True, **rag}
         if mode is not None:
@@ -68,6 +68,8 @@ class RagChartBase(unittest.TestCase):
             # across Python YAML 1.1 and Helm YAML 1.2 parsers.
             configuration.write_text(json.dumps(values), encoding="utf-8")
             command = ["helm", "template", "fixture", str(CHART), "--namespace", "graphs"]
+            if skip_schema_validation:
+                command.append("--skip-schema-validation")
             if preset is not None:
                 command.extend(["-f", str(CHART / preset)])
             if rag is not None and use_profile:
