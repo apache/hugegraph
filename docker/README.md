@@ -112,6 +112,11 @@ an explicit `-Xmx` that exceeds the container's limit.
 
 This is the recommended quickstart.
 
+For a single Server without Hubble, or an unpacked binary distribution, see
+[Standalone Server deployment](../docs/deployment-standalone.md). The standard
+image is `hugegraph/hugegraph`; `hugegraph/server` selects HStore defaults and
+requires PD/Store unless its backend configuration is explicitly replaced.
+
 Start:
 
 ```bash

@@ -106,6 +106,32 @@ for provider in unset rocksdb topling; do
         grep -q 'competing RocksDB JNI in LD_PRELOAD' "$TEST_ROOT/error"
     done
 done
+# Relative overrides must survive cd to TOP, CDPATH, and symlink/.. semantics.
+mkdir -p "$TEST_ROOT/server/physical/child"
+cp "$TEST_ROOT/server/conf/toplingdb.yaml" "$TEST_ROOT/server/physical/custom.yaml"
+ln -s "$TEST_ROOT/server/physical/child" "$TEST_ROOT/profile-link"
+for scenario in relative cdpath symlink; do
+PATH="$TEST_ROOT/fake-bin:$PATH" bash -ec '
+    unset TOPLING_ACTIVE_NATIVE TOPLING_RUNTIME_CLASSPATH TOPLING_AUTO_MIGRATE_CONF
+    export TOPLINGDB_ROCKSDB_PROVIDER=topling
+    cd "$1"
+    export TOPLINGDB_EASY_MIGRATE_CONF=server/conf/toplingdb.yaml
+    expected="$1/server/conf/toplingdb.yaml"
+    if [[ "$2" == cdpath ]]; then
+        export CDPATH=.
+    elif [[ "$2" == symlink ]]; then
+        export TOPLINGDB_EASY_MIGRATE_CONF=profile-link/../custom.yaml
+        expected="$1/server/physical/custom.yaml"
+    fi
+    source server/bin/preload-topling.sh
+    if [[ "$2" == cdpath ]]; then
+        test "$CDPATH" = .
+    fi
+    cd "$1/pd"
+    test "$TOPLINGDB_EASY_MIGRATE_CONF" = "$expected"
+    test -r "$TOPLINGDB_EASY_MIGRATE_CONF"
+' _ "$TEST_ROOT" "$scenario"
+done
 # Older or modified preparations must be verified again before launch.
 for state in missing stale; do
     receipt="$TEST_ROOT/server/topling/easy-migrate.sha256"
