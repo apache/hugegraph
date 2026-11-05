@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.business.itrv2;
 
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 
@@ -34,12 +35,22 @@ public class MapLimitIterator<T> implements ScanIterator {
 
     private static final Integer SET_MAX_SIZE = 100000;
     private final ScanIterator iterator;
-    private final Set<T> set;
+    private final Function<T, ?> keyFunction;
+    private final Set<Object> set;
     private T current = null;
     private boolean closed;
 
     public MapLimitIterator(ScanIterator iterator) {
+        this(iterator, Function.identity());
+    }
+
+    /**
+     * @param keyFunction maps an element to the key it is deduplicated on, for element types
+     *                    without equals/hashCode
+     */
+    public MapLimitIterator(ScanIterator iterator, Function<T, ?> keyFunction) {
         this.iterator = iterator;
+        this.keyFunction = keyFunction;
         set = new ConcurrentHashSet<>();
     }
 
@@ -66,7 +77,7 @@ public class MapLimitIterator<T> implements ScanIterator {
         }
         while (iterator.hasNext()) {
             var tmp = (T) iterator.next();
-            if (tmp != null && !set.contains(tmp)) {
+            if (tmp != null && !set.contains(keyFunction.apply(tmp))) {
                 current = tmp;
                 break;
             }
@@ -74,7 +85,7 @@ public class MapLimitIterator<T> implements ScanIterator {
 
         // Control the size of the set
         if (current != null && set.size() <= SET_MAX_SIZE) {
-            set.add(current);
+            set.add(keyFunction.apply(current));
         }
 
         return current != null;

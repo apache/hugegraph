@@ -726,7 +726,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
             case DEDUP:
                 return new InAccurateUnionFilterIterator<>(result, getBaseElementHashFunction());
             case LIMIT_DEDUP:
-                return new MapLimitIterator<>(result);
+                return new MapLimitIterator<BaseElement>(result, BaseElement::id);
             case PRECISE_DEDUP:
                 var wrapper = new IntersectionWrapper<>(result, getBaseElementHashFunction());
                 wrapper.proc();
