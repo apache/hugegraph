@@ -16,6 +16,8 @@
 
 """State and network regression coverage for the optional RAG component."""
 
+import subprocess
+
 import yaml
 
 from .support import (
@@ -95,6 +97,17 @@ class RagStateMixin:
                 self.assertIn("rag.replicas", result.stderr.replace("/", "."))
 
     def test_single_replica_remains_fixed_without_schema_validation(self):
+        template_help = subprocess.run(
+            ["helm", "template", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(0, template_help.returncode, template_help.stderr)
+        if "--skip-schema-validation" not in template_help.stdout:
+            self.skipTest("helm template lacks --skip-schema-validation")
+
         result = self.render({"replicas": 2}, skip_schema_validation=True)
         self.assertEqual(0, result.returncode, result.stderr)
         documents = [document for document in yaml.safe_load_all(result.stdout) if document]
