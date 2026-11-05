@@ -26,7 +26,7 @@ helm upgrade --install hugegraph ./helm/hugegraph \
   -f helm/hugegraph/values-cluster.yaml \
   -f helm/hugegraph/values-rag.yaml \
   --wait --timeout 15m
-kubectl -n hugegraph port-forward svc/hugegraph-hugegraph-rag 8001:8001
+kubectl -n hugegraph port-forward svc/hugegraph-rag 8001:8001
 ```
 
 For a single-node HugeGraph deployment with RAG:
@@ -37,7 +37,7 @@ helm upgrade --install hugegraph ./helm/hugegraph \
   -f helm/hugegraph/values-single.yaml \
   -f helm/hugegraph/values-rag.yaml \
   --wait --timeout 15m
-kubectl -n hugegraph port-forward svc/hugegraph-hugegraph-rag 8001:8001
+kubectl -n hugegraph port-forward svc/hugegraph-rag 8001:8001
 ```
 
 Open http://127.0.0.1:8001/. A different release name changes the Service name;
@@ -108,7 +108,7 @@ request prompts. Only explicit saves/index generation require writable storage.
 Deployment file/Secret changes require a restart:
 
 ```bash
-kubectl -n hugegraph rollout restart deployment/hugegraph-hugegraph-rag
+kubectl -n hugegraph rollout restart deployment/hugegraph-rag
 ```
 
 There is no automatic file hot reload. An online Helm upgrade observes an explicit
