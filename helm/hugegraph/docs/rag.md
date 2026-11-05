@@ -12,23 +12,60 @@ RAG remains a single process with a persistent resource directory.
 
 ## Start and open RAG
 
+Run these commands from the repository root. Before installing, provide a
+Kubernetes cluster with enough CPU and memory, working persistent-volume
+provisioning, and access to the compatible latest/1.8 RAG image described above.
+The cluster preset runs three PD, three Store and three Server replicas and
+requires scheduling them across nodes; RAG itself still runs one replica. By
+default the RAG resource PVC requests 10Gi, separately from PD and Store storage.
+
+For a distributed HugeGraph cluster with RAG:
+
+```bash
+helm upgrade --install hugegraph ./helm/hugegraph \
+  -n hugegraph --create-namespace \
+  -f helm/hugegraph/values-cluster.yaml \
+  -f helm/hugegraph/values-rag.yaml \
+  --wait --timeout 15m
+kubectl -n hugegraph port-forward svc/hugegraph-hugegraph-rag 8001:8001
+```
+
+For a single-node HugeGraph deployment with RAG:
+
 ```bash
 helm upgrade --install hugegraph ./helm/hugegraph \
   -n hugegraph --create-namespace \
   -f helm/hugegraph/values-single.yaml \
-  -f helm/hugegraph/values-rag.yaml
+  -f helm/hugegraph/values-rag.yaml \
+  --wait --timeout 15m
 kubectl -n hugegraph port-forward svc/hugegraph-hugegraph-rag 8001:8001
 ```
 
 Open http://127.0.0.1:8001/. A different release name changes the Service name;
-Helm prints the matching command. For distributed HugeGraph, use
-`values-cluster.yaml` instead of `values-single.yaml`.
+Helm prints the matching command.
 
 The only required RAG value is `rag.enabled: true`. The chart derives the full
 Server HTTP URL, graph space, admin identity and administrator Secret from the
 release. Graph name defaults to `hugegraph`; override `rag.hugegraph.graphName`
 for another graph. Model services and credentials are needed for inference.
 The UI being reachable does not establish that Server or model services are ready.
+
+### Configure models in the web UI
+
+No model key needs to be placed in Helm values before installation. After opening
+the RAG page, use the configuration section to select an OpenAI-compatible or
+Ollama Chat provider and enter its address, model and, where required, API key.
+Choose **Save configuration**, then **Test saved connection**. Configure an
+Embedding provider in the same way before workflows that need embeddings or
+vector indexes. Reranker and external vector-engine settings are optional and
+depend on the chosen workflow. Extraction and Text2GQL use Chat by default.
+
+When RAG and Server belong to this release, the chart supplies the Server
+connection and administrator Secret automatically. Use the HugeGraph server
+configuration section only when connecting to a different Server or graph.
+Model endpoints must be reachable from the RAG Pod. Values saved in the web UI
+persist on the RAG PVC; alternatively, operators can supply bootstrap defaults
+through mounted files and Kubernetes Secrets as described below.
 
 RAG uses ClusterIP by default. Put external exposure behind an authenticated
 reverse proxy: the application's login does not protect every HTTP route.
