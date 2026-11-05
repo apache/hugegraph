@@ -65,6 +65,13 @@
 {{- if or (not $mountPath) (not (hasPrefix "/" $mountPath)) -}}
 {{- fail "rag.persistence.mountPath must be an absolute path" -}}
 {{- end -}}
+{{- $existingClaim := trim (get $persistence "existingClaim" | default "" | toString) -}}
+{{- if not $existingClaim -}}
+{{- $accessModes := get $persistence "accessModes" | default (list "ReadWriteOnce") -}}
+{{- if and (has "ReadWriteOncePod" $accessModes) (ne (len $accessModes) 1) -}}
+{{- fail "rag.persistence.accessModes must contain only ReadWriteOncePod when that mode is selected" -}}
+{{- end -}}
+{{- end -}}
 {{- range $mount := get $rag "extraVolumeMounts" | default (list) -}}
 {{- if eq (get $mount "mountPath" | default "" | toString) $mountPath -}}
 {{- fail "rag.extraVolumeMounts must not use rag.persistence.mountPath when persistence is enabled" -}}
