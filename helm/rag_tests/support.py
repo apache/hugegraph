@@ -29,9 +29,7 @@ import yaml
 CHART = Path(__file__).resolve().parents[1] / "hugegraph"
 HELM_TEMPLATE_TIMEOUT_SECONDS = 120
 RAG_MOUNT = "/var/lib/hugegraph-rag"
-RAG_PERSISTENT_ENV = f"{RAG_MOUNT}/.env"
 RAG_EPHEMERAL_ENV = "/tmp/hugegraph-llm.env"
-RAG_ENV = RAG_PERSISTENT_ENV
 
 
 def component_resources(documents, component="rag", kind=None):

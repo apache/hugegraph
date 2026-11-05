@@ -16,7 +16,7 @@
 
 """Basic rendered contracts for the optional HugeGraph RAG component."""
 
-from .support import RAG_MOUNT, RAG_PERSISTENT_ENV, component_resources, env_by_name, pod
+from .support import RAG_MOUNT, component_resources, env_by_name, pod
 
 
 class RagBasicMixin:
@@ -60,11 +60,9 @@ class RagBasicMixin:
         self.assertFalse(pod(deployment)["spec"]["automountServiceAccountToken"])
 
         environment = env_by_name(container)
-        self.assertEqual(RAG_PERSISTENT_ENV, environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
-        self.assertEqual(
-            f"{RAG_MOUNT}/demo/config_prompt.yaml",
-            environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
-        )
+        self.assertEqual(RAG_MOUNT, environment["HUGEGRAPH_LLM_RESOURCE_PATH"]["value"])
+        self.assertNotIn("HUGEGRAPH_LLM_ENV_PATH", environment)
+        self.assertNotIn("HUGEGRAPH_LLM_PROMPT_CONFIG_PATH", environment)
 
     def test_default_profile_uses_internal_server_contract(self):
         documents = self.documents({})

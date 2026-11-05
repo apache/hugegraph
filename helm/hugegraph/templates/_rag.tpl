@@ -120,22 +120,6 @@ password
 {{- get $persistence "mountPath" | default "/var/lib/hugegraph-rag" -}}
 {{- end }}
 
-{{- define "hugegraph.rag.envPath" -}}
-{{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
-{{- printf "%s/.env" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
-{{- else -}}
-/tmp/hugegraph-llm.env
-{{- end -}}
-{{- end }}
-
-{{- define "hugegraph.rag.promptConfigPath" -}}
-{{- if eq (include "hugegraph.rag.persistenceEnabled" .) "true" -}}
-{{- printf "%s/demo/config_prompt.yaml" (include "hugegraph.rag.mountPath" . | trimSuffix "/") -}}
-{{- else -}}
-/home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
-{{- end -}}
-{{- end }}
-
 {{- define "hugegraph.rag.claimName" -}}
 {{- $rag := get .Values "rag" | default dict -}}
 {{- $persistence := get $rag "persistence" | default dict -}}

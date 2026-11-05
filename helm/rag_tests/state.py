@@ -36,19 +36,28 @@ class RagStateMixin:
         container = self.container(self.documents({"envFrom": [{"secretRef": {"name": "rag-model"}}]}))
         self.assertEqual([{"secretRef": {"name": "rag-model"}}], container["envFrom"])
 
-    def test_custom_mount_path_updates_both_durable_config_paths(self):
+    def test_custom_mount_path_sets_resource_root_for_application_defaults(self):
         mount_path = "/srv/hugegraph-rag"
         documents = self.documents({"persistence": {"mountPath": mount_path}})
         container = self.container(documents)
         environment = env_by_name(container)
-        self.assertEqual(f"{mount_path}/.env", environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
-        self.assertEqual(
-            f"{mount_path}/demo/config_prompt.yaml",
-            environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"],
-        )
+        self.assertNotIn("HUGEGRAPH_LLM_ENV_PATH", environment)
+        self.assertNotIn("HUGEGRAPH_LLM_PROMPT_CONFIG_PATH", environment)
         mount, = [item for item in container["volumeMounts"] if item["name"] == "data"]
         self.assertEqual(mount_path, mount["mountPath"])
         self.assertEqual(mount_path, environment["HUGEGRAPH_LLM_RESOURCE_PATH"]["value"])
+
+    def test_explicit_configuration_paths_and_env_from_are_preserved(self):
+        explicit = [
+            {"name": "HUGEGRAPH_LLM_ENV_PATH", "value": "/mounted/config.env"},
+            {"name": "HUGEGRAPH_LLM_PROMPT_CONFIG_PATH", "value": "/mounted/prompts.yaml"},
+        ]
+        env_from = [{"secretRef": {"name": "rag-model"}}]
+        container = self.container(self.documents({"env": explicit, "envFrom": env_from}))
+        environment = env_by_name(container)
+        self.assertEqual("/mounted/config.env", environment["HUGEGRAPH_LLM_ENV_PATH"]["value"])
+        self.assertEqual("/mounted/prompts.yaml", environment["HUGEGRAPH_LLM_PROMPT_CONFIG_PATH"]["value"])
+        self.assertEqual(env_from, container["envFrom"])
 
     def test_persistence_can_be_disabled_for_disposable_runs(self):
         documents = self.documents({"persistence": {"enabled": False}})

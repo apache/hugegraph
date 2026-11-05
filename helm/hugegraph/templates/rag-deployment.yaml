@@ -152,13 +152,13 @@ spec:
             - name: HUGEGRAPH_LLM_RESOURCE_PATH
               value: {{ include "hugegraph.rag.mountPath" . | quote }}
             {{- end }}
-            {{- if not (hasKey $envNames "HUGEGRAPH_LLM_ENV_PATH") }}
+            {{- if and (not $persistenceEnabled) (not (hasKey $envNames "HUGEGRAPH_LLM_ENV_PATH")) }}
             - name: HUGEGRAPH_LLM_ENV_PATH
-              value: {{ include "hugegraph.rag.envPath" . | quote }}
+              value: /tmp/hugegraph-llm.env
             {{- end }}
-            {{- if not (hasKey $envNames "HUGEGRAPH_LLM_PROMPT_CONFIG_PATH") }}
+            {{- if and (not $persistenceEnabled) (not (hasKey $envNames "HUGEGRAPH_LLM_PROMPT_CONFIG_PATH")) }}
             - name: HUGEGRAPH_LLM_PROMPT_CONFIG_PATH
-              value: {{ include "hugegraph.rag.promptConfigPath" . | quote }}
+              value: /home/work/hugegraph-llm/src/hugegraph_llm/resources/demo/config_prompt.yaml
             {{- end }}
             {{- with get $rag "env" }}
             {{- toYaml . | nindent 12 }}
