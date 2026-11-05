@@ -71,6 +71,11 @@ class RagBasicMixin:
         service, = component_resources(documents, kind="Service")
         environment = env_by_name(container)
 
+        self.assertEqual(
+            "hugegraph/rag@sha256:"
+            "4eec308ba92d952221a7f42f1ddfd33ece18bde15a25396e1417ece180630aa1",
+            container["image"],
+        )
         self.assertEqual("http://fixture-hugegraph-server.graphs.svc:8080", environment["GRAPH_URL"]["value"])
         self.assertEqual("hugegraph", environment["GRAPH_NAME"]["value"])
         self.assertEqual("DEFAULT", environment["GRAPH_SPACE"]["value"])

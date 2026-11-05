@@ -23,7 +23,10 @@ rag:
   image:
     repository: hugegraph/rag
     tag: latest
-    digest: ''
+    # The digest wins over tag and pins the multi-architecture image validated
+    # with this chart. Override repository and clear or replace digest together;
+    # tag is used only when digest is empty.
+    digest: sha256:4eec308ba92d952221a7f42f1ddfd33ece18bde15a25396e1417ece180630aa1
     pullPolicy: Always
   port: 8001
 
@@ -85,7 +88,8 @@ rag:
   # Unset inherits the top-level persistence.enabled value (true by default).
   # The claim stores the editable .env, prompt configuration, indexes and
   # resource tree. Missing example assets are read from the image, so startup
-  # needs no seeding. Requires the paired HugeGraph AI configuration refactor.
+  # needs no seeding. The pinned image implements the required external-
+  # configuration contract.
   persistence:
     enabled:
     existingClaim: ''
