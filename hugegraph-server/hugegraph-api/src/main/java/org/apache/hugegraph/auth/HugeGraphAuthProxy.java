@@ -1295,10 +1295,11 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         // for admin so the action lands in Ranger's audit log — its verdict
         // is discarded, never allowed to deny admin.
         if (matched && RESOURCE_AUTHORIZER != null) {
-            if (RolePermission.isAdmin((RolePermission) role)) {
-                this.checkResourceAuthorizer(username, actionPerm, ro);
-            } else {
-                matched = this.checkResourceAuthorizer(username, actionPerm, ro);
+            boolean enforce = !RolePermission.isAdmin((RolePermission) role);
+            boolean allowed = this.checkResourceAuthorizer(username, actionPerm,
+                                                           ro, enforce);
+            if (enforce) {
+                matched = allowed;
             }
         }
         V result = matched ? ro.operated() : null;
@@ -1331,26 +1332,28 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
     /**
      * Consult the registered external ResourceAuthorizer for a single
-     * ResourceObject. Repeated calls with the same
-     * (username, graphSpace, graph, resourceType) shape — as happens while
-     * filtering a large traversal result one element at a time — are
-     * rate-limited so audit volume stays bounded; once the limiter is
-     * exhausted for a shape, further calls in that window are allowed
-     * through without re-consulting the authorizer (the earlier calls in
-     * the same window already established the decision).
+     * ResourceObject. When {@code enforce} is set, every call asks the
+     * authorizer for a decision: the label and action of each check can
+     * differ, so no earlier decision stands in for a later one. Only the
+     * auditing is rate-limited, per (username, graphSpace, graph,
+     * resourceType) shape, so filtering a large traversal result one element
+     * at a time keeps audit volume bounded. Without {@code enforce} (admin)
+     * the call exists only for the audit trail, so it is skipped once the
+     * limiter is exhausted and the result is not meaningful.
      */
     private boolean checkResourceAuthorizer(String username, HugePermission actionPerm,
-                                             ResourceObject<?> ro) {
+                                             ResourceObject<?> ro, boolean enforce) {
         String key = username + "/" + ro.graphSpace() + "/" + ro.graph() + "/" + ro.type();
         Id limiterId = IdGenerator.of(key);
         RateLimiter limiter = this.resourceAuthLimiters.getOrFetch(limiterId, id -> {
             return RateLimiter.create(this.auditLogMaxRate);
         });
-        if (!limiter.tryAcquire()) {
+        boolean audit = limiter.tryAcquire();
+        if (!enforce && !audit) {
             return true;
         }
         return RESOURCE_AUTHORIZER.isAllowed(username, ro.graphSpace(), ro.graph(),
-                                             ro.type(), ro.label(), actionPerm);
+                                             ro.type(), ro.label(), actionPerm, audit);
     }
 
     public static class Context {

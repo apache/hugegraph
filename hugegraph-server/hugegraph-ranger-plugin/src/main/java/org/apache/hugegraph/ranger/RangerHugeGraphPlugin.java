@@ -111,17 +111,35 @@ public class RangerHugeGraphPlugin extends RangerBasePlugin implements ResourceA
      * @param permission   requested HugePermission
      * @return true if the Ranger policy grants access
      */
-    @Override
     public boolean isAllowed(String username,
                              String graphSpace,
                              String graph,
                              ResourceType resourceType,
                              String label,
                              HugePermission permission) {
+        return this.isAllowed(username, graphSpace, graph, resourceType,
+                              label, permission, true);
+    }
+
+    /**
+     * Same as {@link #isAllowed(String, String, String, ResourceType, String,
+     * HugePermission)}, but writes the Ranger audit record only when
+     * {@code audit} is set. The policy decision is evaluated either way.
+     */
+    @Override
+    public boolean isAllowed(String username,
+                             String graphSpace,
+                             String graph,
+                             ResourceType resourceType,
+                             String label,
+                             HugePermission permission,
+                             boolean audit) {
         RangerAccessRequestImpl request = buildRequest(
                 username, graphSpace, graph, resourceType, label, permission);
 
-        RangerAccessResult result = isAccessAllowed(request);
+        // A null result processor skips the audit handler but not evaluation
+        RangerAccessResult result = audit ? isAccessAllowed(request) :
+                                    isAccessAllowed(request, null);
         boolean allowed = result != null && result.getIsAllowed();
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ranger check user={} gs={} graph={} type={} label={} " +

@@ -25,7 +25,14 @@ package org.apache.hugegraph.auth;
  */
 public interface ResourceAuthorizer {
 
+    /**
+     * Decide whether {@code username} may perform {@code permission} on the
+     * resource. The decision must not depend on {@code audit}, which only
+     * says whether this check should be recorded in the authorizer's audit
+     * trail; callers suppress auditing to bound audit volume while still
+     * asking for every decision.
+     */
     boolean isAllowed(String username, String graphSpace, String graph,
-                       ResourceType resourceType, String label,
-                       HugePermission permission);
+                      ResourceType resourceType, String label,
+                      HugePermission permission, boolean audit);
 }
