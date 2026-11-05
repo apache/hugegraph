@@ -4,17 +4,16 @@ The chart deploys one RAG instance that connects to the Server Service. This is
 independent of whether HugeGraph uses one PD/Store/Server or a distributed cluster.
 RAG remains a single process with a persistent resource directory.
 
-> This refactor requires [HugeGraph AI PR #96](https://github.com/hugegraph/hugegraph-ai/pull/96) in the
-> `latest`/1.8 image. Merge #96 and publish and validate that image before merging
-> or enabling this chart revision. Until then, this chart change remains blocked
-> on that release; an older `latest` image is not supported. The chart no longer
-> patches application configuration at startup.
+> Use a HugeGraph RAG image built from Apache HugeGraph AI 1.8.0 or later.
+> Earlier images do not implement the external-configuration contract required by
+> this chart. The chart mounts resources and supplies bootstrap defaults; it does
+> not patch application configuration at startup.
 
 ## Start and open RAG
 
 Run these commands from the repository root. Before installing, provide a
 Kubernetes cluster with enough CPU and memory, working persistent-volume
-provisioning, and access to the compatible latest/1.8 RAG image described above.
+provisioning, and access to a compatible HugeGraph RAG 1.8.0-or-later image.
 The cluster preset runs three PD, three Store and three Server replicas and
 requires scheduling them across nodes; RAG itself still runs one replica. By
 default the RAG resource PVC requests 10Gi, separately from PD and Store storage.
@@ -241,5 +240,5 @@ directory/PVC: ordinary saves use atomic replacement; a writable single-file bin
 mount uses an in-place fallback on `EBUSY`, which cannot guarantee atomicity if
 interrupted. This does not affect read-only bootstrap Secret/ConfigMap mounts.
 
-See the paired AI PR's [application configuration guide](https://github.com/hugegraph/hugegraph-ai/blob/refactor/external-rag-config/hugegraph-llm/config.md)
+See the [application configuration guide](https://github.com/apache/hugegraph-ai/blob/main/hugegraph-llm/config.md)
 for API examples, complete saved connection groups and restore-default behavior.
