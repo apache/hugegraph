@@ -81,6 +81,7 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
     // https://github.com/apache/hugegraph/issues/3212
     private static final Set<String> FIXED_WHITE_API_SET = ImmutableSet.of(
             "versions",
+            "readiness",
             "openapi.json"
     );
     /** Remove auth/login API from whitelist */

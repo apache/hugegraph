@@ -53,7 +53,8 @@ public class LoadDetectFilter implements ContainerRequestFilter {
             "",
             "apis",
             "metrics",
-            "versions"
+            "versions",
+            "readiness"
     );
 
     // Call gc every 30+ seconds if memory is low and request frequently

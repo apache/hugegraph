@@ -57,6 +57,7 @@ public class PathFilter implements ContainerRequestFilter {
             "apis",
             "metrics",
             "versions",
+            "readiness",
             "health",
             "gremlin",
             "graphs/auth",
