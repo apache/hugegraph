@@ -45,6 +45,11 @@ server:
     token:
       autoGenerate: true
 
+# Optional RAG application follows this preset only when explicitly enabled.
+rag:
+  enabled: false
+  replicas: 1
+
 # Optional computation follows this preset only when explicitly enabled.
 vermeer:
   enabled: false

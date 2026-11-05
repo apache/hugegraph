@@ -164,6 +164,137 @@
           ]
         }
       }
+    },
+    "rag": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "replicas": {
+                "type": "integer",
+                "const": 1
+              },
+              "hugegraph": {
+                "type": "object",
+                "properties": {
+                  "autoConfigure": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "persistence": {
+                "type": "object",
+                "properties": {
+                  "storageClassName": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "size": {
+                    "type": "string",
+                    "pattern": "^\\+?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+|[numkMGTPE]|[KMGTPE]i)?$",
+                    "not": {
+                      "pattern": "^\\+?0*(\\.0*)?([eE][+-]?[0-9]+|[numkMGTPE]|[KMGTPE]i)?$"
+                    }
+                  },
+                  "accessModes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "ReadWriteOnce",
+                        "ReadOnlyMany",
+                        "ReadWriteMany",
+                        "ReadWriteOncePod"
+                      ]
+                    }
+                  },
+                  "existingClaim": {
+                    "type": "string"
+                  }
+                }
+              },
+              "probes": {
+                "type": "object",
+                "properties": {
+                  "startup": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/ragProbe"
+                      },
+                      {
+                        "properties": {
+                          "successThreshold": {
+                            "maximum": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "readiness": {
+                    "$ref": "#/definitions/ragProbe"
+                  },
+                  "liveness": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/ragProbe"
+                      },
+                      {
+                        "properties": {
+                          "successThreshold": {
+                            "maximum": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "serviceAccount": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "ingress": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "terminationGracePeriodSeconds": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "definitions": {
@@ -456,6 +587,30 @@
         "successThreshold": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "ragProbe": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "periodSeconds": {
+          "$ref": "#/definitions/probe/properties/periodSeconds"
+        },
+        "failureThreshold": {
+          "$ref": "#/definitions/probe/properties/failureThreshold"
+        },
+        "timeoutSeconds": {
+          "$ref": "#/definitions/probe/properties/timeoutSeconds"
+        },
+        "initialDelaySeconds": {
+          "$ref": "#/definitions/probe/properties/initialDelaySeconds"
+        },
+        "successThreshold": {
+          "$ref": "#/definitions/probe/properties/successThreshold"
         }
       }
     },

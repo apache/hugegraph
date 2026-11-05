@@ -69,7 +69,7 @@ class HelmPackageTest(unittest.TestCase):
                         "Chart exceeds its package budget; check non-runtime assets")
 
     def test_no_contributor_or_binary_documentation_files(self):
-        excluded = ("images/", "tests/", "scripts/", "testdata/")
+        excluded = ("images/", "docs/images/", "tests/", "scripts/", "testdata/")
         leaked = [name for name in self.files
                   if name.startswith(excluded) or name.endswith(".tgz")]
         self.assertEqual([], leaked,
@@ -78,7 +78,8 @@ class HelmPackageTest(unittest.TestCase):
     def test_required_configuration_is_preserved(self):
         required = ("Chart.yaml", "README.md", "values.yaml", "values.schema.json",
                     "values-single.yaml", "values-cluster.yaml", "values-strict.yaml",
-                    "docs/operations.md", "docs/distribution.md", "docs/vermeer.md", "examples/README.md")
+                    "values-rag.yaml", "docs/operations.md", "docs/distribution.md",
+                    "docs/vermeer.md", "docs/rag.md", "examples/README.md")
         for name in required:
             with self.subTest(file=name):
                 self.assertIn(name, self.files.keys())
@@ -142,6 +143,22 @@ class HelmPackageTest(unittest.TestCase):
                                  "Optional Vermeer must reuse its native image for token helpers")
                 self.assertTrue(all(image.startswith(registry + "/") for image in selected))
                 self.assertIn("/go/bin/vermeer-token", rendered)
+
+
+def load_tests(loader, tests, pattern):
+    """Load the RAG suite only for the narrow packaged-chart CI invocation."""
+    if pattern != "test_helm_package.py":
+        return tests
+
+    try:
+        from test_helm_rag import RagChartTest
+    except ModuleNotFoundError as error:
+        if error.name != "test_helm_rag":
+            raise
+        from helm.test_helm_rag import RagChartTest
+
+    tests.addTests(loader.loadTestsFromTestCase(RagChartTest))
+    return tests
 
 
 if __name__ == "__main__":
