@@ -17,30 +17,33 @@
 
 package org.apache.hugegraph.dist;
 
-import org.apache.hugegraph.exception.HugeException;
+import java.util.concurrent.CompletableFuture;
+
 import org.apache.hugegraph.HugeFactory;
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutor;
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutorFactory;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.constant.ServiceConstant;
 import org.apache.hugegraph.core.GraphManager;
-import org.apache.hugegraph.query.ConditionQuery;
-import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.server.RestServer;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.Log;
 import org.apache.logging.log4j.LogManager;
 import org.apache.tinkerpop.gremlin.server.GremlinServer;
 import org.slf4j.Logger;
 
-import java.util.concurrent.CompletableFuture;
-
 public class HugeGraphServer {
 
     private static final Logger LOG = Log.logger(HugeGraphServer.class);
 
+    private final GremlinRestExecutor gremlinRestExecutor;
     private final RestServer restServer;
     private final GremlinServer gremlinServer;
     private final MemoryMonitor memoryMonitor;
@@ -61,6 +64,7 @@ public class HugeGraphServer {
         GremlinServer preparedGremlinServer = null;
         GremlinServer gremlinServer = null;
         MemoryMonitor memoryMonitor = null;
+        GremlinRestExecutor restExecutor = null;
         try {
             initializeQueryClasses();
             ConfigUtil.checkGremlinConfig(gremlinServerConf);
@@ -99,9 +103,14 @@ public class HugeGraphServer {
             try {
                 // Start HugeRestServer (loads graphs from PD; events go to
                 // ContextGremlinServer which is already listening)
-                restServer = HugeRestServer.start(restServerConf, hub);
+                restExecutor = GremlinRestExecutorFactory.create(
+                        restServerConfig, preparedGremlinServer, restServerConf);
+                restServer = RestServer.start(restServerConf, hub, restExecutor);
             } catch (Throwable e) {
                 LOG.error("HugeRestServer start error: ", e);
+                if (restExecutor != null) {
+                    restExecutor.close();
+                }
                 stopPreparedGremlinServer(preparedGremlinServer);
                 throw e;
             }
@@ -110,8 +119,11 @@ public class HugeGraphServer {
                 // Now start the pre-prepared GremlinServer
                 gremlinServer = HugeGremlinServer.startPrepared(
                         preparedGremlinServer);
+                GremlinRestExecutorFactory.initialize(
+                        restExecutor, gremlinServer);
             } catch (Throwable e) {
                 LOG.error("HugeGremlinServer start error: ", e);
+                stopPreparedGremlinServer(preparedGremlinServer);
                 try {
                     restServer.shutdown().get();
                 } catch (Throwable t) {
@@ -126,12 +138,14 @@ public class HugeGraphServer {
                 memoryMonitor.start();
             } catch (Throwable e) {
                 LOG.error("MemoryMonitor start error: ", e);
+                restExecutor.beginShutdown();
                 rollbackStartup(memoryMonitor, gremlinServer, restServer);
                 throw e;
             }
         } finally {
             System.setSecurityManager(securityManager);
         }
+        this.gremlinRestExecutor = restExecutor;
         this.restServer = restServer;
         this.gremlinServer = gremlinServer;
         this.memoryMonitor = memoryMonitor;
@@ -177,6 +191,7 @@ public class HugeGraphServer {
     }
 
     public void stop() {
+        this.gremlinRestExecutor.beginShutdown();
         this.memoryMonitor.stop();
 
         try {

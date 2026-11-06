@@ -23,6 +23,8 @@ import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutor;
+import org.apache.hugegraph.api.gremlin.GremlinRestExecutorFactory;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.event.EventHub;
@@ -49,17 +51,24 @@ public class RestServer {
     private final HugeConfig conf;
     private final EventHub eventHub;
     private HttpServer httpServer = null;
+    private final GremlinRestExecutor gremlinRestExecutor;
 
     public RestServer(HugeConfig conf, EventHub hub) {
+        this(conf, hub, GremlinRestExecutorFactory.standalone(conf));
+    }
+
+    public RestServer(HugeConfig conf, EventHub hub,
+                      GremlinRestExecutor executor) {
         this.conf = conf;
         this.eventHub = hub;
+        this.gremlinRestExecutor = executor;
     }
 
     public void start() throws IOException {
         String url = this.conf.get(ServerOptions.REST_SERVER_URL);
         URI uri = UriBuilder.fromUri(url).build();
 
-        ResourceConfig rc = new ApplicationConfig(this.conf, this.eventHub);
+        ResourceConfig rc = new ApplicationConfig(this.conf, this.eventHub, this.gremlinRestExecutor);
 
         this.httpServer = this.configHttpServer(uri, rc);
         try {
@@ -122,6 +131,7 @@ public class RestServer {
     }
 
     public Future<HttpServer> shutdown() {
+        this.gremlinRestExecutor.beginShutdown();
         E.checkNotNull(this.httpServer, "http server");
         /*
          * Since 2.3.x shutdown() won't call shutdownNow(), so the event
@@ -169,11 +179,17 @@ public class RestServer {
     }
 
     public static RestServer start(String conf, EventHub hub) throws Exception {
+        return start(conf, hub, null);
+    }
+
+    public static RestServer start(String conf, EventHub hub,
+                                   GremlinRestExecutor executor) throws Exception {
         LOG.info("RestServer starting...");
         ApiVersion.check();
 
         HugeConfig config = new HugeConfig(conf);
-        RestServer server = new RestServer(config, hub);
+        RestServer server = executor == null ? new RestServer(config, hub) :
+                            new RestServer(config, hub, executor);
         server.start();
         LOG.info("RestServer started");
 
