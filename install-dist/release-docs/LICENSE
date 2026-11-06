@@ -261,6 +261,8 @@ non-Apache-2.0 license text is required for a bundled component.
 The Netty modules share licenses/LICENSE-netty-4.1.137.Final.txt; tcnative
 modules use licenses/LICENSE-netty-tcnative-2.0.81.Final.txt.
 The shaded gRPC transport uses licenses/LICENSE-grpc-netty-shaded-1.55.3.txt.
+The AWS SDK third-party-jackson-core-2.33.8 module bundles MIT-licensed FastDoubleParser;
+see licenses/LICENSE-third-party-jackson-core-2.33.8.txt.
 Arthas 4.1.5 includes shaded Jackson, FastDoubleParser, ASM 9.9, Logback 1.2.13
 and RSyntaxTextArea 3.3.4.
 Their additional MIT, BSD, Boost and EPL 1.0 license texts and source locations
@@ -372,6 +374,7 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/commons-cli/commons-cli/1.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.13 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.15 -> Apache 2.0
+    https://central.sonatype.com/artifact/commons-codec/commons-codec/1.17.1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-collections/commons-collections/3.2.2 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-configuration/commons-configuration/1.10 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-io/commons-io/2.12.0 -> Apache 2.0
@@ -547,6 +550,7 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.apache.htrace/htrace-core4/4.2.0-incubating -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.httpcomponents/httpclient/4.5.13 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.16 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.ivy/ivy/2.6.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-admin/2.0.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-client/2.0.1 -> Apache 2.0
@@ -704,6 +708,37 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-queryparser/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-sandbox/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-suggest/5.2.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/annotations/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/apache-client/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/arns/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/auth/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/aws-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/aws-query-protocol/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/aws-xml-protocol/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/checksums-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/checksums/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/crt-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/endpoints-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-aws-eventstream/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-aws/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-client-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/identity-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/json-utils/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/metrics-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/netty-nio-client/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/profiles/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/protocol-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/regions/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/retries-spi/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/retries/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/s3-transfer-manager/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/s3/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/sdk-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/third-party-jackson-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/utils/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.eventstream/eventstream/1.0.1 -> Apache 2.0
 
 ========================================================================
 Third party BSD licenses
@@ -763,12 +798,14 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/org.mockito/mockito-junit-jupiter/3.9.0 -> MIT
     https://central.sonatype.com/artifact/org.projectlombok/lombok/1.18.24 -> MIT
     https://central.sonatype.com/artifact/org.projectlombok/lombok/1.18.30 -> MIT
+    https://central.sonatype.com/artifact/org.reactivestreams/reactive-streams/1.0.4 -> MIT-0
     https://central.sonatype.com/artifact/org.slf4j/jcl-over-slf4j/1.7.25 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/jul-to-slf4j/1.7.36 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.21 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.25 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.31 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.32 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.36 -> MIT
     https://central.sonatype.com/artifact/org.slf4j/slf4j-api/2.0.9 -> MIT
     https://central.sonatype.com/artifact/redis.clients/jedis/2.5.1 -> MIT
 

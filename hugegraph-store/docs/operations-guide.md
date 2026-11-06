@@ -301,6 +301,14 @@ curl  http://localhost:8620/v1/partitionsAndStats
 
 4. **Wait**: Rebalancing is gradual (may take hours for large datasets)
 
+**Note: disk space after a partition moves off a node**: When a partition leaves a Store node, its local
+RocksDB is destroyed only once no reads or writes still hold it. The Store checks every 60 seconds. If
+references are still held after 30 minutes, it force-releases them and deletes the directory on the next
+check. Until then the DB keeps its RocksDB `LOCK` and disk space, and the Store logs
+`DB <path> has not been deleted refCount is <n>`. Earlier releases checked these conditions in the wrong
+order: they force-released live references on the first check and deleted the directory one to two
+minutes after the destroy. The timing is the same with or without cloud storage.
+
 ---
 
 ### Issue 3: Data Migration Slow

@@ -89,6 +89,18 @@
                 <include>org.apache.hugegraph:${executable.jar.name}:jar:exec:*</include>
             </includes>
         </dependencySet>
+        <!-- rocksdbjni sits on the launcher classpath: RocksDB native-thread callbacks resolve
+             org.rocksdb.* through the system classloader, which cannot see BOOT-INF/lib -->
+        <dependencySet>
+            <outputDirectory>/lib</outputDirectory>
+            <outputFileNameMapping>${artifact.artifactId}-${artifact.version}.jar</outputFileNameMapping>
+            <unpack>false</unpack>
+            <scope>runtime</scope>
+            <useProjectArtifact>false</useProjectArtifact>
+            <includes>
+                <include>org.rocksdb:rocksdbjni</include>
+            </includes>
+        </dependencySet>
     </dependencySets>
 
 </assembly>

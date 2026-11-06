@@ -77,7 +77,7 @@ import org.apache.hugegraph.type.define.Frequency;
 import org.apache.hugegraph.type.define.IndexType;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Bytes;
-import org.junit.Assert;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -96,7 +96,8 @@ public class StoredRowIngressTest {
     public void setUp() throws Exception {
         this.rows = new Properties();
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(FIXTURE)) {
-            Assert.assertNotNull("Frozen baseline BinarySerializer rows must be present", input);
+            Assertions.assertNotNull(input,
+                                     "Frozen baseline BinarySerializer rows must be present");
             this.rows.load(input);
         }
         this.graph = Mockito.mock(HugeGraphSupplier.class);
@@ -134,15 +135,15 @@ public class StoredRowIngressTest {
             ConditionQuery condition = new ConditionQuery(row.equals("vertex") ? HugeType.VERTEX : HugeType.EDGE);
             condition.query(Condition.eq(id(1), 7));
             FilterIterator<?> iterator = new FilterIterator<>(iterator(stored), condition, this.graph);
-            Assert.assertTrue(row, iterator.hasNext());
-            Assert.assertSame(stored, iterator.next());
-            Assert.assertFalse(iterator.hasNext());
+            Assertions.assertTrue(iterator.hasNext(), row);
+            Assertions.assertSame(stored, iterator.next());
+            Assertions.assertFalse(iterator.hasNext());
             iterator.close();
 
             ConditionQuery noMatch = new ConditionQuery(condition.resultType());
             noMatch.query(Condition.eq(id(1), 8));
             FilterIterator<?> rejected = new FilterIterator<>(iterator(stored), noMatch, this.graph);
-            Assert.assertFalse(row, rejected.hasNext());
+            Assertions.assertFalse(rejected.hasNext(), row);
             rejected.close();
         }
     }
@@ -156,9 +157,9 @@ public class StoredRowIngressTest {
         boolean previousClosing = engine.isClosing().getAndSet(false);
         try {
             FilterIterator.of(source, query.bytes(), "invalid-namespace");
-            Assert.fail("Malformed metadata namespace must fail initialization");
+            Assertions.fail("Malformed metadata namespace must fail initialization");
         } catch (HgStoreException expected) {
-            Assert.assertTrue(expected.getMessage().contains("Graph must include"));
+            Assertions.assertTrue(expected.getMessage().contains("Graph must include"));
             Mockito.verify(source).close();
         } finally {
             engine.isClosing().set(previousClosing);
@@ -175,14 +176,14 @@ public class StoredRowIngressTest {
             SelectIterator iterator = new SelectIterator(iterator(stored), List.of(2, 3, 99),
                                                           this.graph, isVertex);
             RocksDBSession.BackendColumn selected = iterator.next();
-            Assert.assertArrayEquals(stored.name, selected.name);
+            Assertions.assertArrayEquals(stored.name, selected.name);
             BaseElement element = QueryUtil.parseEntry(this.graph,
                     BackendColumn.of(selected.name, selected.value), isVertex);
-            Assert.assertEquals(2, element.sizeOfProperties());
-            Assert.assertEquals(List.of(7, -1, 7), element.getPropertyValue(id(2)));
-            Assert.assertEquals(Set.of(-1, 7), element.getPropertyValue(id(3)));
-            Assert.assertNull(element.getPropertyValue(id(1)));
-            Assert.assertEquals(expiry(), element.expiredTime());
+            Assertions.assertEquals(2, element.sizeOfProperties());
+            Assertions.assertEquals(List.of(7, -1, 7), element.getPropertyValue(id(2)));
+            Assertions.assertEquals(Set.of(-1, 7), element.getPropertyValue(id(3)));
+            Assertions.assertNull(element.getPropertyValue(id(1)));
+            Assertions.assertEquals(expiry(), element.expiredTime());
             iterator.close();
         }
     }
@@ -195,8 +196,8 @@ public class StoredRowIngressTest {
         RocksDBSession.BackendColumn selected = iterator.next();
         BaseVertex vertex = this.serializer.parseSchemaVertex(this.graph,
                 BackendColumn.of(selected.name, selected.value), null);
-        Assert.assertEquals(0, vertex.sizeOfProperties());
-        Assert.assertEquals(expiry(), vertex.expiredTime());
+        Assertions.assertEquals(0, vertex.sizeOfProperties());
+        Assertions.assertEquals(expiry(), vertex.expiredTime());
         iterator.close();
     }
 
@@ -204,26 +205,27 @@ public class StoredRowIngressTest {
     public void testOlapMergeKeepsPersistentSchemaFormatAndTtl() {
         BackendColumn merged = QueryUtil.combineColumn(this.graph, column("vertex"), List.of(column("olap")));
         BaseVertex vertex = this.serializer.parseSchemaVertex(this.graph, merged, null);
-        Assert.assertEquals(4, vertex.sizeOfProperties());
-        Assert.assertEquals(Integer.valueOf(42), vertex.getPropertyValue(id(9)));
-        Assert.assertEquals(expiry(), vertex.expiredTime());
+        Assertions.assertEquals(4, vertex.sizeOfProperties());
+        Assertions.assertEquals(Integer.valueOf(42), vertex.getPropertyValue(id(9)));
+        Assertions.assertEquals(expiry(), vertex.expiredTime());
     }
 
     @Test
     public void testDirectTtlReaderUsesFrozenRowSchemaAndIndexNameSuffix() {
         BackendColumn vertex = column("vertex");
-        Assert.assertEquals(expiry(), this.directSerializer.parseSchemaVertex(
+        Assertions.assertEquals(expiry(), this.directSerializer.parseSchemaVertex(
                 this.graph, vertex.name, vertex.value).expiredTime());
         for (String row : List.of("edge.out", "edge.in")) {
             BackendColumn edge = column(row);
-            Assert.assertEquals(expiry(), this.directSerializer.parseSchemaEdge(
+            Assertions.assertEquals(expiry(), this.directSerializer.parseSchemaEdge(
                     this.graph, edge.name, edge.value).expiredTime());
         }
         for (String row : List.of("index.secondary", "index.int", "index.long")) {
             BackendColumn index = column(row);
-            Assert.assertEquals(expiry(), this.directSerializer.parseSchemaIndex(
+            Assertions.assertEquals(expiry(), this.directSerializer.parseSchemaIndex(
                     this.graph, index.name, index.value).expiredTime());
-            Assert.assertEquals(expiry(), this.serializer.parseSchemaIndex(this.graph, index).expiredTime());
+            Assertions.assertEquals(
+                    expiry(), this.serializer.parseSchemaIndex(this.graph, index).expiredTime());
         }
     }
 
@@ -237,9 +239,9 @@ public class StoredRowIngressTest {
             BackendColumn column = column(row);
             PipelineResult input = new PipelineResult(RocksDBSession.BackendColumn.of(column.name, column.value));
             now.setLong(stage, Long.parseLong(this.rows.getProperty("now")));
-            Assert.assertSame(row, input, stage.handle(input));
+            Assertions.assertSame(input, stage.handle(input), row);
             now.setLong(stage, expiry() + 1);
-            Assert.assertNull(row, stage.handle(input));
+            Assertions.assertNull(stage.handle(input), row);
         }
     }
 
@@ -251,15 +253,15 @@ public class StoredRowIngressTest {
         decode.setAccessible(true);
         BackendColumn stored = column("vertex");
         BaseVertex persistent = (BaseVertex) decode.invoke(executor, "g+v", kv(stored), false, true);
-        Assert.assertNotNull(persistent);
-        Assert.assertEquals(List.of(7, -1, 7), persistent.getPropertyValue(id(2)));
+        Assertions.assertNotNull(persistent);
+        Assertions.assertEquals(List.of(7, -1, 7), persistent.getPropertyValue(id(2)));
         BackendColumn tagged = this.serializer.writeVertex(persistent);
         BaseVertex response = (BaseVertex) decode.invoke(executor, "g+v", kv(tagged), false, false);
-        Assert.assertNotNull(response);
+        Assertions.assertNotNull(response);
         Set<?> expectedGroups = persistent.getPropertyValue(id(3));
         Set<?> actualGroups = response.getPropertyValue(id(3));
-        Assert.assertEquals(expectedGroups, actualGroups);
-        Assert.assertEquals(expiry(), response.expiredTime());
+        Assertions.assertEquals(expectedGroups, actualGroups);
+        Assertions.assertEquals(expiry(), response.expiredTime());
     }
 
     @Test
@@ -285,15 +287,19 @@ public class StoredRowIngressTest {
             Mockito.when(this.graph.indexLabel(id(number))).thenReturn(label);
         }
         BackendColumn vertex = column("vertex.untimed");
-        Assert.assertEquals(0L, this.serializer.parseSchemaVertex(this.graph, vertex, null).expiredTime());
+        Assertions.assertEquals(
+                0L, this.serializer.parseSchemaVertex(this.graph, vertex, null).expiredTime());
         BackendColumn untimedEdge = column("edge.untimed");
-        Assert.assertEquals(0L, this.serializer.parseSchemaEdge(this.graph, untimedEdge, null, true).expiredTime());
+        Assertions.assertEquals(
+                0L,
+                this.serializer.parseSchemaEdge(this.graph, untimedEdge, null, true).expiredTime());
         for (String row : List.of("index.secondary.untimed", "index.int.untimed", "index.long.untimed",
                                   "index.system")) {
             BackendColumn column = column(row);
-            Assert.assertEquals(row, 0L, this.serializer.parseSchemaIndex(this.graph, column).expiredTime());
-            Assert.assertEquals(row, 0L, this.directSerializer.parseSchemaIndex(
-                    this.graph, column.name, column.value).expiredTime());
+            Assertions.assertEquals(
+                    0L, this.serializer.parseSchemaIndex(this.graph, column).expiredTime(), row);
+            Assertions.assertEquals(0L, this.directSerializer.parseSchemaIndex(
+                    this.graph, column.name, column.value).expiredTime(), row);
         }
     }
 
@@ -306,12 +312,12 @@ public class StoredRowIngressTest {
         Map<Integer, String> fixtures = Map.of(6, "index.secondary", 7, "index.int", 8, "index.long");
         for (Map.Entry<Integer, String> fixture : fixtures.entrySet()) {
             List<Index> indexes = builder.buildIndex(vertex, this.graph.indexLabel(id(fixture.getKey())));
-            Assert.assertEquals(1, indexes.size());
+            Assertions.assertEquals(1, indexes.size());
             assertPersistentIndex(indexes.get(0), fixture.getValue());
         }
         vertex.addProperty(this.graph.propertyKey(id(17)), "long-field-".repeat(20));
         List<Index> longString = builder.buildIndex(vertex, this.graph.indexLabel(id(15)));
-        Assert.assertEquals(1, longString.size());
+        Assertions.assertEquals(1, longString.size());
         assertPersistentIndex(longString.get(0), "index.hashed");
     }
 
@@ -337,17 +343,23 @@ public class StoredRowIngressTest {
             label.indexType(type);
             label.indexFields(id(17));
             vertex.addProperty(this.graph.propertyKey(id(17)), longValue);
-            Assert.assertEquals(type.name(), longValue, builder.buildIndex(vertex, label).get(0).fieldValues());
+            Assertions.assertEquals(longValue,
+                                    builder.buildIndex(vertex, label).get(0).fieldValues(),
+                                    type.name());
             vertex.addProperty(this.graph.propertyKey(id(17)), "");
-            Assert.assertEquals(type.name(), "\u0002", builder.buildIndex(vertex, label).get(0).fieldValues());
+            Assertions.assertEquals("\u0002",
+                                    builder.buildIndex(vertex, label).get(0).fieldValues(),
+                                    type.name());
             vertex.addProperty(this.graph.propertyKey(id(17)), "prefix!tail");
-            Assert.assertEquals(type.name(), "prefix`!tail", builder.buildIndex(vertex, label).get(0).fieldValues());
+            Assertions.assertEquals("prefix`!tail",
+                                    builder.buildIndex(vertex, label).get(0).fieldValues(),
+                                    type.name());
             vertex.addProperty(this.graph.propertyKey(id(17)), "\u0001illegal");
             try {
                 builder.buildIndex(vertex, label);
-                Assert.fail("Reserved leading index symbols must remain illegal: " + type);
+                Assertions.fail("Reserved leading index symbols must remain illegal: " + type);
             } catch (IllegalArgumentException expected) {
-                Assert.assertTrue(expected.getMessage().contains("Illegal leading char"));
+                Assertions.assertTrue(expected.getMessage().contains("Illegal leading char"));
             }
         }
     }
@@ -364,8 +376,8 @@ public class StoredRowIngressTest {
         label.indexType(IndexType.UNIQUE);
         label.indexFields(id(17), id(18));
         List<Index> indexes = new IndexBuilder(this.graph).buildIndex(vertex, label);
-        Assert.assertEquals(1, indexes.size());
-        Assert.assertEquals("prefix!\u0001", indexes.get(0).fieldValues());
+        Assertions.assertEquals(1, indexes.size());
+        Assertions.assertEquals("prefix!\u0001", indexes.get(0).fieldValues());
     }
 
     @Test
@@ -373,17 +385,20 @@ public class StoredRowIngressTest {
         Properties legacy = new Properties();
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(
                 "compatibility/2f827d6e8/store-index-rows.properties")) {
-            Assert.assertNotNull("Frozen baseline Store index writer output must be present", input);
+            Assertions.assertNotNull(
+                    input, "Frozen baseline Store index writer output must be present");
             legacy.load(input);
         }
         for (String row : List.of("secondary", "int", "long", "system")) {
             BackendColumn column = BackendColumn.of(Bytes.fromHex(legacy.getProperty(row + ".name")),
                                                     Bytes.fromHex(legacy.getProperty(row + ".value")));
             long expectedExpiry = Long.parseLong(legacy.getProperty(row + ".expiry"));
-            Assert.assertEquals(row, expectedExpiry,
-                                this.serializer.parseSchemaIndex(this.graph, column).expiredTime());
-            Assert.assertEquals(row, expectedExpiry, this.directSerializer.parseSchemaIndex(
-                    this.graph, column.name, column.value).expiredTime());
+            Assertions.assertEquals(expectedExpiry,
+                                    this.serializer.parseSchemaIndex(this.graph, column)
+                                                   .expiredTime(),
+                                    row);
+            Assertions.assertEquals(expectedExpiry, this.directSerializer.parseSchemaIndex(
+                    this.graph, column.name, column.value).expiredTime(), row);
         }
     }
 
@@ -395,10 +410,10 @@ public class StoredRowIngressTest {
         rows.put(ByteBuffer.wrap(legacy.name), legacy.value);
         for (boolean tagged : List.of(false, true)) {
             BaseVertex merged = runOlapStage(rows, tagged, id(9), id(18));
-            Assert.assertEquals(42, (Object) merged.getProperty(id(9)).value());
-            Assert.assertNull(merged.getProperty(id(18)));
-            Assert.assertArrayEquals(legacy.value, rows.get(ByteBuffer.wrap(legacy.name)));
-            Assert.assertEquals(1, rows.size());
+            Assertions.assertEquals(42, (Object) merged.getProperty(id(9)).value());
+            Assertions.assertNull(merged.getProperty(id(18)));
+            Assertions.assertArrayEquals(legacy.value, rows.get(ByteBuffer.wrap(legacy.name)));
+            Assertions.assertEquals(1, rows.size());
         }
     }
 
@@ -412,9 +427,9 @@ public class StoredRowIngressTest {
         rows.put(ByteBuffer.wrap(OlapKey.format(id(18), id(1))), schemaOlapValue(id(18), 123));
         for (boolean tagged : List.of(false, true)) {
             BaseVertex merged = runOlapStage(rows, tagged, id(9), id(18));
-            Assert.assertEquals(99, (Object) merged.getProperty(id(9)).value());
-            Assert.assertEquals(123, (Object) merged.getProperty(id(18)).value());
-            Assert.assertArrayEquals(legacy.value, rows.get(ByteBuffer.wrap(legacy.name)));
+            Assertions.assertEquals(99, (Object) merged.getProperty(id(9)).value());
+            Assertions.assertEquals(123, (Object) merged.getProperty(id(18)).value());
+            Assertions.assertArrayEquals(legacy.value, rows.get(ByteBuffer.wrap(legacy.name)));
         }
     }
 
@@ -447,7 +462,7 @@ public class StoredRowIngressTest {
             BaseVertex decoded = this.serializer.parseSchemaVertex(this.graph, vertex, null);
             PipelineResult input = tagged ? new PipelineResult(decoded) :
                     new PipelineResult(RocksDBSession.BackendColumn.of(vertex.name, vertex.value));
-            Assert.assertSame(input, stage.handle(input));
+            Assertions.assertSame(input, stage.handle(input));
             if (tagged) {
                 return (BaseVertex) input.getElement();
             }
@@ -464,12 +479,12 @@ public class StoredRowIngressTest {
         BackendColumn written = this.serializer.writeSchemaIndex(rebuilt);
         // DataManager's persisted batch normalizes an absent payload to zero bytes.
         byte[] value = written.value == null ? new byte[0] : written.value;
-        Assert.assertArrayEquals(fixture, expected.name, written.name);
-        Assert.assertArrayEquals(fixture, expected.value, value);
+        Assertions.assertArrayEquals(expected.name, written.name, fixture);
+        Assertions.assertArrayEquals(expected.value, value, fixture);
         Index decoded = this.serializer.parseSchemaIndex(this.graph, BackendColumn.of(written.name, value));
-        Assert.assertEquals(rebuilt.elementId(), decoded.elementId());
-        Assert.assertEquals(rebuilt.fieldValues(), decoded.fieldValues());
-        Assert.assertEquals(expiry(), decoded.expiredTime());
+        Assertions.assertEquals(rebuilt.elementId(), decoded.elementId());
+        Assertions.assertEquals(rebuilt.fieldValues(), decoded.fieldValues());
+        Assertions.assertEquals(expiry(), decoded.expiredTime());
     }
 
     @Test
@@ -484,8 +499,8 @@ public class StoredRowIngressTest {
             // Real sublabels persist their own endpoint links; they do not inherit them on read.
             label.sourceLabel(id(4));
             label.targetLabel(id(4));
-            Assert.assertEquals(id(4), label.sourceLabel());
-            Assert.assertEquals(id(4), label.targetLabel());
+            Assertions.assertEquals(id(4), label.sourceLabel());
+            Assertions.assertEquals(id(4), label.targetLabel());
             Mockito.when(this.graph.edgeLabel(label.id())).thenReturn(label);
             Mockito.when(this.graph.edgeLabelOrNone(label.id())).thenReturn(label);
         }
@@ -530,14 +545,14 @@ public class StoredRowIngressTest {
         HugeGraphSupplier previous = (HugeGraphSupplier) mock.get(null);
         BusinessHandlerImpl.setMockGraphSupplier(this.graph);
         try {
-            Assert.assertTrue(manager.doBuildIndex(request, partition).isOk());
-            Assert.assertEquals(1, written.size());
+            Assertions.assertTrue(manager.doBuildIndex(request, partition).isOk());
+            Assertions.assertEquals(1, written.size());
             BatchPutRequest.KV row = written.get(0);
             Index decoded = this.serializer.parseSchemaIndex(this.graph,
                                                               BackendColumn.of(row.getKey(), row.getValue()));
-            Assert.assertEquals(parent.id(), decoded.indexLabel().baseValue());
-            Assert.assertEquals(childEdge.id(), decoded.elementId());
-            Assert.assertEquals("child record", decoded.fieldValues());
+            Assertions.assertEquals(parent.id(), decoded.indexLabel().baseValue());
+            Assertions.assertEquals(childEdge.id(), decoded.elementId());
+            Assertions.assertEquals("child record", decoded.fieldValues());
             Mockito.verify(source).close();
         } finally {
             BusinessHandlerImpl.setMockGraphSupplier(previous);
@@ -554,16 +569,16 @@ public class StoredRowIngressTest {
     @Test
     public void testResponseFormatMatchesDeserializationPlanning() {
         QueryRequest.Builder request = QueryRequest.newBuilder().setScanType(ScanType.TABLE_SCAN);
-        Assert.assertFalse(QueryResultFormat.returnsTaggedElements(request.build()));
+        Assertions.assertFalse(QueryResultFormat.returnsTaggedElements(request.build()));
         request.setCheckTtl(true);
-        Assert.assertFalse(QueryResultFormat.returnsTaggedElements(request.build()));
+        Assertions.assertFalse(QueryResultFormat.returnsTaggedElements(request.build()));
         request.addProperty(ByteString.copyFromUtf8("property"));
-        Assert.assertTrue(QueryResultFormat.requiresElementDeserialization(request.build()));
-        Assert.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
+        Assertions.assertTrue(QueryResultFormat.requiresElementDeserialization(request.build()));
+        Assertions.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
         request.clearProperty().addOrderBy(ByteString.copyFromUtf8("order"));
-        Assert.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
+        Assertions.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
         request.clearOrderBy().setCondition(ByteString.copyFromUtf8("condition"));
-        Assert.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
+        Assertions.assertTrue(QueryResultFormat.returnsTaggedElements(request.build()));
     }
 
     private void property(int value, Cardinality cardinality, WriteType writeType) {

@@ -31,8 +31,8 @@ import org.apache.hugegraph.store.grpc.stream.KvPageRes;
 import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.node.AppConfig;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import io.grpc.stub.StreamObserver;
 
@@ -46,12 +46,12 @@ public class ScanUtilTest {
                                                    .setOrderType(ScanOrderType.ORDER_BY_KEY)
                                                    .build();
 
-        IllegalArgumentException error = Assert.assertThrows(
+        IllegalArgumentException error = Assertions.assertThrows(
                 IllegalArgumentException.class,
                 () -> ScanQueryProducer.requestOf("graph",
                                                   new String[]{"table"},
                                                   request));
-        Assert.assertTrue(error.getMessage().contains("batch scan"));
+        Assertions.assertTrue(error.getMessage().contains("batch scan"));
     }
 
     @Test
@@ -62,9 +62,9 @@ public class ScanUtilTest {
         ScanIterator iterator = ScanUtil.getIterator(request, wrapper);
         BackendColumn column = iterator.next();
 
-        Assert.assertEquals(1, column.name[0] & 0xff);
-        Assert.assertTrue(wrapper.orderedCalled);
-        Assert.assertFalse(wrapper.legacyCalled);
+        Assertions.assertEquals(1, column.name[0] & 0xff);
+        Assertions.assertTrue(wrapper.orderedCalled);
+        Assertions.assertFalse(wrapper.legacyCalled);
     }
 
     @Test
@@ -75,9 +75,9 @@ public class ScanUtilTest {
         ScanIterator iterator = ScanUtil.getIterator(request, wrapper);
         BackendColumn column = iterator.next();
 
-        Assert.assertEquals(9, column.name[0] & 0xff);
-        Assert.assertFalse(wrapper.orderedCalled);
-        Assert.assertTrue(wrapper.legacyCalled);
+        Assertions.assertEquals(9, column.name[0] & 0xff);
+        Assertions.assertFalse(wrapper.orderedCalled);
+        Assertions.assertTrue(wrapper.legacyCalled);
     }
 
     @Test
@@ -90,12 +90,12 @@ public class ScanUtilTest {
 
         try {
             ScanUtil.getIterator(request, wrapper);
-            Assert.fail("Expected ordered cursor rejection");
+            Assertions.fail("Expected ordered cursor rejection");
         } catch (IllegalArgumentException e) {
-            Assert.assertTrue(e.getMessage().contains("position"));
+            Assertions.assertTrue(e.getMessage().contains("position"));
         }
-        Assert.assertFalse(wrapper.orderedCalled);
-        Assert.assertFalse(wrapper.legacyCalled);
+        Assertions.assertFalse(wrapper.orderedCalled);
+        Assertions.assertFalse(wrapper.legacyCalled);
     }
 
     @Test
@@ -108,11 +108,11 @@ public class ScanUtilTest {
         ScanOneShotResponse.scanOneShot(request,
                                         observer(response, error), wrapper);
 
-        Assert.assertNull(error.get());
-        Assert.assertNotNull(response.get());
-        Assert.assertEquals(1, response.get().getVersion());
-        Assert.assertTrue(wrapper.orderedCalled);
-        Assert.assertFalse(wrapper.legacyCalled);
+        Assertions.assertNull(error.get());
+        Assertions.assertNotNull(response.get());
+        Assertions.assertEquals(1, response.get().getVersion());
+        Assertions.assertTrue(wrapper.orderedCalled);
+        Assertions.assertFalse(wrapper.legacyCalled);
     }
 
     @Test
@@ -134,12 +134,12 @@ public class ScanUtilTest {
 
             stream.onNext(close);
 
-            Assert.assertNull(error.get());
-            Assert.assertNotNull(response.get());
-            Assert.assertTrue(response.get().getOver());
-            Assert.assertEquals(1, response.get().getVersion());
-            Assert.assertFalse(wrapper.orderedCalled);
-            Assert.assertFalse(wrapper.legacyCalled);
+            Assertions.assertNull(error.get());
+            Assertions.assertNotNull(response.get());
+            Assertions.assertTrue(response.get().getOver());
+            Assertions.assertEquals(1, response.get().getVersion());
+            Assertions.assertFalse(wrapper.orderedCalled);
+            Assertions.assertFalse(wrapper.legacyCalled);
         } finally {
             executor.shutdownNow();
         }

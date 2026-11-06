@@ -135,6 +135,14 @@ public class PartitionManager extends GlobalMetaStore {
     }
 
     /**
+     * Whether a DB-directory name is a transient artifact of snapshot loading ("_temp_" suffix) or
+     * of cloud metadata capture ("_cloudmeta_" infix), not a partition's data directory.
+     */
+    private static boolean isTransientDbDir(String name) {
+        return name.endsWith("_temp_") || name.contains("_cloudmeta_");
+    }
+
+    /**
      * Judge the storage path as either the partition id or starting with partition id_
      *
      * @param detections  dir list
@@ -149,6 +157,9 @@ public class PartitionManager extends GlobalMetaStore {
             // Must be in a folder named after the partition id
             if (detections[x].isDirectory()) {
                 String tmp = detections[x].getName();
+                if (isTransientDbDir(tmp)) {
+                    continue;
+                }
                 if (tmp.equals(partitionDirectory) || tmp.startsWith(partitionDirectory + "_")) {
                     if (checkLogDir) {
                         String logDir = detections[x].getAbsolutePath() + "/log";
@@ -252,7 +263,7 @@ public class PartitionManager extends GlobalMetaStore {
             }
 
             for (File f : dirs) {
-                if (f.isDirectory()) {
+                if (f.isDirectory() && !isTransientDbDir(f.getName())) {
                     try {
                         partIds.add(Integer.parseInt(f.getName().split("_")[0]));
                     } catch (Exception e) {

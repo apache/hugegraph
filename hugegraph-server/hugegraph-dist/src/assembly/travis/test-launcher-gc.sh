@@ -62,6 +62,8 @@ for component in server pd store; do
             launcher=start-hugegraph-store.sh
             rm -f "$FIXTURE/lib/"*.jar
             touch "$FIXTURE/lib/hg-store-node-test.jar"
+            # The store launcher requires one rocksdbjni jar for native callback classloading.
+            touch "$FIXTURE/lib/rocksdbjni-test.jar"
             ;;
     esac
     cp "$source_bin/$launcher" "$source_bin/util.sh" "$source_bin/jvm-module.options" "$FIXTURE/bin/"
