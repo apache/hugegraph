@@ -96,7 +96,7 @@ class RagValidationMixin:
             ({"env": [{"name": "BAD NAME", "value": "x"}]}, "Kubernetes 1.23"),
             ({"env": [{"name": "BAD\tNAME", "value": "x"}]}, "Kubernetes 1.23"),
             ({"env": [{"name": "GRAPH_URL", "value": "a"}, {"name": "GRAPH_URL", "value": "b"}]}, "duplicate"),
-            ({"persistance": {"enabled": False}}, "persistance"),
+            ({"persistence": {"enabled": False}}, "persistance"),
         )
         for values, expected in invalid:
             with self.subTest(values=values):
