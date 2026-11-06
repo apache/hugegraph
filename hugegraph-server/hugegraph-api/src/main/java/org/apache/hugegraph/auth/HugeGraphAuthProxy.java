@@ -120,12 +120,25 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     private static final ThreadLocal<Context> CONTEXTS = new InheritableThreadLocal<>();
     private static final ThreadLocal<String> REQUEST_GRAPH_SPACE = new ThreadLocal<>();
 
+    /**
+     * Optional external authorizer (e.g. Ranger) consulted per-request in
+     * verifyResPermission(), in addition to (never instead of) the local
+     * RolePermission match. Null (the default) is a complete no-op, so
+     * deployments without such a hook registered are unaffected.
+     */
+    private static volatile ResourceAuthorizer RESOURCE_AUTHORIZER;
+
     static {
         HugeGraph.registerTraversalStrategies(HugeGraphAuthProxy.class);
     }
 
+    public static void setResourceAuthorizer(ResourceAuthorizer authorizer) {
+        RESOURCE_AUTHORIZER = authorizer;
+    }
+
     private final Cache<Id, UserWithRole> usersRoleCache;
     private final Cache<Id, RateLimiter> auditLimiters;
+    private final Cache<Id, RateLimiter> resourceAuthLimiters;
     private final double auditLogMaxRate;
     private final HugeGraph hugegraph;
     private final TaskSchedulerProxy taskScheduler;
@@ -141,6 +154,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         this.taskScheduler = new TaskSchedulerProxy(hugegraph.taskScheduler());
         this.authManager = new AuthManagerProxy(hugegraph.authManager());
         this.auditLimiters = this.cache("audit-log-limiter", capacity, -1L);
+        this.resourceAuthLimiters = this.cache("resource-authorizer-limiter", capacity, -1L);
         this.usersRoleCache = this.cache("users-role", capacity, expired);
         this.hugegraph.proxy(this);
 
@@ -1261,20 +1275,34 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                       action, ro, username, role);
         }
 
-        V result = ro.operated();
         // Verify role permission
-        if (!RolePerm.match(role, actionPerm, ro)) {
-            result = null;
-        }
+        boolean matched = RolePerm.match(role, actionPerm, ro);
         // Verify permission for one access another, like: granted <= user role
-        else if (ro.type().isGrantOrUser()) {
+        if (matched && ro.type().isGrantOrUser()) {
             AuthElement element = (AuthElement) ro.operated();
             RolePermission grant = this.hugegraph.authManager()
                                                  .rolePermission(element);
-            if (!RolePerm.match(role, grant, ro)) {
-                result = null;
+            matched = RolePerm.match(role, grant, ro);
+        }
+        // Verify against the optional external authorizer (e.g. Ranger), if
+        // registered. This can only narrow access already granted above,
+        // never widen it. The admin role is exempt from enforcement: admin
+        // is the trusted identity used for engine bootstrap/lifecycle
+        // operations (see HugeFactoryAuthProxy's static init and
+        // GraphManager's grpc-thread handling) where no Ranger policy is
+        // expected to exist, and the local RolePerm.match() above already
+        // bypasses fine-grained checks for it. Still consult the authorizer
+        // for admin so the action lands in Ranger's audit log — its verdict
+        // is discarded, never allowed to deny admin.
+        if (matched && RESOURCE_AUTHORIZER != null) {
+            boolean enforce = !RolePermission.isAdmin((RolePermission) role);
+            boolean allowed = this.checkResourceAuthorizer(username, actionPerm,
+                                                           ro, enforce);
+            if (enforce) {
+                matched = allowed;
             }
         }
+        V result = matched ? ro.operated() : null;
 
         // Check resource detail if needed
         if (result != null && checker != null && !checker.get()) {
@@ -1300,6 +1328,32 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             throw new ForbiddenException(error);
         }
         return result;
+    }
+
+    /**
+     * Consult the registered external ResourceAuthorizer for a single
+     * ResourceObject. When {@code enforce} is set, every call asks the
+     * authorizer for a decision: the label and action of each check can
+     * differ, so no earlier decision stands in for a later one. Only the
+     * auditing is rate-limited, per (username, graphSpace, graph,
+     * resourceType) shape, so filtering a large traversal result one element
+     * at a time keeps audit volume bounded. Without {@code enforce} (admin)
+     * the call exists only for the audit trail, so it is skipped once the
+     * limiter is exhausted and the result is not meaningful.
+     */
+    private boolean checkResourceAuthorizer(String username, HugePermission actionPerm,
+                                             ResourceObject<?> ro, boolean enforce) {
+        String key = username + "/" + ro.graphSpace() + "/" + ro.graph() + "/" + ro.type();
+        Id limiterId = IdGenerator.of(key);
+        RateLimiter limiter = this.resourceAuthLimiters.getOrFetch(limiterId, id -> {
+            return RateLimiter.create(this.auditLogMaxRate);
+        });
+        boolean audit = limiter.tryAcquire();
+        if (!enforce && !audit) {
+            return true;
+        }
+        return RESOURCE_AUTHORIZER.isAllowed(username, ro.graphSpace(), ro.graph(),
+                                             ro.type(), ro.label(), actionPerm, audit);
     }
 
     public static class Context {

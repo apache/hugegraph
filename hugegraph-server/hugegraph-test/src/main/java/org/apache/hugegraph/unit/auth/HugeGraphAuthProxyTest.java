@@ -31,7 +31,9 @@ import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.HugeUser;
+import org.apache.hugegraph.auth.ResourceAuthorizer;
 import org.apache.hugegraph.auth.ResourceObject;
+import org.apache.hugegraph.auth.ResourceType;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
@@ -39,10 +41,12 @@ import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.config.AuthOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.task.TaskManager;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.Namifiable;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.util.Reflection;
 import org.apache.hugegraph.util.RateLimiter;
@@ -58,6 +62,7 @@ import org.apache.logging.log4j.core.config.Property;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.junit.After;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 public class HugeGraphAuthProxyTest extends BaseUnitTest {
@@ -96,6 +101,114 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         setContext(new HugeGraphAuthProxy.Context(new HugeAuthenticator.User("admin", RolePermission.admin())));
         proxy.recoverLoadingMode("instance", 0, 0);
         Mockito.verify(graph).recoverLoadingMode("instance", 0, 0);
+    }
+
+    @Test
+    public void testResourceAuthorizerCanDenyNonAdmin() {
+        HugeGraph graph = mockStatusGraph();
+        HugeGraphAuthProxy proxy = newProxy(graph, 1000D);
+        ResourceAuthorizer authorizer = Mockito.mock(ResourceAuthorizer.class);
+        HugeGraphAuthProxy.setResourceAuthorizer(authorizer);
+        setContext(new HugeGraphAuthProxy.Context(new HugeAuthenticator.User(
+                "writer", RolePermission.role("DEFAULT", "tc13_mode_auth", HugePermission.WRITE))));
+
+        // The local role allows it, the external authorizer narrows it
+        Assert.assertThrows(jakarta.ws.rs.ForbiddenException.class, (Assert.ThrowableRunnable) proxy::loadingMode);
+        Mockito.verify(graph, Mockito.never()).loadingMode();
+
+        Mockito.when(authorizer.isAllowed(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
+                                          Mockito.any(), Mockito.anyString(), Mockito.any(),
+                                          Mockito.anyBoolean())).thenReturn(true);
+        proxy.loadingMode();
+        Mockito.verify(graph).loadingMode();
+    }
+
+    @Test
+    public void testResourceAuthorizerDecidesEveryCallWhenAuditIsRateLimited() {
+        HugeGraph graph = mockStatusGraph();
+        // One audited check per second, so the later calls exceed the limit
+        HugeGraphAuthProxy proxy = newProxy(graph, 1D);
+        ResourceAuthorizer authorizer = Mockito.mock(ResourceAuthorizer.class);
+        HugeGraphAuthProxy.setResourceAuthorizer(authorizer);
+        setContext(new HugeGraphAuthProxy.Context(new HugeAuthenticator.User(
+                "writer", RolePermission.role("DEFAULT", "tc13_mode_auth", HugePermission.WRITE))));
+
+        for (int i = 0; i < 3; i++) {
+            Assert.assertThrows(jakarta.ws.rs.ForbiddenException.class,
+                                (Assert.ThrowableRunnable) proxy::loadingMode);
+        }
+        Mockito.verify(graph, Mockito.never()).loadingMode();
+
+        ArgumentCaptor<Boolean> audit = ArgumentCaptor.forClass(Boolean.class);
+        Mockito.verify(authorizer, Mockito.times(3)).isAllowed(
+                Mockito.eq("writer"), Mockito.anyString(), Mockito.anyString(),
+                Mockito.eq(ResourceType.STATUS), Mockito.anyString(),
+                Mockito.eq(HugePermission.WRITE), audit.capture());
+        Assert.assertTrue(audit.getAllValues().get(0));
+        Assert.assertTrue(audit.getAllValues().contains(false));
+    }
+
+    @Test
+    public void testResourceAuthorizerNeverDeniesAdmin() {
+        HugeGraph graph = mockStatusGraph();
+        HugeGraphAuthProxy proxy = newProxy(graph, 1D);
+        ResourceAuthorizer authorizer = Mockito.mock(ResourceAuthorizer.class);
+        HugeGraphAuthProxy.setResourceAuthorizer(authorizer);
+        setContext(new HugeGraphAuthProxy.Context(new HugeAuthenticator.User(
+                "admin", RolePermission.admin())));
+
+        for (int i = 0; i < 3; i++) {
+            proxy.loadingMode();
+        }
+        Mockito.verify(graph, Mockito.times(3)).loadingMode();
+        // Admin is consulted only to be audited, so never without auditing
+        Mockito.verify(authorizer, Mockito.atLeastOnce()).isAllowed(
+                Mockito.eq("admin"), Mockito.anyString(), Mockito.anyString(),
+                Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.eq(true));
+        Mockito.verify(authorizer, Mockito.never()).isAllowed(
+                Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
+                Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.eq(false));
+    }
+
+    @Test
+    public void testResourceObjectLabel() {
+        Namifiable vertexLabel = Mockito.mock(Namifiable.class);
+        Mockito.when(vertexLabel.name()).thenReturn("person");
+        Assert.assertEquals("person", new ResourceObject<>(
+                "DEFAULT", "hugegraph", ResourceType.VERTEX_LABEL, vertexLabel).label());
+
+        HugeElement vertex = Mockito.mock(HugeElement.class);
+        Mockito.when(vertex.label()).thenReturn("software");
+        Assert.assertEquals("software", new ResourceObject<>(
+                "DEFAULT", "hugegraph", ResourceType.VERTEX, vertex).label());
+
+        Namifiable edgeName = Mockito.mock(Namifiable.class);
+        Mockito.when(edgeName.name()).thenReturn("likes");
+        Assert.assertEquals("likes", new ResourceObject<>(
+                "DEFAULT", "hugegraph", ResourceType.EDGE, edgeName).label());
+
+        Assert.assertEquals("*", new ResourceObject<>(
+                "DEFAULT", "hugegraph", ResourceType.STATUS, "status").label());
+    }
+
+    private static HugeGraph mockStatusGraph() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        Mockito.when(graph.name()).thenReturn("tc13_mode_auth");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.spaceGraphName()).thenReturn("tc13_mode_auth");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(Mockito.mock(AuthManager.class));
+        Mockito.when(graph.taskScheduler()).thenReturn(Mockito.mock(TaskScheduler.class));
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE)).thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY)).thenReturn(100L);
+        return graph;
+    }
+
+    private static HugeGraphAuthProxy newProxy(HugeGraph graph, double auditRate) {
+        HugeConfig config = graph.configuration();
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE)).thenReturn(auditRate);
+        return new HugeGraphAuthProxy(graph);
     }
 
     @Test
@@ -151,6 +264,7 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     @After
     public void tearDown() {
         // Clean up contexts after each test
+        HugeGraphAuthProxy.setResourceAuthorizer(null);
         HugeGraphAuthProxy.resetContext();
         TaskManager.resetContext();
     }

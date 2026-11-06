@@ -84,10 +84,19 @@ class PolicyTest(unittest.TestCase):
                      "hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/traversal/A.java"]:
             with self.subTest(path=path):
                 plan = self.plan_for([path])
-                self.assertEqual({"server", "macos"}, set(plan["selected"]))
-                self.assertEqual({"server_memory", "server_rocksdb", "macos"}, set(plan["expected"]))
+                self.assertEqual({"server", "macos", "ranger"}, set(plan["selected"]))
+                self.assertEqual({"server_memory", "server_rocksdb", "macos", "ranger"}, set(plan["expected"]))
                 self.assertFalse(plan["macos_full"])
                 self.assertFalse(plan["pd_store"])
+
+    def test_ranger_plugin_changes_only_run_ranger_job(self):
+        plan = self.plan_for(["hugegraph-server/hugegraph-ranger-plugin/src/main/java/A.java"])
+        self.assertEqual({"ranger"}, set(plan["selected"]))
+        self.assertEqual(["ranger"], plan["expected"])
+        self.assertTrue(plan["ranger"])
+        self.assertFalse(plan["server"])
+        self.assertFalse(plan["macos"])
+        self.assertEqual({"ranger"}, policy.select("server", [".github/workflows/ranger-plugin-ci.yml"]))
 
     def test_distributed_server_contracts_keep_hstore_cluster_without_pd_store_units(self):
         for path in [policy.SERVER_CORE + "backend/store/BackendStore.java",
@@ -343,14 +352,14 @@ class PolicyTest(unittest.TestCase):
         preflight = re.search(r"^  preflight:\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S).group(1)
         self.assertEqual("check-license", re.search(r"^    name: (.+)$", preflight, re.M).group(1))
         full = self.plan_for([], "workflow_dispatch", {"inputs": {"test-set": "full"}})
-        expected = {"build-server", "server-rocksdb", "commons", "pd_store", "cluster", "docker",
+        expected = {"build-server", "server-rocksdb", "commons", "ranger", "pd_store", "cluster", "docker",
                     "dependency_license", "compatibility", "codeql"}
         self.assertEqual(expected, self.coordinator_jobs(full))
         self.assertEqual(expected, self.coordinator_jobs(full, result="failure"))
         docs = self.plan_for(["hugegraph-pd/docs/guide.txt", "docker/README.md"])
         self.assertEqual(set(), self.coordinator_jobs(docs, result="failure"))
         source = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"])
-        self.assertEqual({"build-server", "server-rocksdb", "compatibility"}, self.coordinator_jobs(source))
+        self.assertEqual({"build-server", "server-rocksdb", "ranger", "compatibility"}, self.coordinator_jobs(source))
         master = self.plan_for(["hugegraph-server/hugegraph-core/src/main/A.java"], "push",
                                {"before": "base", "ref": "refs/heads/master"})
         self.assertEqual({"docker", "compatibility"}, self.coordinator_jobs(master))
@@ -420,8 +429,8 @@ class PolicyTest(unittest.TestCase):
         mixed = self.plan_for([policy.TRAVIS + "test-stop-hugegraph-store.sh", "hugegraph-pd/src/A.java"])
         self.assertTrue({"struct", "pd", "store", "hstore", "cluster"}.issubset(mixed["selected"]))
         checker = self.plan_for([policy.TRAVIS + "check-java-runtime-logs.sh"])
-        self.assertEqual({"build-server", "server-rocksdb", "commons", "pd_store", "cluster", "compatibility"},
-                         self.coordinator_jobs(checker))
+        self.assertEqual({"build-server", "server-rocksdb", "commons", "ranger", "pd_store", "cluster",
+                          "compatibility"}, self.coordinator_jobs(checker))
         self.assertTrue(checker["hbase"] and checker["riscv64"] and checker["macos_full"])
         master = {"ref": "refs/heads/master"}
         for script in policy.CONTRACT_SUITES:

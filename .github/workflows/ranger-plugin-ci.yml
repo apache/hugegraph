@@ -1,0 +1,56 @@
+name: "HugeGraph-Ranger-Plugin CI"
+
+on:
+  workflow_call:
+    inputs:
+      java-versions:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-ranger-plugin:
+    timeout-minutes: 30
+    name: Ranger plugin tests (Java ${{ matrix.JAVA_VERSION }})
+    runs-on: ubuntu-24.04
+    env:
+      USE_STAGE: 'false' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
+
+    strategy:
+      fail-fast: false
+      matrix:
+        JAVA_VERSION: ${{ fromJSON(inputs.java-versions) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Install JDK ${{ matrix.JAVA_VERSION }}
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ matrix.JAVA_VERSION }}
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
+
+      - name: Use staged maven repo settings
+        if: ${{ env.USE_STAGE == 'true' }}
+        run: |
+          cp "$HOME/.m2/settings.xml" /tmp/settings.xml
+          cp -vf .github/configs/settings.xml "$HOME/.m2/settings.xml" && cat "$HOME/.m2/settings.xml"
+
+      # The module is opt-in (-Dwith-ranger-plugin) and compiled against the server
+      # modules it extends, so -am rebuilds those from source and catches API drift.
+      - name: Run ranger plugin tests
+        run: |
+          set -o pipefail
+          RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
+          mvn -B -ntp -Dwith-ranger-plugin -Dmaven.javadoc.skip=true \
+            -pl hugegraph-server/hugegraph-ranger-plugin -am test \
+            -Dtest='Ranger*Test' -Dsurefire.failIfNoSpecifiedTests=false 2>&1 | tee "$RUNTIME_LOG"
+          bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG"

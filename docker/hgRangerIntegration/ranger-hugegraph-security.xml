@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<configuration>
+
+    <!-- Ranger Admin URL (uses Docker service name) -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.rest.url</name>
+        <value>http://ranger:6080</value>
+    </property>
+
+    <property>
+        <name>ranger.plugin.hugegraph.service.name</name>
+        <value>hugegraph</value>
+    </property>
+
+    <!-- Poll Ranger Admin every 30 seconds for policy updates -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.pollIntervalMs</name>
+        <value>30000</value>
+    </property>
+
+    <!-- Local policy cache (used when Ranger Admin is unreachable) -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.cache.dir</name>
+        <value>/tmp/ranger/cache/hugegraph</value>
+    </property>
+
+    <property>
+        <name>ranger.plugin.hugegraph.policy.source.impl</name>
+        <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
+    </property>
+
+    <!-- Credentials for the plugin to authenticate to Ranger Admin -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.rest.user</name>
+        <value>admin</value>
+    </property>
+    <property>
+        <name>ranger.plugin.hugegraph.policy.rest.password</name>
+        <value>rangerR0cks!</value>
+    </property>
+
+    <!-- Audit logging configuration -->
+    <property>
+        <name>xasecure.audit.is.enabled</name>
+        <value>true</value>
+    </property>
+
+    <!-- Log audit events to a local file instead of Solr -->
+    <property>
+        <name>xasecure.audit.destination.file</name>
+        <value>true</value>
+    </property>
+
+    <!-- Audit log file location -->
+    <property>
+        <name>xasecure.audit.destination.file.dir</name>
+        <value>/var/log/ranger/audit</value>
+    </property>
+
+    <!-- Audit log file name format -->
+    <property>
+        <name>xasecure.audit.destination.file.file</name>
+        <value>hugegraph_audit.log</value>
+    </property>
+
+    <!-- Send plugin audit events to the same Solr core Ranger Admin's UI
+         reads from, so they show up under the Audit tab. -->
+    <property>
+        <name>xasecure.audit.destination.solr</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>xasecure.audit.destination.solr.urls</name>
+        <value>http://ranger-solr:8983/solr/ranger_audits</value>
+    </property>
+    <property>
+        <name>xasecure.audit.destination.solr.zookeepers</name>
+        <value>NONE</value>
+    </property>
+
+    <!-- Optional: Send audit logs to syslog as well -->
+    <property>
+        <name>xasecure.audit.destination.syslog</name>
+        <value>false</value>
+    </property>
+
+    <!-- Buffer audit logs before writing to disk (optional, improves perf) -->
+    <property>
+        <name>xasecure.audit.destination.file.buffered</name>
+        <value>true</value>
+    </property>
+
+    <!-- Max buffer size before flushing to disk -->
+    <property>
+        <name>xasecure.audit.destination.file.buffered.dirtyThreshold</name>
+        <value>100</value>
+    </property>
+
+</configuration>
