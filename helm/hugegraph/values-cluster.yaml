@@ -132,6 +132,13 @@ server:
 
 # Network isolation is selected by mode or an explicit enabled override.
 
+# Optional RAG follows this preset only when explicitly enabled. The current
+# runtime supports exactly one active replica in every storage mode: RWX makes
+# files shareable but does not coordinate in-process state or concurrent writes.
+rag:
+  enabled: false
+  replicas: 1
+
 # Optional computation follows this preset only when explicitly enabled.
 vermeer:
   enabled: false

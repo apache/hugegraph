@@ -47,6 +47,13 @@ runs:
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_package.py' -v
 
+  - name: RAG integration regression
+    shell: 'bash -e {0}'
+    run: |
+      helm lint helm/hugegraph -f helm/hugegraph/values-single.yaml -f helm/hugegraph/values-rag.yaml
+      helm lint helm/hugegraph -f helm/hugegraph/values-cluster.yaml -f helm/hugegraph/values-rag.yaml
+      python3 -m unittest discover -s helm -p 'test_helm_rag.py' -v
+
   - name: SeaTunnel integration regression
     shell: 'bash -e {0}'
     run: python3 -m unittest discover -s helm -p 'test_helm_seatunnel.py' -v
@@ -86,6 +93,7 @@ runs:
     run: |
       for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml" \
         "-f helm/hugegraph/examples/values-seatunnel-standalone.yaml" "-f helm/hugegraph/examples/values-seatunnel-cluster.yaml" \
+        "-f helm/hugegraph/values-single.yaml -f helm/hugegraph/values-rag.yaml" "-f helm/hugegraph/values-cluster.yaml -f helm/hugegraph/values-rag.yaml" \
         "--set vermeer.enabled=true" "--set vermeer.enabled=true --set vermeer.mode=cluster --set mode=strict"; do
         # shellcheck disable=SC2086 # $preset intentionally splits into flags
         helm template ci helm/hugegraph $preset > /dev/null
@@ -525,6 +533,7 @@ runs:
       tar -xzf /tmp/kc.tar.gz -C /tmp
       for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml" "-f helm/hugegraph/values-strict.yaml" \
         "-f helm/hugegraph/examples/values-seatunnel-standalone.yaml" "-f helm/hugegraph/examples/values-seatunnel-cluster.yaml" \
+        "-f helm/hugegraph/values-single.yaml -f helm/hugegraph/values-rag.yaml" "-f helm/hugegraph/values-cluster.yaml -f helm/hugegraph/values-rag.yaml" \
         "--set vermeer.enabled=true" "--set vermeer.enabled=true --set vermeer.mode=cluster --set mode=strict"; do
         # shellcheck disable=SC2086 # $preset intentionally splits into flags
         helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0

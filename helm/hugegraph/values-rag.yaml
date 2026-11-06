@@ -1,0 +1,122 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Optional HugeGraph RAG overlay. Layer it after values-single.yaml or
+# values-cluster.yaml. The same-release Server address, port, graph identity
+# and administrator Secret are derived by the chart and need no duplication.
+rag:
+  enabled: true
+  image:
+    repository: hugegraph/rag
+    tag: latest
+    # The digest wins over tag and pins the multi-architecture image validated
+    # with this chart. Override repository and clear or replace digest together;
+    # tag is used only when digest is empty.
+    digest: sha256:4eec308ba92d952221a7f42f1ddfd33ece18bde15a25396e1417ece180630aa1
+    pullPolicy: Always
+  port: 8001
+
+  # Keep this true for a Server deployed by the same Helm release. Configure
+  # url/graphName/graphSpace/username/passwordSecret only for an external or
+  # deliberately separate HugeGraph deployment; see docs/rag.md.
+  hugegraph:
+    autoConfigure: true
+
+  # The current RAG application is intentionally single-replica: mutable
+  # settings live in one process and prompts/resources are writable. The chart
+  # rejects rag.replicas other than 1 and uses a Recreate deployment strategy.
+
+  # The main RAG process has no universal resource profile because model,
+  # embedding and indexing workloads vary widely. Size it for the selected
+  # providers and dataset.
+  resources: {}
+
+  # Non-root execution, RuntimeDefault seccomp, no added capabilities, disabled
+  # privilege escalation and no ServiceAccount token are enforced by templates,
+  # including bare --set rag.enabled=true installs. UID/GID/fsGroup default to
+  # 1000; use the string auto for platform-assigned non-root identities.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ''
+  podAnnotations: {}
+  podLabels: {}
+  # env/envFrom provide bootstrap defaults ahead of .env. Application-saved
+  # connections in settings.yaml survive upgrades and take precedence.
+  env: []
+  envFrom: []
+  terminationGracePeriodSeconds: 30
+
+  serviceAccount:
+    create: true
+    name: ''
+    annotations: {}
+    automountServiceAccountToken: false
+
+  # RAG stays internal by default because the application login does not
+  # protect every HTTP route. Expose it only behind a reviewed auth boundary.
+  service:
+    type: ClusterIP
+    nodePort: null
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ''
+    annotations: {}
+    hosts:
+    - host: rag.local
+      paths:
+      - path: /
+        pathType: Prefix
+    tls: []
+
+  # Unset inherits the top-level persistence.enabled value (true by default).
+  # The claim stores the editable .env, prompt configuration, indexes and
+  # resource tree. Missing example assets are read from the image, so startup
+  # needs no seeding. The pinned image implements the required external-
+  # configuration contract.
+  persistence:
+    enabled:
+    existingClaim: ''
+    size: 10Gi
+    storageClassName: ''
+    accessModes:
+    - ReadWriteOnce
+    mountPath: /var/lib/hugegraph-rag
+
+  extraVolumes: []
+  extraVolumeMounts: []
+  probes:
+    startup:
+      path: /
+      failureThreshold: 60
+      periodSeconds: 5
+      timeoutSeconds: 3
+    readiness:
+      path: /
+      failureThreshold: 3
+      periodSeconds: 10
+      timeoutSeconds: 3
+    liveness:
+      path: /
+      failureThreshold: 3
+      periodSeconds: 20
+      timeoutSeconds: 3
+  networkPolicy:
+    extraIngress: []
+    extraEgress: []
