@@ -102,6 +102,16 @@ public class RaftBackendStoreProvider implements BackendStoreProvider {
     }
 
     @Override
+    public String serializerName() {
+        return this.provider.serializerName();
+    }
+
+    @Override
+    public boolean acceptsOtherSerializer() {
+        return this.provider.acceptsOtherSerializer();
+    }
+
+    @Override
     public String storedVersion() {
         return this.provider.storedVersion();
     }

@@ -497,7 +497,6 @@ public final class GraphManager {
 
             sysGraphConfig.put("gremlin.graph", "org.apache.hugegraph.HugeFactory");
             sysGraphConfig.put("backend", "hstore");
-            sysGraphConfig.put("serializer", "binary");
             sysGraphConfig.put("store", SYS_GRAPH);
             sysGraphConfig.putIfAbsent("nickname", SYS_GRAPH);
             sysGraphConfig.putIfAbsent("creator", "admin");

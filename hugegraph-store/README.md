@@ -306,7 +306,6 @@ Edit `hugegraph-server/conf/graphs/<graph-name>.properties`:
 ```properties
 # Backend configuration
 backend=hstore
-serializer=binary
 
 # Store connection (PD addresses)
 store.provider=org.apache.hugegraph.backend.store.hstore.HstoreProvider
