@@ -49,6 +49,8 @@ import org.apache.hugegraph.pd.grpc.kv.LockResponse;
 import org.apache.hugegraph.pd.grpc.kv.ScanPrefixResponse;
 import org.apache.hugegraph.pd.grpc.kv.TTLRequest;
 import org.apache.hugegraph.pd.grpc.kv.TTLResponse;
+import org.apache.hugegraph.pd.grpc.kv.TxnRequest;
+import org.apache.hugegraph.pd.grpc.kv.TxnResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchEvent;
 import org.apache.hugegraph.pd.grpc.kv.WatchKv;
 import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
@@ -187,6 +189,33 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         TTLRequest request =
                 TTLRequest.newBuilder().setKey(key).setValue(value).setTtl(ttl).build();
         TTLResponse response = blockingUnaryCall(KvServiceGrpc.getPutTTLMethod(), request);
+        handleErrors(response.getHeader());
+        return response;
+    }
+
+    /**
+     * Atomic multi-key write. A failed compare or a rejected record is not an error: check
+     * succeeded on the response. The call is sent once: a TXN applied twice is not always
+     * harmless, a guarded CREATE fails its compare the second time. Only a call whose
+     * connection was refused, so never sent, goes once more to the leader found again. When
+     * no response arrives, or the PD that took the TXN lost the leadership before answering,
+     * it throws.
+     *
+     * @throws PDException with an unknown outcome: PD may have applied the TXN, except with
+     *                     error type TXN_NOT_PROPOSED, which PD answers before it proposes a
+     *                     request it rejects (invalid, or a PD peer without the txn opcode), so
+     *                     nothing was applied. A call PD answered with a gRPC status carries
+     *                     that status in its message and as its cause (UNIMPLEMENTED: a PD
+     *                     from before this RPC rejected it before any apply; UNAVAILABLE,
+     *                     DEADLINE_EXCEEDED: the call was lost)
+     */
+    public TxnResponse txn(TxnRequest request) throws PDException {
+        TxnResponse response = blockingUnaryCallOnce(KvServiceGrpc.getTxnMethod(), request);
+        if (response == null) {
+            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                  "No response to a txn from PD, pd.peers=" +
+                                  config.getServerHost());
+        }
         handleErrors(response.getHeader());
         return response;
     }

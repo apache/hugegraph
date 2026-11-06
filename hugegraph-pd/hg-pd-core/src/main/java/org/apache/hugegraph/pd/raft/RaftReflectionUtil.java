@@ -20,6 +20,7 @@ package org.apache.hugegraph.pd.raft;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.ReplicatorGroup;
 import com.alipay.sofa.jraft.core.Replicator;
+import com.alipay.sofa.jraft.storage.LogManager;
 import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.util.ThreadId;
 
@@ -27,6 +28,34 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class RaftReflectionUtil {
+
+    /**
+     * The last index of the node's raft log, read from its log manager; Long.MAX_VALUE when
+     * it cannot be read, which the caller treats as "unknown"
+     */
+    /**
+     * The log manager of the node, read once; null when it cannot be read. It reads the private
+     * field NodeImpl.logManager of jraft; RaftReflectionUtilTest pins that to the jraft version
+     * of the pom, so a jraft upgrade that renames or retypes the field fails CI rather than
+     * leaving every replay unchecked in production.
+     */
+    public static LogManager getLogManager(Node node) {
+        if (node == null) {
+            return null;
+        }
+        try {
+            var f = node.getClass().getDeclaredField("logManager");
+            f.setAccessible(true);
+            try {
+                return (LogManager) f.get(node);
+            } finally {
+                f.setAccessible(false);
+            }
+        } catch (NoSuchFieldException | IllegalAccessException | ClassCastException e) {
+            log.warn("Failed to get the raft log manager via reflection: {}", e.getMessage(), e);
+            return null;
+        }
+    }
 
     public static Replicator.State getReplicatorState(Node node, PeerId peerId) {
         if (node == null || peerId == null) {

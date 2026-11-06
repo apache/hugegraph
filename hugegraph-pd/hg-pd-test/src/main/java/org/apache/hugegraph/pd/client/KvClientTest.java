@@ -19,6 +19,7 @@ package org.apache.hugegraph.pd.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
@@ -29,10 +30,15 @@ import static org.mockito.Mockito.when;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
+import java.net.ServerSocket;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Queue;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
@@ -42,6 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.IntFunction;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.pd.common.PDException;
@@ -53,6 +60,11 @@ import org.apache.hugegraph.pd.grpc.kv.KvServiceGrpc;
 import org.apache.hugegraph.pd.grpc.kv.LockRequest;
 import org.apache.hugegraph.pd.grpc.kv.LockResponse;
 import org.apache.hugegraph.pd.grpc.kv.ScanPrefixResponse;
+import org.apache.hugegraph.pd.grpc.kv.TxnCompare;
+import org.apache.hugegraph.pd.grpc.kv.TxnOp;
+import org.apache.hugegraph.pd.grpc.kv.TxnRecord;
+import org.apache.hugegraph.pd.grpc.kv.TxnRequest;
+import org.apache.hugegraph.pd.grpc.kv.TxnResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchEvent;
 import org.apache.hugegraph.pd.grpc.kv.WatchKv;
 import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
@@ -1099,6 +1111,310 @@ public class KvClientTest extends BaseClientTest {
         assertThat(reconnectThread.isAlive()).isFalse();
         assertThat(closeThread.isAlive()).isFalse();
         verify(reconnectChannel).shutdownNow();
+    }
+
+    /**
+     * Graph lifecycle TXNs through the raft of the suite's PD: a create of a name whose config
+     * exists fails its compare, a BUMP with the incarnation goes through, a DROP of that
+     * incarnation drops it, and a BUMP of the dropped graph is rejected
+     */
+    @Test
+    public void testTxnLifecycleThroughRaft() throws Exception {
+        String name = "txn-" + UUID.randomUUID();
+        String record = "HUGEGRAPH/hg/SCHEMA_SYNC/DEFAULT/" + name;
+        String config = "HUGEGRAPH/hg/GRAPHSPACE/DEFAULT/GRAPH_CONF/" + name;
+        TxnResponse first = client.txn(createTxn(config, record, "A"));
+        assertThat(first.getSucceeded()).isTrue();
+        assertThat(first.getIncarnation()).isEqualTo(1L);
+        assertThat(first.getState()).isEqualTo("LIVE");
+
+        TxnResponse other = client.txn(createTxn(config, record, "B"));
+        assertThat(other.getSucceeded()).isFalse();
+        assertThat(other.getFailure()).isEqualTo(TxnResponse.Failure.COMPARE_FAILED);
+        assertThat(client.get(config).getValue()).isEqualTo("A");
+
+        TxnResponse bumped = client.txn(recordTxn(record, TxnRecord.Op.BUMP, 1L).build());
+        assertThat(bumped.getSucceeded()).isTrue();
+        assertThat(bumped.getRevision()).isGreaterThan(first.getRevision());
+
+        TxnResponse dropped = client.txn(recordTxn(record, TxnRecord.Op.DROP, 1L).addOps(
+                TxnOp.newBuilder().setType(TxnOp.Type.DELETE).setKey(config)).build());
+        assertThat(dropped.getState()).isEqualTo("DROPPED");
+        assertThat(client.get(config).getValue()).isEmpty();
+
+        TxnResponse rejected = client.txn(recordTxn(record, TxnRecord.Op.BUMP, 1L).build());
+        assertThat(rejected.getSucceeded()).isFalse();
+        assertThat(rejected.getFailure()).isEqualTo(TxnResponse.Failure.GRAPH_DROPPED);
+    }
+
+    /**
+     * Two Servers (two clients) creating the same graph at the same time through the suite's
+     * PD: exactly one gets the name
+     */
+    @Test
+    public void testConcurrentCreatesThroughRaft() throws Exception {
+        try (KvClient<WatchResponse> second = new KvClient<>(getPdConfig())) {
+            for (int n = 0; n < 5; n++) {
+                String name = "txn-race-" + UUID.randomUUID();
+                String record = "HUGEGRAPH/hg/SCHEMA_SYNC/DEFAULT/" + name;
+                String config = "HUGEGRAPH/hg/GRAPHSPACE/DEFAULT/GRAPH_CONF/" + name;
+                CountDownLatch start = new CountDownLatch(1);
+                CompletableFuture<TxnResponse> a = CompletableFuture.supplyAsync(() -> txnAfter(
+                        start, client, createTxn(config, record, "A")));
+                CompletableFuture<TxnResponse> b = CompletableFuture.supplyAsync(() -> txnAfter(
+                        start, second, createTxn(config, record, "B")));
+                start.countDown();
+                boolean aWon = a.get(30, TimeUnit.SECONDS).getSucceeded();
+                assertThat(aWon).isNotEqualTo(b.get(30, TimeUnit.SECONDS).getSucceeded());
+                assertThat(client.get(config).getValue()).isEqualTo(aWon ? "A" : "B");
+            }
+        }
+    }
+
+    /**
+     * PD answers the leader lookup but fails every txn call: the client has no response to
+     * return, and says so with a PDException, which its callers handle, not with a
+     * NullPointerException
+     */
+    @Test
+    public void testTxnWithoutAResponseIsAPdException() throws Exception {
+        AtomicReference<String> address = new AtomicReference<>();
+        AtomicInteger calls = new AtomicInteger();
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(Pdpb.GetMembersRequest request,
+                                                StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             observer.onNext(Pdpb.GetMembersResponse.newBuilder()
+                                                     .setLeader(Metapb.Member.newBuilder()
+                                                             .setGrpcUrl(address.get()))
+                                                     .build());
+                                             observer.onCompleted();
+                                         }
+                                     })
+                                     .addService(new KvServiceGrpc.KvServiceImplBase() {
+                                         @Override
+                                         public void txn(TxnRequest request,
+                                                         StreamObserver<TxnResponse> observer) {
+                                             calls.incrementAndGet();
+                                             observer.onError(Status.UNAVAILABLE.asException());
+                                         }
+                                     }).build().start();
+        address.set("127.0.0.1:" + server.getPort());
+        try (KvClient<WatchResponse> testClient = new KvClient<>(
+                PDConfig.of(address.get()).setAuthority(user, pwd))) {
+            assertThatThrownBy(() -> testClient.txn(createTxn("c", "r", "A")))
+                    .isInstanceOf(PDException.class)
+                    .hasMessageContaining("UNAVAILABLE")
+                    .hasMessageContaining("pd.peers=")
+                    .hasCauseInstanceOf(StatusRuntimeException.class);
+            // Sent once, where a failed call used to be sent again: the txn may have committed
+            assertThat(calls.get()).isEqualTo(1);
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * A txn that fails with UNAVAILABLE drops the stub, so the next call connects again, and
+     * one that fails otherwise keeps it, with the calls of other threads on its channel
+     */
+    @Test
+    public void testOnlyAnUnavailableTxnDropsTheStub() throws Exception {
+        AtomicReference<String> address = new AtomicReference<>();
+        AtomicInteger lookups = new AtomicInteger();
+        Queue<Status> failures = new ConcurrentLinkedQueue<>(
+                List.of(Status.UNAVAILABLE, Status.INTERNAL, Status.INTERNAL));
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(Pdpb.GetMembersRequest request,
+                                                StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             lookups.incrementAndGet();
+                                             observer.onNext(Pdpb.GetMembersResponse.newBuilder()
+                                                     .setLeader(Metapb.Member.newBuilder()
+                                                             .setGrpcUrl(address.get()))
+                                                     .build());
+                                             observer.onCompleted();
+                                         }
+                                     })
+                                     .addService(new KvServiceGrpc.KvServiceImplBase() {
+                                         @Override
+                                         public void txn(TxnRequest request,
+                                                         StreamObserver<TxnResponse> observer) {
+                                             observer.onError(failures.remove().asException());
+                                         }
+                                     }).build().start();
+        address.set("127.0.0.1:" + server.getPort());
+        try (KvClient<WatchResponse> testClient = new KvClient<>(
+                PDConfig.of(address.get()).setAuthority(user, pwd))) {
+            TxnRequest txn = createTxn("c", "r", "A");
+            assertThatThrownBy(() -> testClient.txn(txn)).isInstanceOf(PDException.class);
+            int connected = lookups.get();
+            assertThat(connected).isGreaterThan(0);
+            // After UNAVAILABLE: connects again
+            assertThatThrownBy(() -> testClient.txn(txn)).isInstanceOf(PDException.class);
+            int reconnected = lookups.get();
+            assertThat(reconnected).isGreaterThan(connected);
+            // After INTERNAL: keeps the stub
+            assertThatThrownBy(() -> testClient.txn(txn)).isInstanceOf(PDException.class);
+            assertThat(lookups.get()).isEqualTo(reconnected);
+            assertThat(failures).isEmpty();
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * The leader the client found refuses connections, as a PD that stopped a moment ago does:
+     * the txn was never sent, so it goes once more to the leader found next, and only once
+     */
+    @Test
+    public void testRefusedTxnIsSentOnceMoreOnANewStub() throws Exception {
+        String refusing = refusingAddress();
+        AtomicInteger txns = new AtomicInteger();
+        AtomicInteger lookups = new AtomicInteger();
+        // The first lookup names the stopped leader, the next ones this PD
+        Server server = fakePd(txns, lookups, n -> n == 1 ? refusing : null);
+        try (KvClient<WatchResponse> testClient = new KvClient<>(
+                PDConfig.of("127.0.0.1:" + server.getPort()).setAuthority(user, pwd))) {
+            assertThat(testClient.txn(createTxn("c", "r", "A")).getSucceeded()).isTrue();
+            assertThat(txns.get()).isEqualTo(1);
+            assertThat(lookups.get()).isEqualTo(2);
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * Refused again on the new stub: sent at most once more, then the txn fails
+     */
+    @Test
+    public void testTxnRefusedTwiceFails() throws Exception {
+        String refusing = refusingAddress();
+        AtomicInteger txns = new AtomicInteger();
+        AtomicInteger lookups = new AtomicInteger();
+        Server server = fakePd(txns, lookups, n -> refusing);
+        try (KvClient<WatchResponse> testClient = new KvClient<>(
+                PDConfig.of("127.0.0.1:" + server.getPort()).setAuthority(user, pwd))) {
+            assertThatThrownBy(() -> testClient.txn(createTxn("c", "r", "A")))
+                    .isInstanceOf(PDException.class)
+                    .hasMessageContaining("UNAVAILABLE");
+            assertThat(txns.get()).isEqualTo(0);
+            assertThat(lookups.get()).isEqualTo(2);
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * A PD that answers a txn with a status, here UNIMPLEMENTED as a PD from before the txn
+     * RPC does, fails the call with that status: a rejected call, not a lost one, and not
+     * an unreachable PD
+     */
+    @Test
+    public void testTxnRejectedByPdNamesTheStatus() throws Exception {
+        AtomicReference<String> address = new AtomicReference<>();
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(Pdpb.GetMembersRequest request,
+                                                StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             observer.onNext(Pdpb.GetMembersResponse.newBuilder()
+                                                     .setLeader(Metapb.Member.newBuilder()
+                                                             .setGrpcUrl(address.get()))
+                                                     .build());
+                                             observer.onCompleted();
+                                         }
+                                     })
+                                     .addService(new KvServiceGrpc.KvServiceImplBase() {
+                                     }).build().start();
+        address.set("127.0.0.1:" + server.getPort());
+        try (KvClient<WatchResponse> testClient = new KvClient<>(
+                PDConfig.of(address.get()).setAuthority(user, pwd))) {
+            PDException e = (PDException) catchThrowable(
+                    () -> testClient.txn(createTxn("c", "r", "A")));
+            assertThat(e).hasMessageContaining("UNIMPLEMENTED")
+                         .hasCauseInstanceOf(StatusRuntimeException.class);
+            assertThat(e.getMessage()).doesNotContain("pd.peers");
+            assertThat(e.getErrorCode()).isEqualTo(Pdpb.ErrorType.UNKNOWN_VALUE);
+            assertThat(Status.fromThrowable(e.getCause()).getCode())
+                    .isEqualTo(Status.Code.UNIMPLEMENTED);
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * An address nothing listens on
+     */
+    private static String refusingAddress() throws Exception {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return "127.0.0.1:" + socket.getLocalPort();
+        }
+    }
+
+    /**
+     * A PD that commits every txn and names the leader the given function returns for the
+     * n-th lookup, itself when it returns null
+     */
+    private static Server fakePd(AtomicInteger txns, AtomicInteger lookups,
+                                 IntFunction<String> leader)
+            throws Exception {
+        AtomicReference<String> address = new AtomicReference<>();
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(Pdpb.GetMembersRequest request,
+                                                StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             String named = leader.apply(
+                                                     lookups.incrementAndGet());
+                                             observer.onNext(Pdpb.GetMembersResponse.newBuilder()
+                                                     .setLeader(Metapb.Member.newBuilder()
+                                                             .setGrpcUrl(named == null ?
+                                                                         address.get() : named))
+                                                     .build());
+                                             observer.onCompleted();
+                                         }
+                                     })
+                                     .addService(new KvServiceGrpc.KvServiceImplBase() {
+                                         @Override
+                                         public void txn(TxnRequest request,
+                                                         StreamObserver<TxnResponse> observer) {
+                                             txns.incrementAndGet();
+                                             observer.onNext(TxnResponse.newBuilder()
+                                                                        .setSucceeded(true)
+                                                                        .build());
+                                             observer.onCompleted();
+                                         }
+                                     }).build().start();
+        address.set("127.0.0.1:" + server.getPort());
+        return server;
+    }
+
+    private static TxnResponse txnAfter(CountDownLatch start, KvClient<WatchResponse> kv,
+                                        TxnRequest request) {
+        try {
+            start.await();
+            return kv.txn(request);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static TxnRequest createTxn(String config, String record, String server) {
+        return recordTxn(record, TxnRecord.Op.CREATE, 0L)
+                .addCompares(TxnCompare.newBuilder().setKey(config)
+                                       .setKind(TxnCompare.Kind.ABSENT))
+                .addOps(TxnOp.newBuilder().setKey(config).setType(TxnOp.Type.PUT)
+                             .setValue(server)).build();
+    }
+
+    private static TxnRequest.Builder recordTxn(String record, TxnRecord.Op op,
+                                                long incarnation) {
+        return TxnRequest.newBuilder()
+                         .setRecord(TxnRecord.newBuilder().setKey(record).setOp(op)
+                                             .setExpectedIncarnation(incarnation));
     }
 
     String key = "key";

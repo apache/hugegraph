@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -65,6 +66,7 @@ import com.alipay.sofa.jraft.rpc.impl.core.InstallSnapshotRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.ReadIndexRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.RequestVoteRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.TimeoutNowRequestProcessor;
+import com.alipay.sofa.jraft.storage.LogManager;
 import com.alipay.sofa.jraft.util.Endpoint;
 import com.alipay.sofa.jraft.util.RpcFactoryHelper;
 
@@ -95,11 +97,21 @@ public class RaftEngine {
     private volatile static RaftEngine instance = new RaftEngine();
     private RaftStateMachine stateMachine;
     private String groupId = "pd_raft";
+    // How long an unconfirmed peer is left alone between txn attempts, see TxnPeerGate
+    private static final long TXN_PEER_PROBE_INTERVAL_MS = 3000L;
     private PDConfig.Raft config;
     private RaftGroupService raftGroupService;
     private RpcServer rpcServer;
     private volatile Node raftNode;
     private RaftRpcClient raftRpcClient;
+    // The last index of this node's log when it started, Long.MAX_VALUE until a node runs
+    private volatile long lastLogIndexAtStart = Long.MAX_VALUE;
+    // The log manager of this node, to read the term of an entry; null without a node
+    private volatile LogManager logManager;
+    // Confirms that every peer applies the TXN entry before one is proposed, null without a node
+    private volatile TxnPeerGate txnPeerGate;
+    // Where the gate's confirmations are recorded through raft, the raft KV store once it runs
+    private volatile TxnPeerGate.Record txnPeerRecord = TxnPeerGate.Record.NONE;
     private volatile int alivePeerCount = -1;
     private ScheduledExecutorService alivePeersRefresher;
 
@@ -163,6 +175,17 @@ public class RaftEngine {
                 new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
         this.stateMachine.resetForNewNode();
         this.raftNode = raftGroupService.start(false);
+        // Read before the node appends anything new: the entries up to here are the replay
+        this.logManager = RaftReflectionUtil.getLogManager(this.raftNode);
+        this.lastLogIndexAtStart = this.logManager == null ? Long.MAX_VALUE :
+                                   this.logManager.getLastLogIndex();
+        log.info("Raft log ends at index {} at start", this.lastLogIndexAtStart);
+        String self = serverId.getEndpoint().toString();
+        this.txnPeerGate = new TxnPeerGate(() -> otherPeerEndpoints(serverId),
+                                           raftRpcClient::getGrpcAddress,
+                                           TXN_PEER_PROBE_INTERVAL_MS, config.getRpcTimeout(),
+                                           System::currentTimeMillis,
+                                           () -> withSelf(this.txnPeerRecord, self));
         startAlivePeersRefresher();
         log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
                  nodeOptions.getInitialConf().getPeers());
@@ -264,6 +287,10 @@ public class RaftEngine {
                 this.alivePeersRefresher = null;
             }
             this.alivePeerCount = -1;
+            // Without a node there is no configuration to gate and no log to tell a replay by
+            this.txnPeerGate = null;
+            this.lastLogIndexAtStart = Long.MAX_VALUE;
+            this.logManager = null;
             if (this.raftGroupService != null) {
                 this.raftGroupService.shutdown();
                 boolean joined = false;
@@ -609,6 +636,8 @@ public class RaftEngine {
                 throw new PDException(-1, "the number of peer list must be odd.");
             }
             newPeers.parse(peerList);
+            // A peer that joins applies the log, TXN entries included
+            checkTxnPeers(newPeers);
             CountDownLatch latch = new CountDownLatch(1);
             this.raftNode.changePeers(newPeers, status -> {
                 result.compareAndSet(null, status);
@@ -678,6 +707,136 @@ public class RaftEngine {
 
     public Node getRaftNode() {
         return raftNode;
+    }
+
+    /**
+     * The last index of this node's raft log when the node started. After a restart jraft
+     * applies the log after the last snapshot again, and every entry at or below this index
+     * is such a replay; an entry above it is new in this run. Long.MAX_VALUE while no node
+     * runs or the index could not be read, so every entry counts as a replay then.
+     */
+    public long getLastLogIndexAtStart() {
+        return this.lastLogIndexAtStart;
+    }
+
+    /**
+     * Sets where the TXN peer gate records its confirmations through raft
+     */
+    public void setTxnPeerRecord(TxnPeerGate.Record record) {
+        this.txnPeerRecord = record == null ? TxnPeerGate.Record.NONE : record;
+    }
+
+    /**
+     * The record with this node added on every write: the leader that records confirmations
+     * applies TXN entries itself, and the next leader must not have to probe it
+     */
+    private static TxnPeerGate.Record withSelf(TxnPeerGate.Record record, String self) {
+        return new TxnPeerGate.Record() {
+            @Override
+            public Set<String> confirmed() {
+                return record.confirmed();
+            }
+
+            @Override
+            public void record(Set<String> confirmed) {
+                Set<String> all = new TreeSet<>(confirmed);
+                all.add(self);
+                record.record(all);
+            }
+        };
+    }
+
+    /**
+     * The term of the entry at the index in this node's raft log: 0 when the log does not hold
+     * it, -1 when the log cannot be read (no node, or the log manager could not be reached)
+     */
+    public long getLogTerm(long index) {
+        LogManager manager = this.logManager;
+        return manager == null ? -1L : manager.getTerm(index);
+    }
+
+    /**
+     * Fails when a peer of the current configuration is not confirmed to apply the TXN
+     * entry, see {@link TxnPeerGate}; does nothing without a node
+     *
+     * @throws PDException TXN_NOT_PROPOSED
+     */
+    public void checkTxnPeers() throws PDException {
+        TxnPeerGate gate = this.txnPeerGate;
+        if (gate == null) {
+            return;
+        }
+        try {
+            gate.check();
+        } catch (IllegalStateException e) {
+            // jraft lists the configuration only on the leader: this node lost the leadership
+            // after the leader check of the call, and nothing was proposed
+            throw new PDException(Pdpb.ErrorType.TXN_NOT_PROPOSED_VALUE,
+                                  "txn not proposed: this PD is not the raft leader any more (" +
+                                  e.getMessage() + ")");
+        }
+    }
+
+    /**
+     * Fails when a peer that a configuration about to be installed adds is not confirmed to
+     * apply the TXN entry: a peer that joins replays the log, TXN entries included. Peers the
+     * change keeps are not probed: they are in the current configuration, so the check before
+     * every TXN covers them already, and a kept peer that is down or not upgraded yet must not
+     * stop a membership change on a cluster that never sends a TXN. Called before every
+     * membership change; does nothing without a node
+     *
+     * @throws PDException TXN_NOT_PROPOSED, naming the peer
+     */
+    public void checkTxnPeers(Configuration next) throws PDException {
+        TxnPeerGate gate = this.txnPeerGate;
+        if (gate == null) {
+            return;
+        }
+        PeerId self = this.config == null ? null : JRaftUtils.getPeerId(this.config.getAddress());
+        List<PeerId> current = new ArrayList<>();
+        Node node = this.raftNode;
+        if (node != null) {
+            try {
+                current.addAll(node.listPeers());
+                current.addAll(node.listLearners());
+            } catch (IllegalStateException e) {
+                // jraft lists the configuration only on the leader
+                throw new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE,
+                                      "membership change refused: this PD is not the raft " +
+                                      "leader (" + e.getMessage() + ")");
+            }
+        }
+        List<String> endpoints = new ArrayList<>();
+        List<PeerId> peers = new ArrayList<>(next.getPeers());
+        peers.addAll(next.getLearners());
+        for (PeerId peer : peers) {
+            boolean kept = current.stream().anyMatch(p -> PeerUtil.isPeerEquals(p, peer));
+            if (!kept && !PeerUtil.isPeerEquals(peer, self)) {
+                endpoints.add(peer.getEndpoint().toString());
+            }
+        }
+        gate.confirm(endpoints);
+    }
+
+    /**
+     * The endpoints of the voters and learners of the current configuration, this node
+     * left out
+     */
+    private List<String> otherPeerEndpoints(PeerId self) {
+        List<String> endpoints = new ArrayList<>();
+        Node node = this.raftNode;
+        if (node == null) {
+            // Shut down meanwhile: no configuration; the proposal fails without a node
+            return endpoints;
+        }
+        List<PeerId> peers = new ArrayList<>(node.listPeers());
+        peers.addAll(node.listLearners());
+        for (PeerId peer : peers) {
+            if (!PeerUtil.isPeerEquals(peer, self)) {
+                endpoints.add(peer.getEndpoint().toString());
+            }
+        }
+        return endpoints;
     }
 
     /**
