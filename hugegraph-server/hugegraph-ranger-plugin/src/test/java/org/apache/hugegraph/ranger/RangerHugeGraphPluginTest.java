@@ -17,9 +17,28 @@
 
 package org.apache.hugegraph.ranger;
 
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.google.gson.Gson;
+
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.ResourceType;
+import org.apache.ranger.plugin.model.RangerPolicy;
+import org.apache.ranger.plugin.model.RangerPolicy.RangerPolicyItem;
+import org.apache.ranger.plugin.model.RangerPolicy.RangerPolicyItemAccess;
+import org.apache.ranger.plugin.model.RangerPolicy.RangerPolicyResource;
+import org.apache.ranger.plugin.model.RangerServiceDef;
+import org.apache.ranger.plugin.policyengine.RangerAccessRequest.ResourceMatchingScope;
 import org.apache.ranger.plugin.policyengine.RangerAccessRequestImpl;
+import org.apache.ranger.plugin.util.ServicePolicies;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -86,5 +105,114 @@ public class RangerHugeGraphPluginTest {
         Assert.assertEquals("person",
                             request.getResource().getValue(
                                     RangerHugeGraphPlugin.RES_LABEL));
+    }
+
+    @Test
+    public void testBuildAnyAccessRequestHasNoResourceKeys() {
+        RangerHugeGraphPlugin plugin = new RangerHugeGraphPlugin("hugegraph", null);
+        RangerAccessRequestImpl request = plugin.buildAnyAccessRequest(
+                "bob", HugePermission.WRITE);
+
+        Assert.assertEquals(ResourceMatchingScope.SELF_OR_DESCENDANTS,
+                            request.getResourceMatchingScope());
+        Set<String> keys = request.getResource().getKeys();
+        Assert.assertTrue(keys == null || keys.isEmpty());
+        Assert.assertEquals("write", request.getAccessType());
+        Assert.assertEquals(request.getAccessType(), request.getAction());
+        Assert.assertEquals("bob", request.getUser());
+    }
+
+    /**
+     * Evaluated by a real policy engine: a policy scoped to one graph space
+     * and graph must count as "some access", while it must not for another
+     * permission or user. A request value of "*" would not match it.
+     */
+    @Test
+    public void testHasAnyAccessMatchesPolicyScopedToOneGraphSpace()
+            throws Exception {
+        // As written in the Ranger UI (all four levels) and with only the
+        // mandatory levels
+        for (boolean allLevels : new boolean[]{true, false}) {
+            RangerHugeGraphPlugin plugin = pluginWithPolicy(
+                    "alice", "gs2", "hugegraph", "read", allLevels);
+
+            Assert.assertTrue(plugin.hasAnyAccess("alice",
+                                                  HugePermission.READ));
+            Assert.assertFalse(plugin.hasAnyAccess("alice",
+                                                   HugePermission.WRITE));
+            Assert.assertFalse(plugin.hasAnyAccess("bob",
+                                                   HugePermission.READ));
+        }
+    }
+
+    /** The login probe is only a gate: real requests are still decided. */
+    @Test
+    public void testScopedPolicyStillDecidesEachResource() throws Exception {
+        RangerHugeGraphPlugin plugin = pluginWithPolicy(
+                "alice", "gs2", "hugegraph", "read", true);
+
+        Assert.assertTrue(plugin.isAllowed("alice", "gs2", "hugegraph",
+                                           ResourceType.VERTEX, "person",
+                                           HugePermission.READ, false));
+        Assert.assertFalse(plugin.isAllowed("alice", "DEFAULT", "hugegraph",
+                                            ResourceType.VERTEX, "person",
+                                            HugePermission.READ, false));
+        Assert.assertFalse(plugin.isAllowed("alice", "gs2", "hugegraph",
+                                            ResourceType.VERTEX, "person",
+                                            HugePermission.WRITE, false));
+        // Not granted by a policy limited to gs2, whatever the login probe says
+        Assert.assertFalse(plugin.isAllowed("alice", "*", "*",
+                                            ResourceType.ALL, "*",
+                                            HugePermission.READ, false));
+    }
+
+    private static RangerHugeGraphPlugin pluginWithPolicy(String user,
+                                                          String graphSpace,
+                                                          String graph,
+                                                          String access,
+                                                          boolean allLevels)
+            throws Exception {
+        RangerServiceDef def;
+        try (InputStream in = RangerHugeGraphPluginTest.class.getClassLoader()
+                .getResourceAsStream("ranger-servicedef-hugegraph.json")) {
+            def = new Gson().fromJson(
+                    new InputStreamReader(in, StandardCharsets.UTF_8),
+                    RangerServiceDef.class);
+        }
+
+        Map<String, RangerPolicyResource> resources = new HashMap<>();
+        resources.put(RangerHugeGraphPlugin.RES_GRAPHSPACE,
+                      new RangerPolicyResource(graphSpace));
+        resources.put(RangerHugeGraphPlugin.RES_GRAPH,
+                      new RangerPolicyResource(graph));
+        if (allLevels) {
+            resources.put(RangerHugeGraphPlugin.RES_RESOURCE_TYPE,
+                          new RangerPolicyResource("*"));
+            resources.put(RangerHugeGraphPlugin.RES_LABEL,
+                          new RangerPolicyResource("*"));
+        }
+        RangerPolicyItem item = new RangerPolicyItem();
+        item.setUsers(Collections.singletonList(user));
+        item.setAccesses(Collections.singletonList(
+                new RangerPolicyItemAccess(access)));
+        RangerPolicy policy = new RangerPolicy();
+        policy.setId(1L);
+        policy.setName("scoped");
+        policy.setService("hugegraph");
+        policy.setIsEnabled(true);
+        policy.setResources(resources);
+        policy.setPolicyItems(new ArrayList<>(List.of(item)));
+
+        ServicePolicies policies = new ServicePolicies();
+        policies.setServiceName("hugegraph");
+        policies.setServiceId(1L);
+        policies.setPolicyVersion(1L);
+        policies.setServiceDef(def);
+        policies.setPolicies(new ArrayList<>(List.of(policy)));
+
+        RangerHugeGraphPlugin plugin = new RangerHugeGraphPlugin("hugegraph",
+                                                                 null);
+        plugin.setPolicies(policies);
+        return plugin;
     }
 }

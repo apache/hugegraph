@@ -18,9 +18,13 @@
 package org.apache.hugegraph.ranger;
 
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import javax.security.sasl.AuthenticationException;
 
@@ -69,15 +73,51 @@ public class RangerAuthManager implements AuthManager {
     private static final Logger LOG =
             LoggerFactory.getLogger(RangerAuthManager.class);
 
+    /** Permissions probed at login, besides ADMIN which is checked first. */
+    private static final HugePermission[] PROBED_PERMS = {
+            HugePermission.READ, HugePermission.WRITE,
+            HugePermission.DELETE, HugePermission.EXECUTE
+    };
+
+    private static final int MAX_CACHED_USERS = 1024;
+
     private final AuthManager delegate;
     private final RangerHugeGraphPlugin rangerPlugin;
+    private final long roleCacheNanos;
+    private final LongSupplier nanoClock;
+    private final Map<String, CachedGrant> grantCache = new ConcurrentHashMap<>();
 
+    /**
+     * @param roleCacheExpireSeconds how long a user's Ranger grants are reused
+     *                               between logins; 0 queries Ranger every time
+     */
     public RangerAuthManager(AuthManager delegate,
                              String serviceName,
-                             String rangerConfigFile) {
+                             String rangerConfigFile,
+                             int roleCacheExpireSeconds) {
+        this(delegate, createPlugin(serviceName, rangerConfigFile),
+             roleCacheExpireSeconds, System::nanoTime);
+    }
+
+    RangerAuthManager(AuthManager delegate, RangerHugeGraphPlugin plugin,
+                      int roleCacheExpireSeconds, LongSupplier nanoClock) {
+        if (roleCacheExpireSeconds < 0) {
+            throw new IllegalArgumentException(
+                    "The Ranger role cache expire must be >= 0, but got " +
+                    roleCacheExpireSeconds);
+        }
         this.delegate = delegate;
-        this.rangerPlugin = new RangerHugeGraphPlugin(serviceName, rangerConfigFile);
-        this.rangerPlugin.init();
+        this.rangerPlugin = plugin;
+        this.roleCacheNanos = TimeUnit.SECONDS.toNanos(roleCacheExpireSeconds);
+        this.nanoClock = nanoClock;
+    }
+
+    private static RangerHugeGraphPlugin createPlugin(String serviceName,
+                                                      String rangerConfigFile) {
+        RangerHugeGraphPlugin plugin =
+                new RangerHugeGraphPlugin(serviceName, rangerConfigFile);
+        plugin.init();
+        return plugin;
     }
 
     /**
@@ -183,11 +223,13 @@ public class RangerAuthManager implements AuthManager {
     /**
      * Query Ranger for {@code username} and merge any grants into {@code base}.
      *
-     * <p>We check one broad wildcard request (graphspace=*, graph=*, type=ALL)
-     * for each permission level.  Fine-grained resource checks are applied
-     * per-request inside {@link org.apache.hugegraph.auth.HugeGraphAuthProxy}
-     * via the normal {@link RolePermission} matching logic, so what we build
-     * here must satisfy that matching algorithm.
+     * <p>Login only needs to know which actions the user may attempt at all,
+     * so each permission is probed with {@link
+     * RangerHugeGraphPlugin#hasAnyAccess}: a policy limited to one graph space
+     * or graph still counts. The grant is expressed under the {@code "*"}
+     * graph space and graph, which {@code RolePerm} treats as a wildcard, and
+     * the real graph space, graph and label of every request are decided by
+     * Ranger in {@link org.apache.hugegraph.auth.HugeGraphAuthProxy}.
      *
      * <p>We can't call the protected {@code RolePermission.add()} from outside
      * the package, so we build a JSON role string and deserialise it instead —
@@ -198,40 +240,27 @@ public class RangerAuthManager implements AuthManager {
         if (base == null) {
             base = RolePermission.none();
         }
-        // Admin check first (cheapest)
-        if (rangerPlugin.isAllowed(username, "*", "*",
-                                   ResourceType.ALL, "*",
-                                   HugePermission.ADMIN)) {
+        CachedGrant grant = this.rangerGrant(username);
+        if (grant.admin) {
             return RolePermission.admin();
         }
-
-        // Build a minimal JSON roles document from the Ranger grants, then
-        // deserialise into a RolePermission and merge with base via its JSON
-        // round-trip (the only public merge path available outside the pkg).
-        // Use "DEFAULT" as graphspace key — RolePerm.matchResource() does an
-        // exact key lookup for requiredResource.graphSpace(), which is "DEFAULT".
-        StringBuilder sb = new StringBuilder("{\"roles\":{\"DEFAULT\":{\"*\":{");
-        boolean first = true;
-        HugePermission[] probedPerms = {HugePermission.READ, HugePermission.WRITE,
-                                        HugePermission.DELETE, HugePermission.EXECUTE};
-        for (HugePermission perm : probedPerms) {
-            if (rangerPlugin.isAllowed(username, "*", "*",
-                                       ResourceType.ALL, "*", perm)) {
-                if (!first) {
-                    sb.append(',');
-                }
-                // JSON format: "READ":[{"type":"ALL","label":"*","properties":null}]
-                sb.append('"').append(perm.name()).append('"')
-                  .append(":{\"ALL\":[{\"type\":\"ALL\",\"label\":\"*\"}]}");
-                first = false;
-            }
-        }
-        sb.append("}}}}");
-
-        if (first) {
+        if (grant.perms.isEmpty()) {
             // Ranger denied everything — return base unchanged
             return base;
         }
+
+        StringBuilder sb = new StringBuilder("{\"roles\":{\"*\":{\"*\":{");
+        boolean first = true;
+        for (HugePermission perm : grant.perms) {
+            if (!first) {
+                sb.append(',');
+            }
+            // JSON format: "READ":{"ALL":[{"type":"ALL","label":"*"}]}
+            sb.append('"').append(perm.name()).append('"')
+              .append(":{\"ALL\":[{\"type\":\"ALL\",\"label\":\"*\"}]}");
+            first = false;
+        }
+        sb.append("}}}}");
 
         try {
             RolePermission rangerRole =
@@ -242,6 +271,63 @@ public class RangerAuthManager implements AuthManager {
             LOG.warn("Failed to parse Ranger-derived role JSON, " +
                      "falling back to local permissions: {}", e.getMessage());
             return base;
+        }
+    }
+
+    /**
+     * The user's Ranger grants, reused for the configured expiry so a burst of
+     * logins does not become a burst of policy evaluations. Only Ranger's side
+     * is cached, never the local role, so local role changes apply at once.
+     * A Ranger policy change therefore reaches new logins after at most the
+     * expiry. Per-request enforcement does not use this cache.
+     */
+    private CachedGrant rangerGrant(String username) {
+        long now = this.nanoClock.getAsLong();
+        if (this.roleCacheNanos > 0) {
+            CachedGrant cached = this.grantCache.get(username);
+            if (cached != null && now - cached.loadedAt < this.roleCacheNanos) {
+                return cached;
+            }
+        }
+
+        // Probes are not accesses to a real resource: keep them out of audit
+        CachedGrant grant;
+        if (this.rangerPlugin.isAllowed(username, "*", "*", ResourceType.ALL,
+                                        "*", HugePermission.ADMIN, false)) {
+            grant = new CachedGrant(now, true, EnumSet.noneOf(HugePermission.class));
+        } else {
+            EnumSet<HugePermission> perms = EnumSet.noneOf(HugePermission.class);
+            for (HugePermission perm : PROBED_PERMS) {
+                if (this.rangerPlugin.hasAnyAccess(username, perm)) {
+                    perms.add(perm);
+                }
+            }
+            grant = new CachedGrant(now, false, perms);
+        }
+
+        if (this.roleCacheNanos > 0) {
+            if (this.grantCache.size() >= MAX_CACHED_USERS) {
+                this.grantCache.values().removeIf(
+                        g -> now - g.loadedAt >= this.roleCacheNanos);
+            }
+            if (this.grantCache.size() < MAX_CACHED_USERS) {
+                this.grantCache.put(username, grant);
+            }
+        }
+        return grant;
+    }
+
+    private static final class CachedGrant {
+
+        private final long loadedAt;
+        private final boolean admin;
+        private final EnumSet<HugePermission> perms;
+
+        private CachedGrant(long loadedAt, boolean admin,
+                            EnumSet<HugePermission> perms) {
+            this.loadedAt = loadedAt;
+            this.admin = admin;
+            this.perms = perms;
         }
     }
 
@@ -669,99 +755,55 @@ public class RangerAuthManager implements AuthManager {
         return delegate.isAdminManager(user);
     }
 
-    // The methods below were added to the AuthManager interface in a source
-    // version newer than the currently installed hugegraph-core jar.
-    // We omit @Override and use reflection so this module compiles against
-    // both old and new installed jars.
-
+    @Override
     public void setDefaultGraph(String graphSpace, String graph, String user) {
-        callDelegate("setDefaultGraph", Void.class,
-                     new Class[]{String.class, String.class, String.class},
-                     graphSpace, graph, user);
+        delegate.setDefaultGraph(graphSpace, graph, user);
     }
 
+    @Override
     public void unsetDefaultGraph(String graphSpace, String graph,
                                   String user) {
-        callDelegate("unsetDefaultGraph", Void.class,
-                     new Class[]{String.class, String.class, String.class},
-                     graphSpace, graph, user);
+        delegate.unsetDefaultGraph(graphSpace, graph, user);
     }
 
-    @SuppressWarnings("unchecked")
+    @Override
     public Map<String, Date> getDefaultGraph(String graphSpace, String user) {
-        return (Map<String, Date>) callDelegate("getDefaultGraph", Object.class,
-                new Class[]{String.class, String.class},
-                graphSpace, user);
+        return delegate.getDefaultGraph(graphSpace, user);
     }
 
+    @Override
     public Id createDefaultRole(String graphSpace, String owner,
                                 HugeDefaultRole role, String graph) {
-        return callDelegate("createDefaultRole", Id.class,
-                            new Class[]{String.class, String.class,
-                                        HugeDefaultRole.class, String.class},
-                            graphSpace, owner, role, graph);
+        return delegate.createDefaultRole(graphSpace, owner, role, graph);
     }
 
+    @Override
     public Id createSpaceDefaultRole(String graphSpace, String owner,
                                      HugeDefaultRole role) {
-        return callDelegate("createSpaceDefaultRole", Id.class,
-                            new Class[]{String.class, String.class, HugeDefaultRole.class},
-                            graphSpace, owner, role);
+        return delegate.createSpaceDefaultRole(graphSpace, owner, role);
     }
 
+    @Override
     public boolean isDefaultRole(String graphSpace, String owner,
                                  HugeDefaultRole role) {
-        return Boolean.TRUE.equals(callDelegate("isDefaultRole", Boolean.class,
-                                                new Class[]{String.class, String.class,
-                                                            HugeDefaultRole.class},
-                                                graphSpace, owner, role));
+        return delegate.isDefaultRole(graphSpace, owner, role);
     }
 
+    @Override
     public boolean isDefaultRole(String graphSpace, String graph,
                                  String owner, HugeDefaultRole role) {
-        return Boolean.TRUE.equals(callDelegate("isDefaultRole", Boolean.class,
-                                                new Class[]{String.class, String.class,
-                                                            String.class, HugeDefaultRole.class},
-                                                graphSpace, graph, owner, role));
+        return delegate.isDefaultRole(graphSpace, graph, owner, role);
     }
 
+    @Override
     public void deleteDefaultRole(String graphSpace, String owner,
                                   HugeDefaultRole role) {
-        callDelegate("deleteDefaultRole", Void.class,
-                     new Class[]{String.class, String.class, HugeDefaultRole.class},
-                     graphSpace, owner, role);
+        delegate.deleteDefaultRole(graphSpace, owner, role);
     }
 
+    @Override
     public void deleteDefaultRole(String graphSpace, String owner,
                                   HugeDefaultRole role, String graph) {
-        callDelegate("deleteDefaultRole", Void.class,
-                     new Class[]{String.class, String.class,
-                                 HugeDefaultRole.class, String.class},
-                     graphSpace, owner, role, graph);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> T callDelegate(String methodName, Class<T> returnType,
-                                Class<?>[] paramTypes, Object... args) {
-        try {
-            java.lang.reflect.Method m =
-                    delegate.getClass().getMethod(methodName, paramTypes);
-            Object result = m.invoke(delegate, args);
-            if (returnType == Void.class) {
-                return null;
-            }
-            return (T) result;
-        } catch (java.lang.reflect.InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException) {
-                throw (RuntimeException) cause;
-            }
-            throw new RuntimeException(cause);
-        } catch (NoSuchMethodException e) {
-            throw new UnsupportedOperationException(
-                    "Delegate does not support " + methodName, e);
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        }
+        delegate.deleteDefaultRole(graphSpace, owner, role, graph);
     }
 }

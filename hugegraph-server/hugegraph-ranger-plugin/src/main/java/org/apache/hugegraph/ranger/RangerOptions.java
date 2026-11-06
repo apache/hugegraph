@@ -26,6 +26,9 @@ package org.apache.hugegraph.ranger;
  *
  *   # Path to ranger-hugegraph-security.xml (Ranger client config)
  *   auth.ranger.config=/etc/ranger/hugegraph/ranger-hugegraph-security.xml
+ *
+ *   # Seconds a user's Ranger grants are reused between logins (0 disables)
+ *   auth.ranger.role_cache_expire=30
  * </pre>
  */
 public final class RangerOptions {
@@ -38,6 +41,12 @@ public final class RangerOptions {
 
     /** rest-server.properties key for the path to ranger-*-security.xml. */
     public static final String RANGER_CONFIG_FILE = "auth.ranger.config";
+
+    /** rest-server.properties key for the login grant cache expiry, in seconds. */
+    public static final String RANGER_ROLE_CACHE_EXPIRE = "auth.ranger.role_cache_expire";
+
+    /** Default login grant cache expiry, in seconds. */
+    public static final int DEFAULT_ROLE_CACHE_EXPIRE = 30;
 
     /** Default Ranger service name if not configured. */
     public static final String DEFAULT_SERVICE_NAME = "hugegraph";

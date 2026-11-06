@@ -114,7 +114,8 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
         AuthManager delegateProxy = this.graph.authManager();
         LOG.info("RangerAuthManager delegate: {}", delegateProxy.getClass().getName());
         this.rangerAuthManager = new RangerAuthManager(
-                delegateProxy, serviceName, rangerConfigFile);
+                delegateProxy, serviceName, rangerConfigFile,
+                roleCacheExpire(config));
 
         // Register the Ranger plugin so every per-request permission check in
         // HugeGraphAuthProxy also consults real Ranger policy, not just the
@@ -124,6 +125,20 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
 
         LOG.info("RangerHugeGraphAuthenticator initialised, Ranger service={}",
                  serviceName);
+    }
+
+    private static int roleCacheExpire(HugeConfig config) {
+        Object value = config.getProperty(RangerOptions.RANGER_ROLE_CACHE_EXPIRE);
+        if (value == null) {
+            return RangerOptions.DEFAULT_ROLE_CACHE_EXPIRE;
+        }
+        try {
+            return Integer.parseInt(value.toString().trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(String.format(
+                    "Invalid '%s' value '%s', expected a number of seconds",
+                    RangerOptions.RANGER_ROLE_CACHE_EXPIRE, value), e);
+        }
     }
 
     @Override

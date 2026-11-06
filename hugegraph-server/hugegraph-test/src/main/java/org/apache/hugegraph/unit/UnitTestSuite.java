@@ -65,6 +65,7 @@ import org.apache.hugegraph.unit.api.profile.ProfileAPITest;
 import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
 import org.apache.hugegraph.unit.api.space.SchemaTemplateAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
+import org.apache.hugegraph.unit.auth.RolePermGraphSpaceWildcardTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
 import org.apache.hugegraph.unit.cache.CacheTest;
 import org.apache.hugegraph.unit.cache.CachedGraphTransactionTest;
@@ -268,6 +269,7 @@ import org.junit.runners.Suite;
         EphemeralJobBuilderTest.class,
         DeleteExpiredJobTest.class,
         HugeGraphAuthProxyTest.class,
+        RolePermGraphSpaceWildcardTest.class,
         SchemaElementTest.class,
         HugeGraphTestInfrastructureTest.class,
         HugeElementViewTest.class,

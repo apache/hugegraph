@@ -46,13 +46,6 @@ public class StandardAuthenticator implements HugeAuthenticator {
 
     private HugeGraph graph = null;
 
-    private void initAdminUser() throws Exception {
-        if (this.requireInitAdminUser()) {
-            this.initAdminUser(this.inputPassword());
-        }
-        this.graph.close();
-    }
-
     @Override
     public HugeGraph graph() {
         E.checkState(this.graph != null, "Must setup Authenticator first");
@@ -202,7 +195,15 @@ public class StandardAuthenticator implements HugeAuthenticator {
         config.addProperty(INITING_STORE, true);
         auth.setup(config);
         if (auth.graph().backendStoreFeatures().supportsPersistence()) {
-            auth.initAdminUser(config.get(ServerOptions.ADMIN_PA));
+            // The 'pa' default is public, so it is never used implicitly:
+            // without an explicit non-empty value the operator is prompted
+            String adminPa = config.containsKey(ServerOptions.ADMIN_PA.name()) ?
+                             config.get(ServerOptions.ADMIN_PA) : "";
+            if (!adminPa.isEmpty()) {
+                auth.initAdminUser(adminPa);
+            } else if (auth.requireInitAdminUser()) {
+                auth.initAdminUser(auth.inputPassword());
+            }
         }
         auth.graph().close();
     }

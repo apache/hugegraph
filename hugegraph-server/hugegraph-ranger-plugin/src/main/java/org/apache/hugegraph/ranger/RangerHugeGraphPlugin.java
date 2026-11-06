@@ -25,6 +25,7 @@ import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.ResourceAuthorizer;
 import org.apache.hugegraph.auth.ResourceType;
 import org.apache.ranger.plugin.audit.RangerDefaultAuditHandler;
+import org.apache.ranger.plugin.policyengine.RangerAccessRequest.ResourceMatchingScope;
 import org.apache.ranger.plugin.policyengine.RangerAccessRequestImpl;
 import org.apache.ranger.plugin.policyengine.RangerAccessResourceImpl;
 import org.apache.ranger.plugin.policyengine.RangerAccessResult;
@@ -148,6 +149,45 @@ public class RangerHugeGraphPlugin extends RangerBasePlugin implements ResourceA
                       label, request.getAccessType(), allowed ? "ALLOW" : "DENY");
         }
         return allowed;
+    }
+
+    /**
+     * Whether any policy grants {@code permission} to {@code username} on at
+     * least one resource, at any graph space, graph, type or label. Used to
+     * decide at login what the user may attempt at all; each actual request is
+     * still decided on its real resource.
+     *
+     * <p>A request value of {@code "*"} would only match policies that
+     * themselves list {@code *}, so a policy scoped to one graph space or one
+     * graph would not count. This leaves every resource key unset and matches
+     * policies on the resources below that point instead. It writes no audit
+     * record, since it is not an access to a real resource.
+     */
+    public boolean hasAnyAccess(String username, HugePermission permission) {
+        RangerAccessRequestImpl request = buildAnyAccessRequest(username,
+                                                                permission);
+        RangerAccessResult result = isAccessAllowed(request, null);
+        boolean allowed = result != null && result.getIsAllowed();
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ranger any-access check user={} access={} → {}",
+                      username, request.getAccessType(),
+                      allowed ? "ALLOW" : "DENY");
+        }
+        return allowed;
+    }
+
+    /** Package-visible for unit testing, like {@link #buildRequest}. */
+    RangerAccessRequestImpl buildAnyAccessRequest(String username,
+                                                  HugePermission permission) {
+        String accessType = hugePermToRangerAccess(permission);
+        RangerAccessRequestImpl request = new RangerAccessRequestImpl(
+                new RangerAccessResourceImpl(), accessType, username,
+                null, null);
+        request.setResourceMatchingScope(
+                ResourceMatchingScope.SELF_OR_DESCENDANTS);
+        request.setAccessTime(new Date());
+        request.setAction(accessType);
+        return request;
     }
 
     /**

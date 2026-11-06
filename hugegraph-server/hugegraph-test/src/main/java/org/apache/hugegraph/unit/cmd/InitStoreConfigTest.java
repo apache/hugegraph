@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.unit.cmd;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -481,6 +483,65 @@ public class InitStoreConfigTest {
         Mockito.verify(graph).close();
     }
 
+    /**
+     * The 'pa' default is public, so without an explicit non-empty
+     * auth.admin_pa the operator is prompted instead and the default is never
+     * used. System.console() is null under the test runner, so the prompt
+     * reads System.in.
+     */
+    @Test
+    public void testInitAdminUserIfNeededPromptsWithoutExplicitAdminPa()
+                                                        throws Exception {
+        for (String adminPa : new String[]{null, ""}) {
+            String restConf = this.writeAuthenticatorRestServerConf(adminPa);
+            StandardAuthManager authManager =
+                    Mockito.mock(StandardAuthManager.class);
+            HugeGraph graph = this.mockAuthGraph(authManager, true);
+
+            InputStream stdin = System.in;
+            System.setIn(new ByteArrayInputStream(
+                         "typed-secret\n".getBytes(StandardCharsets.UTF_8)));
+            try {
+                this.initAdminUserIfNeeded(restConf, graph);
+            } finally {
+                System.setIn(stdin);
+            }
+
+            ArgumentCaptor<HugeUser> admin =
+                    ArgumentCaptor.forClass(HugeUser.class);
+            Mockito.verify(authManager).createUser(admin.capture());
+            Assert.assertTrue(StringEncoding.checkPassword(
+                              "typed-secret", admin.getValue().password()));
+            Assert.assertFalse(StringEncoding.checkPassword(
+                               "pa", admin.getValue().password()));
+            Mockito.verify(graph).close();
+        }
+    }
+
+    @Test
+    public void testInitAdminUserIfNeededDoesNotPromptWhenAdminExists()
+                                                        throws Exception {
+        String restConf = this.writeAuthenticatorRestServerConf(null);
+        StandardAuthManager authManager =
+                Mockito.mock(StandardAuthManager.class);
+        Mockito.when(authManager.findUser("admin"))
+               .thenReturn(new HugeUser("admin"));
+        HugeGraph graph = this.mockAuthGraph(authManager, true);
+
+        InputStream stdin = System.in;
+        // Nothing to read: a prompt would fail with NoSuchElementException
+        System.setIn(new ByteArrayInputStream(new byte[0]));
+        try {
+            this.initAdminUserIfNeeded(restConf, graph);
+        } finally {
+            System.setIn(stdin);
+        }
+
+        Mockito.verify(authManager, Mockito.never())
+               .createUser(Mockito.any(HugeUser.class));
+        Mockito.verify(graph).close();
+    }
+
     private HugeGraph mockAuthGraph(StandardAuthManager authManager,
                                     boolean persistent) {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
@@ -521,12 +582,15 @@ public class InitStoreConfigTest {
     private String writeAuthenticatorRestServerConf(String adminPa)
                                                     throws IOException {
         Path graphsDir = this.writeAuthGraphConfig("rocksdb");
-        return this.writeDisabledRestServerConfForGraphs(
-                graphsDir,
+        List<String> extra = new ArrayList<>(Arrays.asList(
                 ServerOptions.AUTHENTICATOR.name() +
                 "=" + StandardAuthenticator.class.getName(),
-                ServerOptions.AUTH_GRAPH_STORE.name() + "=hugegraph",
-                ServerOptions.ADMIN_PA.name() + "=" + adminPa);
+                ServerOptions.AUTH_GRAPH_STORE.name() + "=hugegraph"));
+        if (adminPa != null) {
+            extra.add(ServerOptions.ADMIN_PA.name() + "=" + adminPa);
+        }
+        return this.writeDisabledRestServerConfForGraphs(
+                graphsDir, extra.toArray(new String[0]));
     }
 
     private String writeDisabledRestServerConf(String... extraLines)

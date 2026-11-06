@@ -686,6 +686,20 @@ curl -s -o /dev/null -w "%{http_code}\n" -u bob:bobpass \
 # Expected: 201
 ```
 
+### Login-time role cache
+
+Each request is decided by Ranger on the real graph space, graph, type and label, so a
+policy change applies to requests as soon as the plugin has refreshed its policies. What
+HugeGraph decides at login is only whether a user may attempt anything at all (any grant
+in any graph space), and that result is cached per user for `auth.ranger.role_cache_expire`
+seconds (default `30`; `0` disables the cache). A user who gets a first grant, or loses
+the last one, can therefore see the change at login up to that many seconds later, in
+addition to the policy refresh interval. Set it in `rest-server.properties`:
+
+```properties
+auth.ranger.role_cache_expire=30
+```
+
 ---
 
 ## Observability
@@ -758,16 +772,12 @@ check when validating that the real resource type reached Ranger, not "Resource 
 The `result` field indicates: `1` = allowed, `0` = denied (`RangerDefaultAuditHandler` maps
 `RangerAccessResult.getIsAllowed()` to `1`/`0` respectively).
 
-**v1 limitation:** bulk traversal / iterator-based reads (e.g. paging through many vertices or
-edges from a single request) are rate-limited before reaching the Ranger authorizer, so they do
-not produce one audit event per element — only a bounded sample per (user, graphspace, graph,
-resource-type) window. This avoids multiplying audit-event volume (and Ranger policy-engine
-calls) by thousands per request. Elements outside the sampled rate fall back to the local
-`RolePermission` match only (the coarse permission level from login) rather than a fresh
-per-element Ranger check; every element still passes the local check either way, so this is
-a sampling trade-off on fine-grained per-element enforcement/audit during iteration, not a
-security hole for the single-request checkpoints (schema, single-element read/write, Gremlin
-execution) that this fix targets.
+**Audit sampling:** bulk traversal / iterator-based reads (e.g. paging through many vertices or
+edges from a single request) do not produce one audit event per element — only a bounded sample
+per (user, graphspace, graph, resource-type) window. This avoids multiplying audit-event volume
+by thousands per request. Sampling only limits the *audit record*: Ranger still evaluates the
+policy for every element (the check runs with auditing off once the sample is used up), so
+fine-grained per-label denies keep filtering results during iteration.
 
 ---
 
