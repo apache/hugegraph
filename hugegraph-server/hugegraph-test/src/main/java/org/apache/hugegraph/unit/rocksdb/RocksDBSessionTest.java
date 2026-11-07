@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.unit.rocksdb;
 
+import java.io.File;
 import java.nio.ByteBuffer;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,9 +29,13 @@ import java.util.Random;
 
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBSessions.Session;
+import org.apache.hugegraph.backend.store.rocksdbsst.RocksDBSstSessions;
+import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.hugegraph.unit.FakeObjects;
 import org.junit.Assume;
 import org.junit.Test;
 import org.rocksdb.RocksDBException;
@@ -649,5 +655,27 @@ public class RocksDBSessionTest extends BaseRocksDBUnitTest {
         String property = "rocksdb.estimate-num-keys";
         String numKeys = this.rocks.session().property(TABLE, property);
         Assert.assertEquals(String.valueOf(count), numKeys);
+    }
+
+    @Test
+    public void testSstSessionsCloseWithEmptyTable() throws RocksDBException {
+        HugeConfig config = FakeObjects.newConfig();
+        String sstPath = DB_PATH + "/sst-empty-table";
+        config.addProperty(RocksDBOptions.SST_PATH.name(), sstPath);
+        RocksDBSstSessions sstSessions = new RocksDBSstSessions(config, "sst", "store", sstPath);
+        sstSessions.createTable("empty-table");
+        sstSessions.createTable("written-table");
+
+        sstSessions.session().put("written-table", getBytes("person:1"), getBytes("James"));
+        sstSessions.session().commit();
+
+        // An empty table must not make close() fail
+        sstSessions.close();
+        Assert.assertEquals(0, sstSessions.openedTables().size());
+
+        // The table with data must still be finished
+        File written = Paths.get(sstPath, "written-table", "0001.sst").toFile();
+        Assert.assertTrue(written.exists());
+        Assert.assertTrue(written.length() > 0L);
     }
 }
