@@ -21,6 +21,7 @@ import java.io.File;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,15 +155,17 @@ public class EtcdMetaDriver implements MetaDriver {
                                 endpoints[i], endpoints[i].getClass(),
                                 endpoints[0], endpoints[0].getClass());
             }
-            builder = Client.builder().endpoints((String[]) endpoints);
+            builder = Client.builder().endpoints(
+                    Arrays.copyOf(endpoints, length, String[].class));
         } else if (endpoints[0] instanceof URI) {
             for (int i = 1; i < length; i++) {
-                E.checkArgument(endpoints[i] instanceof String,
-                                "Invalid endpoint %s(%s)",
+                E.checkArgument(endpoints[i] instanceof URI,
+                                "Inconsistent endpoint %s(%s) with %s(%s)",
                                 endpoints[i], endpoints[i].getClass(),
                                 endpoints[0], endpoints[0].getClass());
             }
-            builder = Client.builder().endpoints((URI[]) endpoints);
+            builder = Client.builder().endpoints(
+                    Arrays.copyOf(endpoints, length, URI[].class));
         } else {
             E.checkArgument(false, "Invalid endpoint %s(%s)",
                             endpoints[0], endpoints[0].getClass());

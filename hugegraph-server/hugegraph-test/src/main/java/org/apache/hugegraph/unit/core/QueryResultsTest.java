@@ -34,6 +34,7 @@ import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
+import org.apache.hugegraph.backend.serializer.MergeIterator;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.testutil.Assert;
@@ -475,6 +476,22 @@ public class QueryResultsTest {
         Assert.assertSame(filter, context.resultsFilter());
         Assert.assertNotSame(context.resultsFilter(),
                              new QueryResultContext(other).resultsFilter());
+    }
+
+    @Test
+    public void testMergeIteratorCloseClosesOriginIterator() throws Exception {
+        CountingIterator origin = new CountingIterator(1L, 2L);
+        CountingIterator other = new CountingIterator(1L);
+        MergeIterator<TestIdfiable, TestIdfiable> merged = new MergeIterator<>(
+                origin, ImmutableList.<Iterator<TestIdfiable>>of(other),
+                (element, merging) -> false);
+
+        Assert.assertTrue(merged.hasNext());
+        merged.next();
+        merged.close();
+
+        Assert.assertEquals(1, other.closed);
+        Assert.assertEquals(1, origin.closed);
     }
 
     private static QueryResults<TestIdfiable> resultsOf(List<Long> input,
