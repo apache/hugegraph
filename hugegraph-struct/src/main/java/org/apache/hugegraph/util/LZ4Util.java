@@ -43,10 +43,9 @@ public class LZ4Util {
         LZ4Compressor compressor = factory.fastCompressor();
         int initBufferSize = Math.round(bytes.length / ratio);
         BytesBuffer buf = new BytesBuffer(initBufferSize);
-        LZ4BlockOutputStream lz4Output = new LZ4BlockOutputStream(buf, blockSize, compressor);
-        try {
+        try (LZ4BlockOutputStream lz4Output = new LZ4BlockOutputStream(buf, blockSize,
+                                                                       compressor)) {
             lz4Output.write(bytes);
-            lz4Output.close();
         } catch (IOException e) {
             throw new BackendException("Failed to compress", e);
         }
@@ -66,14 +65,12 @@ public class LZ4Util {
         int initBufferSize = Math.min(Math.round(bytes.length * ratio),
                                       BytesBuffer.maxBufferCapacity());
         BytesBuffer buf = new BytesBuffer(initBufferSize);
-        LZ4BlockInputStream lzInput = new LZ4BlockInputStream(bais, decompressor);
         int count;
         byte[] buffer = new byte[blockSize];
-        try {
+        try (LZ4BlockInputStream lzInput = new LZ4BlockInputStream(bais, decompressor)) {
             while ((count = lzInput.read(buffer)) != -1) {
                 buf.write(buffer, 0, count);
             }
-            lzInput.close();
         } catch (IOException e) {
             throw new BackendException("Failed to decompress", e);
         }
