@@ -60,7 +60,6 @@ class Partition {
                 log.error("Partition graphName '{}' too short to trim postfixLength={}", graphName,
                          postfixLength);
             }
-            graphName = graphName.substring(0, graphName.length() - postfixLength);
             if (stats != null) {
                 List<Metapb.ShardStats> shardStatsList = stats.getShardStatsList();
                 List<Shard> shardsList = new ArrayList<>();
