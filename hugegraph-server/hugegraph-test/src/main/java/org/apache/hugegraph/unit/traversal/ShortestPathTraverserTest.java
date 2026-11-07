@@ -37,6 +37,7 @@ import org.apache.hugegraph.traversal.algorithm.HugeTraverser;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.Path;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.PathSet;
 import org.apache.hugegraph.traversal.algorithm.ShortestPathTraverser;
+import org.apache.hugegraph.traversal.algorithm.records.ShortestPathRecords;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -45,6 +46,135 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 public class ShortestPathTraverserTest extends BaseUnitTest {
+
+    @Test
+    public void testManySparseIdsInOneLayer() {
+        // Initialize the traverser's collection factory for PathSet.
+        new TestTraverser();
+        Id source = IdGenerator.of("person:7763");
+        Id target = IdGenerator.of("person:17592186046524");
+        ShortestPathRecords records = new ShortestPathRecords(source, target);
+        records.startOneLayer(true);
+        Assert.assertEquals(source, records.nextKey());
+        Id middle = null;
+        for (int i = 0; i < 1000; i++) {
+            Id vertex = IdGenerator.of("person:" + (i * 1000000007L));
+            if (i == 500) {
+                middle = vertex;
+            }
+            Assert.assertTrue(records.findPath(vertex, id -> true, false,
+                                               false).isEmpty());
+        }
+        records.finishOneLayer();
+        records.startOneLayer(false);
+        Assert.assertEquals(target, records.nextKey());
+        PathSet paths = records.findPath(middle, id -> true, false, false);
+
+        Assert.assertEquals(1, paths.size());
+        Assert.assertEquals(Arrays.asList(source, middle, target),
+                            paths.iterator().next().vertices());
+    }
+
+    @Test
+    public void testShortestPathWithSparseStringIds() {
+        Id source = IdGenerator.of("person:7763");
+        Id first = IdGenerator.of("person:15393162799074");
+        Id second = IdGenerator.of("person:17592186046524");
+        Id target = IdGenerator.of("person:24189255811086");
+        TrackingIterator forward = edges(edgeTo(first));
+        TrackingIterator backward = edges(edgeTo(second));
+        TrackingIterator next = edges(edgeTo(second));
+        TestTraverser traverser = new TestTraverser(forward, backward, next);
+
+        Path path = shortestPath(traverser, source, target, 3, 0L);
+
+        Assert.assertEquals(Arrays.asList(source, first, second, target),
+                            path.vertices());
+        Assert.assertTrue(forward.closed());
+        Assert.assertTrue(backward.closed());
+        Assert.assertTrue(next.closed());
+    }
+
+    @Test
+    public void testUnreachableSparseStringIds() {
+        Id source = IdGenerator.of("person:30786325581562");
+        Id target = IdGenerator.of("person:24189255811086");
+        TrackingIterator forward = edges(edgeTo(IdGenerator.of("person:7763")));
+        TrackingIterator backward = edges(edgeTo(IdGenerator.of("person:15393162799074")));
+        TrackingIterator next = edges();
+        TestTraverser traverser = new TestTraverser(forward, backward, next);
+
+        Path path = shortestPath(traverser, source, target, 3, 0L);
+
+        Assert.assertTrue(path.vertices().isEmpty());
+        Assert.assertTrue(forward.closed());
+        Assert.assertTrue(backward.closed());
+        Assert.assertTrue(next.closed());
+    }
+
+    @Test
+    public void testShortestPathWithMixedSparseIds() {
+        Id source = IdGenerator.of(Integer.MAX_VALUE - 1L);
+        Id middle = IdGenerator.of("person:7763");
+        Id target = IdGenerator.of(-9876543210L);
+        TestTraverser traverser = new TestTraverser(edges(edgeTo(middle)),
+                                                    edges(edgeTo(middle)));
+
+        Path path = shortestPath(traverser, source, target, 2, 0L);
+
+        Assert.assertEquals(Arrays.asList(source, middle, target),
+                            path.vertices());
+    }
+
+    @Test
+    public void testShortestPathWithHashCollisionAndZeroId() {
+        Id source = IdGenerator.of("Aa");
+        Id middle = IdGenerator.of("BB");
+        Id target = IdGenerator.of(0L);
+        Assert.assertEquals(source.hashCode(), middle.hashCode());
+        TestTraverser traverser = new TestTraverser(edges(edgeTo(middle)),
+                                                    edges(edgeTo(middle)));
+
+        Path path = shortestPath(traverser, source, target, 2, 0L);
+
+        Assert.assertEquals(Arrays.asList(source, middle, target),
+                            path.vertices());
+    }
+
+    @Test
+    public void testShortestPathWithUnlimitedDegreeAndCapacity() {
+        Id source = IdGenerator.of("person:21990232557366");
+        Id middle = IdGenerator.of("person:21990232565255");
+        Id target = IdGenerator.of("person:30786325581208");
+        TestTraverser traverser = new TestTraverser(edges(edgeTo(middle)),
+                                                    edges(edgeTo(middle)));
+
+        Path path = traverser.shortestPath(source, target, Directions.OUT,
+                                           Collections.emptyList(), 3, -1L,
+                                           0L, -1L);
+
+        Assert.assertEquals(Arrays.asList(source, middle, target),
+                            path.vertices());
+    }
+
+    @Test
+    public void testAllShortestPathsWithSparseStringIds() {
+        Id source = IdGenerator.of("person:7763");
+        Id first = IdGenerator.of("person:15393162799074");
+        Id second = IdGenerator.of("person:17592186046524");
+        Id target = IdGenerator.of("person:24189255811086");
+        TestTraverser traverser = new TestTraverser(edges(edgeTo(first), edgeTo(second)),
+                                                    edges(edgeTo(first), edgeTo(second)));
+
+        PathSet paths = traverser.allShortestPaths(source, target, Directions.OUT,
+                                                  Collections.emptyList(), 2, 2L, 0L, 100L);
+
+        Assert.assertEquals(2, paths.size());
+        for (Path path : paths) {
+            Assert.assertTrue(path.vertices().equals(Arrays.asList(source, first, target)) ||
+                              path.vertices().equals(Arrays.asList(source, second, target)));
+        }
+    }
 
     @Test
     public void testCloseEdgesWhenPathFoundForward() {

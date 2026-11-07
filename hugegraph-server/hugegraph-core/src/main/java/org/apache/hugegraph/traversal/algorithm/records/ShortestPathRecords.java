@@ -25,22 +25,21 @@ import java.util.function.Function;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.Path;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.PathSet;
-import org.apache.hugegraph.traversal.algorithm.records.record.Int2IntRecord;
 import org.apache.hugegraph.traversal.algorithm.records.record.Record;
 import org.apache.hugegraph.traversal.algorithm.records.record.RecordType;
-import org.apache.hugegraph.util.collection.CollectionFactory;
-import org.apache.hugegraph.util.collection.IntMap;
-import org.apache.hugegraph.util.collection.IntSet;
+import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
 
 public class ShortestPathRecords extends DoubleWayMultiPathsRecords {
 
-    private final IntSet accessedVertices;
+    private final IntHashSet accessedVertices;
     private boolean pathFound;
 
     public ShortestPathRecords(Id sourceV, Id targetV) {
-        super(RecordType.INT, false, sourceV, targetV);
+        // ID hash codes are sparse; fixed-address records allocate large arrays
+        // for a handful of vertices. Reuse the hash-backed path records instead.
+        super(RecordType.ARRAY, false, sourceV, targetV);
 
-        this.accessedVertices = CollectionFactory.newIntSet();
+        this.accessedVertices = new IntHashSet();
         this.accessedVertices.add(this.code(sourceV));
         this.accessedVertices.add(this.code(targetV));
         this.pathFound = false;
@@ -106,8 +105,9 @@ public class ShortestPathRecords extends DoubleWayMultiPathsRecords {
         ids.add(this.id(node));
         int value = node;
         for (int i = size - 1; i > 0; i--) {
-            IntMap layer = ((Int2IntRecord) all.elementAt(i)).layer();
-            value = layer.get(value);
+            Record layer = all.elementAt(i);
+            // isNew() permits only the first parent in each shortest-path layer.
+            value = layer.get(value).next();
             ids.add(this.id(value));
         }
         return new Path(ids);
