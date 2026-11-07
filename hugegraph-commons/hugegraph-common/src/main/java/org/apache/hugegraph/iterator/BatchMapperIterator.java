@@ -44,6 +44,12 @@ public class BatchMapperIterator<T, R> extends WrappedIterator<R> {
     }
 
     @Override
+    public void close() throws Exception {
+        this.resetBatchIterator();
+        super.close();
+    }
+
+    @Override
     protected Iterator<T> originIterator() {
         return this.originIterator;
     }
