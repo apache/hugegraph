@@ -111,8 +111,9 @@ public enum DataType implements SerialEnum {
     }
 
     public <V> Number valueToNumber(V value) {
-        if (!(this.isNumber() && value instanceof Number) &&
-            !(value instanceof String && SPECIAL_FLOATS.contains(value))) {
+        if (!this.isNumber() ||
+            !(value instanceof Number ||
+              value instanceof String && SPECIAL_FLOATS.contains(value))) {
             return null;
         }
         if (this.clazz.isInstance(value)) {
