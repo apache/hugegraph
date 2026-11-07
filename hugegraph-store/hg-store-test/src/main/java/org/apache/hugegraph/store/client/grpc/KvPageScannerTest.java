@@ -27,6 +27,7 @@ import static org.mockito.Mockito.when;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
+import org.apache.hugegraph.store.HgScanQuery;
 import org.apache.hugegraph.store.client.HgStoreNode;
 import org.apache.hugegraph.store.client.HgStoreNodeManager;
 import org.apache.hugegraph.store.client.HgStoreNodeSession;
@@ -64,6 +66,16 @@ import io.grpc.stub.StreamObserver;
 public class KvPageScannerTest {
 
     private static final AtomicLong NODE_IDS = new AtomicLong(-9000000);
+
+    @Test
+    public void testPrefixScanWithoutPrefixesNamesPrefixList() {
+        HgScanQuery query = HgScanQuery.ScanBuilder.prefixIteratorOf(
+                "table", Collections.emptyIterator()).build();
+        RuntimeException e = Assert.assertThrows(RuntimeException.class,
+                                                 () -> KvBatchUtil.createQueryReq(query, 1));
+        Assert.assertEquals("The prefix-list of ScanQuery shouldn't to be invalid in " +
+                            "ScanMethod.PREFIX mode.", e.getMessage());
+    }
 
     @Test
     public void testUnavailableScanRetiresPoolAndRebindsNextStub() {
