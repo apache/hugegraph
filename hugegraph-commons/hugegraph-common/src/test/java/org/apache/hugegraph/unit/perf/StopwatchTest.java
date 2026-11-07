@@ -99,4 +99,26 @@ public class StopwatchTest extends BaseUnitTest {
         Assert.assertNull(watch1.child("w4"));
         Assert.assertNull(watch1.child("w5"));
     }
+
+    @Test
+    public void testChildReplacedUnderSameNameIsReturned() {
+        Stopwatch parent = new NormalStopwatch("w1", Path.EMPTY);
+        Stopwatch first = new NormalStopwatch("w2", parent);
+        Assert.assertSame(first, parent.child("w2"));
+
+        Stopwatch second = new NormalStopwatch("w2", parent);
+        Assert.assertSame(second, parent.child("w2"));
+
+        Stopwatch other = new NormalStopwatch("w3", parent);
+        Assert.assertSame(other, parent.child("w3"));
+        Assert.assertSame(second, parent.child("w2"));
+    }
+
+    @Test
+    public void testPathEqualsNull() {
+        Path path = new Path("a");
+        Assert.assertFalse(path.equals(null));
+        Assert.assertFalse(path.equals("a"));
+        Assert.assertTrue(path.equals(new Path("a")));
+    }
 }

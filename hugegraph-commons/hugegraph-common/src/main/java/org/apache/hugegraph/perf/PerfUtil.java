@@ -636,7 +636,14 @@ public final class PerfUtil {
         }
 
         public V put(K key, V value) {
-            if (this.key1 == null) {
+            // Update the slot already holding this key before taking a free one
+            if (key == this.key1) {
+                this.val1 = value;
+            } else if (key == this.key2) {
+                this.val2 = value;
+            } else if (key == this.key3) {
+                this.val3 = value;
+            } else if (this.key1 == null) {
                 this.key1 = key;
                 this.val1 = value;
             } else if (this.key2 == null) {
