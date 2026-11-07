@@ -747,7 +747,9 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             Edge warm = QueryResults.one(transaction.queryEdgesByVertex(first.id()));
             Assert.assertEquals(edge.id(), warm.id());
             Assert.assertTrue(offheap.hits() > hits);
-            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+            // Positive edge candidates are served from cache. A nested query
+            // that previously returned no batch is deliberately retried.
+            Mockito.verify(store, Mockito.atMost(1)).query(Mockito.any(Query.class));
         } finally {
             transaction.close();
             AutoCloseable nativeCache = Whitebox.getInternalState(offheap, "cache");
@@ -839,7 +841,7 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
-    public void testEmptyEdgeBatchesRespectBatchCountLimit() {
+    public void testEmptyEdgeBatchesAreNotCached() {
         this.persistEdges(1);
         ConditionQuery root = this.edgeCacheRequest();
         Id label = this.graph.edgeLabel("person_know_person").id();
@@ -860,9 +862,29 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             for (int i = 0; i < 100; i++) {
                 Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(i)).isEmpty());
             }
-            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
-            Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(100)).isEmpty());
-            Mockito.verify(store, Mockito.times(1)).query(Mockito.any(Query.class));
+            Mockito.verify(store, Mockito.times(100)).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
+        }
+    }
+
+    @Test
+    public void testTransientEmptyEdgeBatchIsNotReused() {
+        List<Id> ids = this.persistEdges(1);
+        ConditionQuery root = this.edgeCacheRequest();
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params,
+                                                                         store);
+        try {
+            transaction.clearCache(null, false);
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(store).query(Mockito.any(Query.class));
+            Assert.assertTrue(this.fetchEdgeIds(transaction, root).isEmpty());
+
+            Mockito.clearInvocations(store);
+            Mockito.doCallRealMethod().when(store).query(Mockito.any(Query.class));
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, root));
+            Mockito.verify(store).query(Mockito.any(Query.class));
         } finally {
             transaction.close();
         }
