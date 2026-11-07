@@ -179,11 +179,10 @@ public final class CypherClient {
             }
             Map<String, Object> normalized = new LinkedHashMap<>();
             try {
-                Path path = matchedPath;
                 normalized.put("labels",
-                               normalize(path.labels(), depth + 1, seen));
+                               normalize(matchedPath.labels(), depth + 1, seen));
                 normalized.put("objects",
-                               normalize(path.objects(), depth + 1, seen));
+                               normalize(matchedPath.objects(), depth + 1, seen));
             } finally {
                 seen.remove(value);
             }
