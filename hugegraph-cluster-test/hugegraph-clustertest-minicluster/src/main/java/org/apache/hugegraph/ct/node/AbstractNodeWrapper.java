@@ -112,7 +112,11 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
             PathUtils.deleteDirectory(Paths.get(getNodePath()));
         } catch (IOException ex) {
             try {
+                // Retry once, files may still be held by a stopping process
                 TimeUnit.SECONDS.sleep(1);
+                PathUtils.deleteDirectory(Paths.get(getNodePath()));
+            } catch (IOException e) {
+                LOG.warn("Fail to delete node dir {}", getNodePath(), e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 LOG.error("Fail to delete node file", e);
