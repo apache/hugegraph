@@ -299,7 +299,10 @@ public class ConditionQuery extends IdQuery {
     }
 
     public ConditionQuery removeCondition(Condition condition) {
-        this.conditions.remove(condition);
+        // EMPTY_CONDITIONS is immutable and throws even when nothing matches
+        if (this.conditions != EMPTY_CONDITIONS) {
+            this.conditions.remove(condition);
+        }
         return this;
     }
 
@@ -519,6 +522,9 @@ public class ConditionQuery extends IdQuery {
     }
 
     public void unsetCondition(Object key) {
+        if (this.conditions == EMPTY_CONDITIONS) {
+            return;
+        }
         this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
     }
 
@@ -696,6 +702,9 @@ public class ConditionQuery extends IdQuery {
     }
 
     public void resetUserpropConditions() {
+        if (this.conditions == EMPTY_CONDITIONS) {
+            return;
+        }
         this.conditions.removeIf(condition -> !condition.isSysprop());
     }
 
