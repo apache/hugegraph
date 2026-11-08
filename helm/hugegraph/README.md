@@ -415,6 +415,15 @@ NodePort-default notice in NOTES; explicitly configured entry types are preserve
 To adopt new defaults, use `--reset-values` with a reviewed values file retaining
 all settings your release needs.
 
+A release installed with an older chart may have a NodePort stored in its release values even when the operator never set the Service type explicitly. `--reuse-values` can retain that value, so changing only `mode=strict` does not guarantee that existing Server or Hubble Services become `ClusterIP`. Inspect the effective values and Services after the upgrade:
+
+```bash
+helm get values hugegraph -n hugegraph --all
+kubectl -n hugegraph get svc hugegraph-server hugegraph-hubble
+```
+
+To make existing entries private, explicitly set `server.service.type=ClusterIP` and `hubble.service.type=ClusterIP`—plus the Service type of each enabled optional component—or use `--reset-values` with a complete reviewed values file. Verify the resulting Service types rather than assuming a mode change replaced values retained from an older release.
+
 PD, Store and Server images built from this version run as UID/GID `10001`. The
 PD and Store pods get `fsGroup: 10001` (with `fsGroupChangePolicy: OnRootMismatch`)
 unless their `podSecurityContext` sets `fsGroup`, also when `--reuse-values` keeps
