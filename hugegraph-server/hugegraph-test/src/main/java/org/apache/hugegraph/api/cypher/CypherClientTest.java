@@ -62,6 +62,21 @@ public class CypherClientTest extends BaseUnitTest {
     }
 
     @Test
+    public void testMissingConfigFileIsReported() {
+        CypherManager manager = CypherManager.configOf(
+                "no-such-dir/no-such-cypher-config.yaml");
+        CypherClient client = manager.getAnonymousClient();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            client.submitQuery("RETURN 1", null);
+        }, e -> {
+            Assert.assertContains("Configuration file at " +
+                                  "'no-such-dir/no-such-cypher-config.yaml' " +
+                                  "does not exist", e.getMessage());
+        });
+    }
+
+    @Test
     public void testAnonymousServerDoesNotRequireAuthorization() {
         Configuration config = clientConfig(apiClient(false, null));
 
