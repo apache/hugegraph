@@ -38,20 +38,22 @@ Applications can use REST APIs, Gremlin, Cypher or client SDKs. Gremlin compatib
 Start a standalone server for local evaluation, bind it to the loopback interface and wait for the version endpoint before continuing:
 
 ```bash
-docker run -d --name hugegraph \
-  -p 127.0.0.1:8080:8080 hugegraph/hugegraph
+(
+  docker run -d --name hugegraph \
+    -p 127.0.0.1:8080:8080 hugegraph/hugegraph || exit 1
 
-for attempt in $(seq 1 60); do
-  if curl -fs http://127.0.0.1:8080/versions; then
-    break
-  fi
-  if [ "${attempt}" -eq 60 ]; then
-    printf 'Server did not become ready; inspect the logs before continuing.\n' >&2
-    docker logs hugegraph
-    break
-  fi
-  sleep 2
-done
+  for attempt in $(seq 1 60); do
+    if curl -fs --max-time 2 http://127.0.0.1:8080/versions; then
+      exit 0
+    fi
+    if [ "${attempt}" -eq 60 ]; then
+      printf 'Server did not become ready; inspect the logs before continuing.\n' >&2
+      docker logs hugegraph
+      exit 1
+    fi
+    sleep 2
+  done
+)
 ```
 
 After the version request succeeds, run a small graph query. If the loop reports a timeout, resolve the startup failure before continuing:
