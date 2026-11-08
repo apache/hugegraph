@@ -42,7 +42,7 @@ achieved through the powerful [Gremlin](https://tinkerpop.apache.org/gremlin.htm
 
 ### 5 Minutes Quick Start
 
-Start a standalone server for local evaluation, bind it to the loopback interface and wait until the graph service is ready before continuing:
+Start a standalone server for local evaluation, bind it to the loopback interface and wait until a Gremlin query succeeds before continuing:
 
 ```bash
 (
@@ -50,11 +50,14 @@ Start a standalone server for local evaluation, bind it to the loopback interfac
     -p 127.0.0.1:8080:8080 hugegraph/hugegraph || exit 1
 
   for attempt in $(seq 1 60); do
-    if curl -fs --max-time 2 http://127.0.0.1:8080/graphs; then
+    if curl -fsS --max-time 2 -o /dev/null \
+      -X POST http://127.0.0.1:8080/gremlin \
+      -H 'Content-Type: application/json' \
+      -d '{"gremlin":"g.V().limit(1)"}'; then
       exit 0
     fi
     if [ "${attempt}" -eq 60 ]; then
-      printf 'Server did not become ready; inspect the logs before continuing.\n' >&2
+      printf 'Server query did not become ready; inspect the logs before continuing.\n' >&2
       docker logs hugegraph
       exit 1
     fi
@@ -63,12 +66,19 @@ Start a standalone server for local evaluation, bind it to the loopback interfac
 )
 ```
 
-After the readiness request succeeds, run a small graph query. If the loop reports a timeout, resolve the startup failure before continuing:
+After the readiness query succeeds, run a small graph query:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/gremlin \
   -H 'Content-Type: application/json' \
   -d '{"gremlin":"g.V().limit(5)"}'
+```
+
+A timeout deliberately leaves the named container available for diagnosis. Inspect `docker logs hugegraph` and preserve any required data or attached volumes first. When it is safe to discard the failed container, stop and remove it before retrying:
+
+```bash
+docker stop hugegraph 2>/dev/null || true
+docker rm hugegraph
 ```
 
 The loopback bind keeps this evaluation endpoint off ordinary remote interfaces while authentication is not enabled. Users of older Docker or unusual host-network setups should also restrict host firewall access explicitly. Pin a released image for repeatable deployments and enable authentication before exposing the service outside a trusted network. See the [server deployment guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/) for packages, configuration and production preparation.
