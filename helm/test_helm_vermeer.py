@@ -164,7 +164,9 @@ class VermeerChartTest(unittest.TestCase):
             for upgrade, registry in ((False, ""), (True, ""), (True, "registry.example.com")):
                 with self.subTest(upgrade=upgrade, registry=registry):
                     documents = self.documents(chart=chart, upgrade=upgrade, deterministic_auth=False,
-                                               **{"global": {"imageRegistry": registry}})
+                                               **{"global": {"imageRegistry": registry},
+                                                  "bootstrap": {"pdReplicas": 3, "storeReplicas": 3,
+                                                                "initialStoreCount": 3}})
                     self.assertEqual([], vermeer_resources(documents))
             values = yaml.safe_load((CHART / "values.yaml").read_text())
             values.pop("mode")
@@ -435,12 +437,19 @@ class VermeerChartTest(unittest.TestCase):
         script = "\n".join(app.get("args", []))
         self.assertIn("vermeer.url", script)
         self.assertIn("vermeer.token_file", script)
+        self.assertIn("operations.vermeer.enabled=false", script)
+        self.assertIn("operations.vermeer.address=", script)
+        self.assertIn("operations.vermeer.token_file=", script)
         self.assertNotIn("fixture-vermeer-master", script)
 
     def test_hubble_wrapper_replaces_stale_and_duplicate_vermeer_properties(self):
-        for enabled in (False, True):
-            with self.subTest(enabled=enabled):
-                documents = self.documents({} if enabled else None)
+        cases = ((None, {}), ({}, {}),
+                 ({"mode": "cluster", "master": {"httpPort": 7688}},
+                  {"fullnameOverride": "analysis"}))
+        for vermeer, overrides in cases:
+            enabled = vermeer is not None
+            with self.subTest(vermeer=vermeer, overrides=overrides):
+                documents = self.documents(vermeer, **overrides)
                 hubble, = resources(documents, "Deployment", "hubble")
                 container, = pod(hubble)["spec"]["containers"]
                 environment = dict(os.environ)
@@ -457,7 +466,13 @@ class VermeerChartTest(unittest.TestCase):
                     properties.write_text("unrelated.setting=preserved\n"
                                           "vermeer.url=http://stale-image-default\n"
                                           "vermeer.token_file=/stale-token\n"
-                                          "vermeer.url=http://duplicate-default\n")
+                                          "vermeer.url=http://duplicate-default\n"
+                                          "operations.vermeer.enabled=true\n"
+                                          "operations.vermeer.address=http://stale-operations-default\n"
+                                          "operations.vermeer.token_file=/stale-operations-token\n"
+                                          "operations.vermeer.enabled=false\n"
+                                          "operations.vermeer.address=http://duplicate-default\n"
+                                          "operations.vermeer.token_file=/duplicate-token\n")
                     start = root / "bin/start-hubble.sh"
                     start.write_text("#!/bin/sh\nexit 0\n")
                     start.chmod(0o755)
@@ -473,6 +488,12 @@ class VermeerChartTest(unittest.TestCase):
                                  [line for line in final if line.startswith("vermeer.url=")])
                 self.assertEqual(["vermeer.token_file=" + expected_token],
                                  [line for line in final if line.startswith("vermeer.token_file=")])
+                self.assertEqual(["operations.vermeer.enabled=" + str(enabled).lower()],
+                                 [line for line in final if line.startswith("operations.vermeer.enabled=")])
+                self.assertEqual(["operations.vermeer.address=" + expected_url],
+                                 [line for line in final if line.startswith("operations.vermeer.address=")])
+                self.assertEqual(["operations.vermeer.token_file=" + expected_token],
+                                 [line for line in final if line.startswith("operations.vermeer.token_file=")])
 
     def test_persistence_inheritance_and_explicit_temporary_storage(self):
         for mode in ("standalone", "cluster"):
@@ -494,6 +515,22 @@ class VermeerChartTest(unittest.TestCase):
         self.assertEqual([], workload["spec"].get("volumeClaimTemplates", []))
         claim, = vermeer_resources(documents, "PersistentVolumeClaim")
         self.assertEqual("7Gi", claim["spec"]["resources"]["requests"]["storage"])
+
+    def test_default_and_custom_tag_cover_both_processes_and_token_helper(self):
+        for mode in ("standalone", "cluster"):
+            for image, expected in (({}, "hugegraph/vermeer:latest"),
+                                    ({"tag": "dev-build"}, "hugegraph/vermeer:dev-build")):
+                with self.subTest(mode=mode, image=image):
+                    documents = self.documents({"mode": mode, "image": image})
+                    containers = [container for workload in self.workloads(documents)
+                                  for container in pod(workload)["spec"]["containers"]]
+                    hubble, = resources(documents, "Deployment", "hubble")
+                    containers += [container for container in pod(hubble)["spec"]["initContainers"]
+                                   if container["name"] == "vermeer-token"]
+                    self.assertEqual(3, len(containers))
+                    for container in containers:
+                        self.assertEqual(expected, container["image"])
+                        self.assertEqual("Always", container["imagePullPolicy"])
 
     def test_registry_digest_and_pull_secrets_cover_both_processes_and_token_helper(self):
         digest = "sha256:" + "a" * 64
@@ -528,6 +565,25 @@ class VermeerChartTest(unittest.TestCase):
             with self.subTest(source=source, destination=destination, port=port):
                 self.assertTrue(policy_allows(policies, labels[destination], labels[source], port, "ingress"))
                 self.assertTrue(policy_allows(policies, labels[source], labels[destination], port, "egress"))
+
+    def test_operations_needs_only_master_http_not_worker_or_rpc_access(self):
+        for mode in ("standalone", "cluster"):
+            with self.subTest(mode=mode):
+                documents = self.documents({"mode": mode, "master": {"httpPort": 7688,
+                                                                 "grpcPort": 7689},
+                                            "worker": {"httpPort": 7788, "grpcPort": 7789}},
+                                           mode="strict")
+                policies = resources(documents, "NetworkPolicy")
+                workloads = resources(documents, "StatefulSet") + resources(documents, "Deployment")
+                labels = {workload["metadata"]["labels"][COMPONENT]: pod(workload)["metadata"]["labels"]
+                          for workload in workloads}
+                hubble, master = labels["hubble"], labels["vermeer-master"]
+                self.assertTrue(policy_allows(policies, hubble, master, 7688, "egress"))
+                self.assertTrue(policy_allows(policies, master, hubble, 7688, "ingress"))
+                worker = labels["vermeer-worker"] if mode == "cluster" else master
+                for target, port in ((master, 7689), (worker, 7788), (worker, 7789)):
+                    self.assertFalse(policy_allows(policies, hubble, target, port, "egress"))
+                    self.assertFalse(policy_allows(policies, target, hubble, port, "ingress"))
 
     def test_backend_connections_need_no_extra_rules_for_either_worker_pod_layout(self):
         for topology in ("standalone", "cluster"):

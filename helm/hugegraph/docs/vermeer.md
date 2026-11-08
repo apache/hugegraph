@@ -105,6 +105,46 @@ view; the Vermeer service token does not grant them this administrator access.
 Setting `hubble.enabled=false` keeps Vermeer available through its native entry.
 `hubble.mode=direct` cannot be combined with an enabled native Vermeer integration.
 
+### Cluster health in Hubble
+
+The Hubble **System & Operations → Cluster Overview** keeps Server, PD and Store
+as the main topology. Vermeer appears as a compact compute-cluster summary;
+select it to switch to the Master-above-Worker view, then use **Return to main
+cluster** to restore the primary topology. This view describes the deployment,
+not the graph selected elsewhere in Hubble. Both Vermeer deployment modes use
+the same view, including standalone's one Master and one Worker.
+
+With `vermeer.enabled=true`, the chart also writes these Hubble properties:
+
+| Property | Chart-managed value |
+|---|---|
+| `operations.vermeer.enabled` | `true` |
+| `operations.vermeer.address` | The release's internal Master HTTP Service origin |
+| `operations.vermeer.token_file` | `/var/run/hugegraph/vermeer/token` |
+
+Operations and batch analysis reuse the same generated service token. Hubble
+mounts that token read-only; its main container never mounts the signing factor.
+No extra password, externally exposed Worker port or Kubernetes API permission
+is needed. The existing network policies allow Hubble to reach only the Master
+HTTP entry. Disabling Vermeer explicitly clears both integrations' endpoint and
+token-file properties and sets `operations.vermeer.enabled=false`, including
+when the image contains old defaults.
+
+Cluster health requires a paired Hubble and Vermeer build that supports the
+authenticated `GET /api/v1/admin/cluster` snapshot (`schema_version: 1`). Select
+compatible builds using `vermeer.image` and `hubble.image`; a tag alone does not
+establish capability. An image that returns 404 is shown as unsupported, not
+healthy. A failed or unauthorized snapshot is reported as unavailable and does
+not turn the main graph cluster into a database outage.
+
+Worker counts are **ready / registered**, not ready / desired Helm replicas.
+Registration alone does not establish readiness: the Master checks its reverse
+connection and all three task streams. Process CPU is expressed in cores and
+memory as RSS bytes; these are not Pod utilization percentages. Missing resource
+measurements do not imply zero usage or make an otherwise ready Worker offline.
+This deployment-wide snapshot is separate from the space-aware allocation
+check at `/api/v1/workers/availability`.
+
 ## Optional native administration
 
 Master HTTP defaults to NodePort in easy mode and ClusterIP in strict mode.
@@ -242,45 +282,59 @@ its intended internal API integration.
 
 ### Image compatibility
 
-The Chart pins the officially published `hugegraph/vermeer:helm-30b67d93e7d0`
-image to OCI index digest
-`sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e`.
-The index provides Linux `amd64` and `arm64` images built from
-[source commit 30b67d93e7d0](https://github.com/hugegraph/hugegraph-computer/commit/30b67d93e7d097374341cf46ee6a0703421512b1).
-No manual image override is needed for ordinary enablement.
+The development Chart defaults to `hugegraph/vermeer:latest` and `Always` pull
+policy. Pin a compatible tag or digest for reproducible deployments.
 
-Publishing uses the
-[publish latest Vermeer workflow](https://github.com/hugegraph/actions/blob/master/.github/workflows/publish_latest_vermeer_image.yml).
 Custom builds must include `/go/bin/vermeer-token`, versioned HMAC-SHA256 file
 credentials, native administrator password login and space-aware Worker
 availability. Hubble needs its native Vermeer adapter and nine algorithm forms.
 A different tag alone does not establish these capabilities.
 
-`vermeer.image.digest` takes priority over the tag; a repository override also
-retains that digest. To select another reviewed tag, clear it explicitly:
+`vermeer.image.digest` takes priority over the tag. A Helm upgrade using
+`--reuse-values` retains the release's image settings. To use the development
+default, include the other required values and explicitly set all three:
 
 ```bash
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph -f my-values.yaml \
-  --set-string vermeer.image.tag='<reviewed-tag>' \
-  --set-string vermeer.image.digest= --wait --timeout 20m
+  --set-string vermeer.image.tag=latest \
+  --set-string vermeer.image.digest= \
+  --set vermeer.image.pullPolicy=Always --wait --timeout 20m
 ```
 
 Retain the release's reviewed credentials, storage and metadata namespace in
-`my-values.yaml`. A custom immutable build can instead set its own verified
-`vermeer.image.digest`. Images inherit `global.imageRegistry` and
+`my-values.yaml`. An explicit digest from reused or supplied values must also be
+cleared when selecting another tag. A custom immutable build can instead set its
+own verified `vermeer.image.digest`. Images inherit `global.imageRegistry` and
 `imagePullSecrets`; registry mirrors must preserve the selected index and
 required architectures. Master, Worker and token initialization reuse the
 Vermeer image, with no runtime package downloads.
+
+An updated `latest` image does not change a Pod template by itself: `Always`
+pulls the current image when a container starts, but does not restart running
+Pods. To pick up a newer image, restart the Vermeer StatefulSet(s) and the Hubble
+Deployment (whose init container also uses the Vermeer image), or roll out an
+explicit new tag or digest. Plan the restart for the deployment's availability
+requirements.
 
 </details>
 
 ## Storage and recovery
 
 Master and Worker use separate writable data directories, including when they
-share one Pod. Each role mounts its own `/go/bin/vermeer_data` directory;
-logs use `/go/bin/vermeer_data/vermeer.log`. Never share a Pebble directory
-between process roles. Each process also works from that directory, so relative
-local output files under `./data/hubble` use its corresponding data volume.
+share one Pod. Each role mounts its own `/go/bin/vermeer_data` directory. Never
+share a Pebble directory between process roles. Vermeer writes its application
+logs to container stdout. Replace `MASTER_POD` and `WORKER_POD` below with the
+corresponding Pod names to inspect each container:
+
+```bash
+kubectl -n hugegraph logs MASTER_POD -c master
+kubectl -n hugegraph logs WORKER_POD -c worker
+```
+
+In standalone mode, use the same Pod name for both commands. Application logs
+are not stored in the data volume by default. Each process works from its data
+directory, so relative local output files under `./data/hubble` use its
+corresponding data volume.
 Keeping those files does not recreate the in-memory result-query cache.
 
 | Setting | Default |

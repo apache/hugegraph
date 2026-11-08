@@ -205,7 +205,8 @@ public class StoreDrainTest {
         setField(fixture.service, "statusListeners", List.of(listener));
         fixture.addStore(1, Metapb.StoreState.Up);
         fixture.addStore(2, Metapb.StoreState.Up);
-        Metapb.Store source = fixture.addStore(3, Metapb.StoreState.Up);
+        // Retain compatibility with a drain intent persisted before a failed capacity check.
+        Metapb.Store source = fixture.addStore(3, Metapb.StoreState.Exiting);
         Mockito.when(fixture.meta.getActiveStores())
                .thenAnswer(call -> new ArrayList<>(fixture.stores.values()));
         Metapb.ShardGroup original = group(0, 1, 2, 3);
@@ -247,6 +248,72 @@ public class StoreDrainTest {
         fixture.service.updateStore(drain);
         Assert.assertEquals(1, changeShardInvocations(fixture.partitions).size());
         Mockito.verifyNoInteractions(listener);
+    }
+
+    @Test
+    public void testForceTombstoneUpRejectsInsufficientCapacityBeforePersistence() throws Exception {
+        assertForceTombstoneRejectsInsufficientCapacity(Metapb.StoreState.Up);
+    }
+
+    @Test
+    public void testForceTombstoneOfflineRejectsInsufficientCapacityBeforePersistence() throws Exception {
+        assertForceTombstoneRejectsInsufficientCapacity(Metapb.StoreState.Offline);
+    }
+
+    private static void assertForceTombstoneRejectsInsufficientCapacity(Metapb.StoreState state)
+            throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.config.setMinStoreCount(0);
+        fixture.addStore(1, Metapb.StoreState.Up);
+        fixture.addStore(2, Metapb.StoreState.Up);
+        Metapb.Store source = fixture.addStore(3, state);
+        Mockito.when(fixture.meta.getActiveStores())
+               .thenAnswer(call -> new ArrayList<>(fixture.stores.values()));
+        Metapb.ShardGroup original = group(0, 1, 2, 3);
+        fixture.groups.put(0, original);
+
+        PDException error = Assert.assertThrows(PDException.class, () -> fixture.service.updateStore(
+                source.toBuilder().setState(Metapb.StoreState.Tombstone).build()));
+
+        Assert.assertEquals(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE, error.getErrorCode());
+        Assert.assertEquals(source, fixture.stores.get(3L));
+        Assert.assertEquals(original, fixture.groups.get(0));
+        Mockito.verify(fixture.meta, Mockito.never()).updateStore(Mockito.any());
+        Mockito.verify(fixture.meta, Mockito.never()).removeActiveStore(Mockito.any());
+        Assert.assertTrue(changeShardInvocations(fixture.partitions).isEmpty());
+    }
+
+    @Test
+    public void testForceTombstoneWithoutGroupsDoesNotRequirePlacementCapacity() throws Exception {
+        for (Metapb.StoreState state : List.of(Metapb.StoreState.Up, Metapb.StoreState.Offline)) {
+            Fixture fixture = new Fixture();
+            Metapb.Store source = fixture.addStore(3, state);
+            Mockito.when(fixture.meta.getActiveStores()).thenReturn(List.of(source));
+
+            Metapb.Store retired = fixture.service.updateStore(
+                    source.toBuilder().setState(Metapb.StoreState.Tombstone).build());
+
+            Assert.assertEquals(Metapb.StoreState.Tombstone, retired.getState());
+            Assert.assertEquals(retired, fixture.stores.get(3L));
+            Assert.assertTrue(changeShardInvocations(fixture.partitions).isEmpty());
+        }
+    }
+
+    @Test
+    public void testTombstoneRetryDoesNotReplanReferencedGroup() throws Exception {
+        Fixture fixture = new Fixture();
+        Metapb.Store retired = fixture.addStore(3, Metapb.StoreState.Tombstone);
+        Metapb.ShardGroup original = group(0, 1, 2, 3);
+        fixture.groups.put(0, original);
+
+        Metapb.Store updated = fixture.service.updateStore(retired.toBuilder()
+                                                                .setVersion("metadata-only").build());
+
+        Assert.assertEquals(Metapb.StoreState.Tombstone, updated.getState());
+        Assert.assertEquals("metadata-only", updated.getVersion());
+        Assert.assertEquals(original, fixture.groups.get(0));
+        Assert.assertTrue(changeShardInvocations(fixture.partitions).isEmpty());
+        Mockito.verify(fixture.meta, Mockito.never()).removeActiveStore(Mockito.any());
     }
 
     @Test
@@ -338,7 +405,11 @@ public class StoreDrainTest {
 
     private void assertStateUpdateSerializesWithDrain(boolean registration) throws Exception {
         Fixture fixture = new Fixture();
+        for (long id = 1; id <= 3; id++) {
+            fixture.addStore(id, Metapb.StoreState.Up);
+        }
         Metapb.Store source = fixture.addStore(4, Metapb.StoreState.Up);
+        Mockito.when(fixture.meta.getActiveStores()).thenReturn(new ArrayList<>(fixture.stores.values()));
         CountDownLatch readUp = new CountDownLatch(1);
         CountDownLatch continueUpdate = new CountDownLatch(1);
         CountDownLatch drainRequested = new CountDownLatch(1);

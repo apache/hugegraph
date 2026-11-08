@@ -57,7 +57,7 @@ public final class ReflectionUtil {
                 }
             }
             klass = klass.getSuperclass();
-        } while (klass != Object.class && withSuperClass);
+        } while (klass != null && klass != Object.class && withSuperClass); // null for interfaces
         return methods;
     }
 

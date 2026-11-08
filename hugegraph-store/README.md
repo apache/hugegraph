@@ -85,6 +85,9 @@ For detailed architecture, Raft consensus mechanisms, and partition management, 
 
 ---
 
+For lightweight Raft dashboard counters and the detailed metrics contract, see
+[Store monitoring metrics](docs/monitoring.md).
+
 ## Upgrading from 1.7
 
 Before starting 1.8 on existing HStore data, follow the [GraphID upgrade checks and recovery guide](../docs/graphid-upgrade.md). The Store distribution includes a read-only `bin/hugegraph-store-check.sh --check` command.
@@ -254,7 +257,9 @@ bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
   set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
   unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
   or `-j`; conflicting selections are rejected by the JVM.
-- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
+- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g -XX:MaxDirectMemorySize=2g"`). A `-j` heap replaces the
+  launcher's direct-memory cap, so pass one with it; otherwise the RocksDB budget counts a second heap
+  of direct memory (see the deployment guide's Store Configuration).
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
 The launcher always loads `bin/jvm-module.options`, including with custom `JAVA_OPTIONS` or `-j`.
@@ -397,6 +402,10 @@ docker run -d \
   --name hugegraph-store \
   hugegraph/store:latest
 ```
+
+Add `-e HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=<bytes>` to pin the off-heap RocksDB budget.
+Without it the Store sizes the budget from the container memory limit; see
+[Store Configuration](docs/deployment-guide.md#store-configuration) in the deployment guide.
 
 **Exposed Ports**:
 - `8520`: REST API (management, metrics)

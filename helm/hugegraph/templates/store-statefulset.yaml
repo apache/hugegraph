@@ -101,7 +101,7 @@ spec:
             - -c
             - |
               set -eu
-              REQUIRED={{ include "hugegraph.pd.quorum" . }}
+              REQUIRED={{ include "hugegraph.pd.bootstrapQuorum" . }}
               HEALTH_PEERS=$(echo "{{ include "hugegraph.pd.restPeersList" . }}" | tr ',' ' ')
               TIMEOUT={{ .Values.store.waitTimeoutSeconds | default 900 }}
               DEADLINE=$(( $(date +%s) + TIMEOUT ))

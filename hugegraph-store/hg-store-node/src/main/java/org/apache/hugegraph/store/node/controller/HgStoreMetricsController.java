@@ -58,6 +58,19 @@ public class HgStoreMetricsController {
         return this.driveMetrics.metrics();
     }
 
+    /**
+     * Constant-size counters for monitoring clients that do not need per-group
+     * registries, timer snapshots, or histogram samples.
+     */
+    @GetMapping("raft/summary")
+    public Map<String, Long> getRaftMetricsSummary() {
+        Map<String, NodeMetrics> metrics = this.nodeService.getNodeMetrics();
+        long enabled = metrics.values().stream()
+                              .filter(value -> value != null && value.isEnabled())
+                              .count();
+        return Map.of("groups", (long) metrics.size(), "enabled_groups", enabled);
+    }
+
     @GetMapping("raft")
     public Map<String, NodeMetrics> getRaftMetrics() {
         return nodeService.getNodeMetrics();

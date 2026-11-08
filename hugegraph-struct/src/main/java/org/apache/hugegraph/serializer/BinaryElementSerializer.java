@@ -54,16 +54,13 @@ import org.apache.hugegraph.type.define.EdgeLabelType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.StringEncoding;
-import org.slf4j.Logger;
 
 import com.google.common.primitives.Longs;
 
 public class BinaryElementSerializer {
     static final BinaryElementSerializer INSTANCE =
             new BinaryElementSerializer();
-    static Logger log = Log.logger(BinaryElementSerializer.class);
 
     public static BinaryElementSerializer getInstance() {
         return INSTANCE;
@@ -301,10 +298,11 @@ public class BinaryElementSerializer {
             // next buffer.readId() is the label id of vertex
         } else {
             buffer = BytesBuffer.wrap(col.name);
-            Id ownerVertexId = buffer.readId();
+            // Skip the owner vertex id, the column type and the label id
+            buffer.readId();
             E.checkState(buffer.remaining() > 0, "Missing column type");
-            byte type = buffer.read();
-            Id labelId = buffer.readId();
+            buffer.read();
+            buffer.readId();
             // next buffer.readId() is the sub-label id of edge
         }
         return buffer.readId();
@@ -370,7 +368,7 @@ public class BinaryElementSerializer {
             return lookupGraph.edgeLabelOrNone(id.subLabelId());
         }
         EdgeLabel label = new EdgeLabel(schemaGraph, id.subLabelId(), UNDEF);
-        if (id.subLabelId() != id.edgeLabelId()) {
+        if (!id.subLabelId().equals(id.edgeLabelId())) {
             label.edgeLabelType(EdgeLabelType.SUB);
             label.fatherId(id.edgeLabelId());
         }

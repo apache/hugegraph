@@ -43,6 +43,18 @@ public class ObjectIntMappingTest {
     }
 
     @Test
+    public void testObjectWithMinValueHashCode() {
+        // Long.hashCode(2^31) is Integer.MIN_VALUE
+        Id id = IdGenerator.of(1L << 31);
+        Assert.assertEquals(Integer.MIN_VALUE, id.hashCode());
+
+        int code = mapping.object2Code(id);
+        Assert.assertTrue(code > 0);
+        Assert.assertEquals(id, mapping.code2Object(code));
+        Assert.assertEquals(code, mapping.object2Code(id));
+    }
+
+    @Test
     public void testNumberIdMapping() {
         Set<Integer> codes = new LinkedHashSet<>();
         for (int i = 0; i < OBJECT_NUMBER; i++) {

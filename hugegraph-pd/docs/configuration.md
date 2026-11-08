@@ -181,7 +181,8 @@ Controls PD-specific behavior.
 pd:
   data-path: ./pd_data              # Metadata storage path
   patrol-interval: 1800             # Partition rebalancing interval (seconds)
-  initial-store-count: 1            # Minimum stores for cluster availability
+  initial-store-count: 1            # Bootstrap gate while no shard groups exist
+  min-store-count: 0                # First-bootstrap seed for the persisted placement floor
   initial-store-list: 127.0.0.1:8500  # Auto-activated stores
 ```
 
@@ -189,7 +190,8 @@ pd:
 |-----------|------|---------|-------------|
 | `pd.data-path` | String | `./pd_data` | Directory for RocksDB metadata storage and Raft logs. Ensure sufficient disk space and fast I/O (SSD recommended). |
 | `pd.patrol-interval` | Integer | `1800` | Interval (in seconds) for partition health patrol and automatic rebalancing. Lower values = more frequent checks. |
-| `pd.initial-store-count` | Integer | `1` | Minimum number of Store nodes required for cluster to be operational. Set to expected initial store count. |
+| `pd.initial-store-count` | Integer | `1` | Required live Store count while no shard groups exist. It does not disable existing voting majorities after bootstrap. |
+| `pd.min-store-count` | Integer | `0` | First-bootstrap seed for persisted `PDConfig.min_store_count`, an extra eligible-Store floor for new placement and drain preflight. Existing persisted configuration takes precedence. Zero means no extra floor beyond the desired replica count. |
 | `pd.initial-store-list` | String | `127.0.0.1:8500` | Comma-separated list of Store gRPC addresses to auto-activate on startup. Useful for bootstrapping. |
 
 **Production Recommendations**:
@@ -201,6 +203,62 @@ pd:
   - Production: `1800` (30 minutes) to reduce overhead
   - Large clusters: `3600` (1 hour)
 - `pd.initial-store-count`: Set to expected initial store count (e.g., `3` for 3 stores)
+
+#### Store bootstrap, placement and runtime quorum
+
+The PD distribution and Java fallback default to one initial Store and one shard replica
+(`partition.default-shard-count: 1`). Helm explicitly selects three shard replicas
+when `store.replicas >= 3`, otherwise one. `pd.initial-store-count` controls the
+initial number of Stores, not the replica count; set both independently for other
+multi-Store deployments.
+
+Bootstrap admission is separate from the metadata health hint used for existing data.
+Before any group exists, readiness requires enough eligible `Up` Stores for the initial count,
+desired replica count and persisted placement floor. `Pending` Stores need explicit management
+admission to `Up`; an old active lease does not make them placement capacity.
+An existing group is healthy only when a strict majority of its known `Leader`/`Follower` voter
+IDs have fresh Store leases. `Exiting` sources can still contribute a live vote while serving;
+they cannot receive new replicas. `Learner` and pending `None` targets do not count as voters.
+Zero-voter groups and duplicate IDs fail the health check. The result remains the conjunction
+of every group's view, rather than a per-request-group availability gate.
+
+The known-voter check keeps an ordinary migration with two retained live voters and one pending
+`None` target from stopping writes. PD currently writes target membership before Raft commits it,
+so this metadata hint is not proof of the actual committed membership, successful writes or a
+finished operation. JRaft still enforces actual quorum. Final node removal requires checking
+actual membership and full replica recovery separately.
+
+Ordinary `Up` Store heartbeats already recompute this health hint before returning. An
+`Exiting` source now also rechecks a preceding `Cluster_Warn` against known voting quorum,
+rather than forwarding Warn as a write veto. Lost majorities remain NotReady; explicit Fault
+and maintenance Offline responses remain unchanged. Partition warnings still describe observed
+replica state and are not erased from group metadata. This does not unify every writer of
+`clusterStats` or resolve the independent registration/lazy-read windows and maintenance-state
+aggregation issues.
+
+New allocations and reconfiguration require at least the configured replica count and the
+persisted eligible-Store floor. They fail rather than reducing replicas to the live Store count
+or silently converting two copies to one. Drain preflight checks the current quorum with the
+still-serving source included, then requires enough eligible destinations excluding that source;
+this permits a healthy one-copy source to begin copying before removal. A single-copy group
+can temporarily report NotReady when PD replaces its sole known voter with a pending target;
+this policy does not guarantee uninterrupted traffic during that transition. Final retirement
+has its own empty-engine/member gate. Normal node removal must use `Exiting`. A direct REST
+`Tombstone` update is a force-removal entry point and does not guarantee lossless removal.
+When PD still references that nonterminal Store, insufficient remaining eligible capacity is
+rejected before the terminal state is persisted. Group-free cleanup and metadata-only updates
+to an already terminal Store do not start a new migration.
+
+Older PD metadata omits `min_store_count`, which reads as zero and means automatic placement
+minimum. It must not inherit an old bootstrap count. Explicit positive floors are seeded and
+reloaded through `ConfigService`; they do not stop an existing healthy quorum. The current
+proto3 partial-update merge cannot reset a positive floor to zero; resending zero retains the
+old value. Resetting this floor requires a future field-presence-aware API.
+
+Without a new persisted initialization marker, an entirely group-free cluster is treated as
+bootstrap again, including after all groups are deliberately deleted. Configuration loading
+also retains its existing exception handling; the metadata health failure check does not claim
+to make configuration loading fail closed.
 
 ### Store Management Settings
 

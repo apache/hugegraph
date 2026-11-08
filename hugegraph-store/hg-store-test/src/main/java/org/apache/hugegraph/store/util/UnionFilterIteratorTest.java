@@ -32,6 +32,8 @@ import java.util.function.ToLongFunction;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.store.business.itrv2.IntersectionWrapper;
+import org.apache.hugegraph.store.business.itrv2.MapJoinIterator;
+import org.apache.hugegraph.store.business.itrv2.MapUnionIterator;
 import org.apache.hugegraph.store.business.itrv2.UnionFilterIterator;
 import org.apache.hugegraph.store.business.itrv2.io.SortShuffleSerializer;
 import org.junit.After;
@@ -83,6 +85,30 @@ public class UnionFilterIteratorTest {
 
         // Hash collisions send singletons and repeated groups through the same reducer.
         assertUnion(rows, column -> 0, keys);
+    }
+
+    @Test
+    public void testMapUnionIteratorNextBeforeHasNext() {
+        List<ScanIterator> sources = List.of(new RowIterator(List.of(column(1))),
+                                             new RowIterator(List.of(column(1))));
+        ScanIterator iterator = new MapUnionIterator<BackendColumn, Integer>(
+                sources, column -> SortShuffleSerializer.toInt(column.name));
+        BackendColumn first = iterator.next();
+        assertEquals(1, SortShuffleSerializer.toInt(first.name));
+        assertFalse(iterator.hasNext());
+        iterator.close();
+    }
+
+    @Test
+    public void testMapJoinIteratorNextBeforeHasNext() {
+        List<ScanIterator> sources = List.of(new RowIterator(List.of(column(1), column(2))),
+                                             new RowIterator(List.of(column(2), column(3))));
+        ScanIterator iterator = new MapJoinIterator<BackendColumn, Integer>(
+                sources, 0, column -> SortShuffleSerializer.toInt(column.name));
+        BackendColumn first = iterator.next();
+        assertEquals(2, SortShuffleSerializer.toInt(first.name));
+        assertFalse(iterator.hasNext());
+        iterator.close();
     }
 
     private void assertUnion(List<BackendColumn> rows, ToLongFunction<BackendColumn> hash,

@@ -109,6 +109,7 @@ Fail before dereferencing missing blocks; keep values.yaml the sole defaults sou
 {{- $budget := add (int $server.storageWaitTimeoutSeconds) 150 -}}
 {{- $_ := set $startup "failureThreshold" (add (div (add (sub $budget 1) $period) $period) 1) -}}
 {{- end -}}
+{{- include "hugegraph.bootstrap.resolve" . -}}
 {{- end -}}
 {{- end }}
 
@@ -439,7 +440,7 @@ Uses short headless DNS (cluster.local optional) resolvable inside the namespace
 */}}
 {{- define "hugegraph.pd.raftPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.raft -}}
@@ -454,7 +455,7 @@ PD gRPC peers for Store/Server.
 */}}
 {{- define "hugegraph.pd.grpcPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.grpc -}}
@@ -469,7 +470,7 @@ PD REST endpoints for Server storage-readiness checks.
 */}}
 {{- define "hugegraph.pd.restPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.rest -}}
@@ -523,7 +524,7 @@ Initial store list for PD bootstrap: store-0.svc.ns.svc:8500,...
 */}}
 {{- define "hugegraph.store.initialStoreList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.store.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.storeReplicas -}}
 {{- $name := include "hugegraph.store.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.store.ports.grpc -}}
@@ -592,6 +593,11 @@ Quorum size: floor(replicas/2)+1
 {{- add (div (int .Values.pd.replicas) 2) 1 -}}
 {{- end }}
 
+{{/* The static seed wait is independent of the current voting/PDB majority. */}}
+{{- define "hugegraph.pd.bootstrapQuorum" -}}
+{{- add (div (int .Values.__hugegraphBootstrap.pdReplicas) 2) 1 -}}
+{{- end }}
+
 {{/*
 Render JAVA_OPTS only when explicitly configured. An empty value preserves the
 image entrypoint's existing automatic JVM sizing behavior.
@@ -652,9 +658,8 @@ initialized cluster the flags are inert and the authoritative values live
 in PD metadata, changeable only through PD's own config API. PD reconciles
 existing shard groups toward the stored value when a partition patrol is
 triggered (TaskScheduleService reallocShards). The empty-value derivation
-is 3 when store.replicas is at least 3, else 1, because PD clamps a shard
-count of 2 to 1 (two shards cannot elect a leader) and its config API
-accepts only odd values. store-max-shard-count is rendered only when set,
+is 3 when store.replicas is at least 3, else 1. PD requires an odd
+replica count and rejects allocations with insufficient eligible Stores. store-max-shard-count is rendered only when set,
 keeping the image default. All lookups tolerate absent keys so releases
 stored before these values existed keep rendering under --reuse-values.
 
@@ -680,7 +685,7 @@ well, which is what a leader election waited on.
 {{- $flags := list -}}
 {{- $shardCount := include "hugegraph.optionalScalar" (get $partition "defaultShardCount") -}}
 {{- if eq $shardCount "" -}}
-{{- $shardCount = ternary "3" "1" (ge (int .Values.store.replicas) 3) -}}
+{{- $shardCount = ternary "3" "1" (ge (int .Values.__hugegraphBootstrap.storeReplicas) 3) -}}
 {{- end -}}
 {{- $flags = append $flags (printf "-Dpartition.default-shard-count=%s" $shardCount) -}}
 {{- $maxShard := include "hugegraph.optionalScalar" (get $partition "storeMaxShardCount") -}}
@@ -873,8 +878,8 @@ the chart renders reaches it only as NodeOptions.setInitialConf, which jraft
 applies when bootstrapping a node that has no configuration of its own. On an
 initialized group, adding Pods adds non-voting strangers: the extra PD starts,
 the peer list changes, and the voting configuration does not. PD exposes the
-change through RaftEngine.changePeerList, reachable from the PD client API but
-from no REST route, so the chart cannot perform it and does not pretend to.
+change through RaftEngine.changePeerList and its REST management route, but
+the chart does not coordinate node preparation, catch-up and member completion.
 Growing Store is ordinary scale-out and stays allowed.
 */}}
 {{- if and (eq $comp "pd") (gt $liveReplicas 0) (gt $desired $liveReplicas) -}}
@@ -963,9 +968,8 @@ and must not be failed for a value that has no effect.
 PD -D system properties must be empty or a positive integer. The schema
 enforces the types; these checks add a named failure for zero, negative, and
 nonsense values, and check an explicit shard count against PD's real
-constraints: PD's config API accepts only odd shard counts, PD clamps a
-count of 2 to 1 (two shards cannot elect a leader), and PD clamps the
-effective count to the number of live stores. All lookups tolerate absent
+constraints: PD accepts only positive odd shard counts and rejects
+placement when there are fewer eligible Stores than requested replicas. All lookups tolerate absent
 keys for releases stored before the values existed.
 */}}
 {{- $pdPartition := get .Values.pd "partition" | default dict -}}
@@ -980,10 +984,10 @@ keys for releases stored before the values existed.
 {{- $explicitShards := include "hugegraph.optionalScalar" (get $pdPartition "defaultShardCount") -}}
 {{- if regexMatch "^[1-9][0-9]*$" $explicitShards -}}
 {{- if eq (mod (int $explicitShards) 2) 0 -}}
-{{- fail "pd.partition.defaultShardCount must be odd: PD's config API rejects even shard counts, and PD clamps a bootstrap value of 2 to 1 because two shards cannot elect a leader" -}}
+{{- fail "pd.partition.defaultShardCount must be odd: PD rejects even shard counts because they cannot provide an odd voting majority" -}}
 {{- end -}}
 {{- if gt (int $explicitShards) (int .Values.store.replicas) -}}
-{{- fail "pd.partition.defaultShardCount is greater than store.replicas: PD would clamp the effective shard count to the number of live stores, so the extra replicas would silently never be placed. Raise store.replicas or lower the shard count" -}}
+{{- fail "pd.partition.defaultShardCount is greater than store.replicas: PD rejects placement without enough eligible Stores. Raise store.replicas or lower the shard count" -}}
 {{- end -}}
 {{- end -}}
 {{- $svc := get .Values.server "service" | default dict -}}
@@ -1022,7 +1026,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "PD_CLUSTER" "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
       "server" (list "HG_SERVER_CLUSTER" "POD_IP" "HG_SERVER_SERVICE_ID" "HG_SERVER_GRAPHSPACE" "SERVICE_ID" "GRAPH_SPACE" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_DEPLOY_IN_K8S" "HG_SERVER_STARTUP_TIMEOUT_S" "WAIT_STORAGE_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
-      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "SPRING_DATASOURCE_URL") -}}
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
 {{- range $entry := get $componentValues "extraEnv" | default list -}}

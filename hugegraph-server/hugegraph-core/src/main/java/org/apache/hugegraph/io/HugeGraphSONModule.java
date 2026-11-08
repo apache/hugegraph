@@ -341,9 +341,9 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 if ("name".equals(fieldName)) {
                     name = jsonParser.getText();
                 } else if ("nickname".equals(fieldName)) {
-                    nickname = jsonParser.getText();
+                    nickname = jsonParser.getValueAsString();
                 } else if ("description".equals(fieldName)) {
-                    description = jsonParser.getText();
+                    description = jsonParser.getValueAsString();
                 } else if ("max_graph_number".equals(fieldName)) {
                     maxGraphNumber = jsonParser.getNumberValue();
                 } else if ("max_role_number".equals(fieldName)) {
@@ -359,11 +359,11 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("storage_limit".equals(fieldName)) {
                     storageLimit = jsonParser.getNumberValue();
                 } else if ("oltp_namespace".equals(fieldName)) {
-                    oltpNamespace = jsonParser.getText();
+                    oltpNamespace = jsonParser.getValueAsString();
                 } else if ("olap_namespace".equals(fieldName)) {
-                    olapNamespace = jsonParser.getText();
+                    olapNamespace = jsonParser.getValueAsString();
                 } else if ("storage_namespace".equals(fieldName)) {
-                    storageNamespace = jsonParser.getText();
+                    storageNamespace = jsonParser.getValueAsString();
                 } else if ("cpu_used".equals(fieldName)) {
                     cpuUsed = jsonParser.getNumberValue();
                 } else if ("memory_used".equals(fieldName)) {
@@ -388,11 +388,11 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("auth".equals(fieldName)) {
                     auth = jsonParser.getBooleanValue();
                 } else if ("operator_image_path".equals(fieldName)) {
-                    operatorImagePath = jsonParser.getText();
+                    operatorImagePath = jsonParser.getValueAsString();
                 } else if ("internal_algorithm_image_url".equals(fieldName)) {
-                    internalAlgorithmImageUrl = jsonParser.getText();
+                    internalAlgorithmImageUrl = jsonParser.getValueAsString();
                 } else if ("creator".equals(fieldName)) {
-                    creator = jsonParser.getText();
+                    creator = jsonParser.getValueAsString();
                 } else if ("create_time".equals(fieldName)) {
                     String val = jsonParser.getValueAsString();
                     if (val == null) {
@@ -523,7 +523,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 if ("name".equals(fieldName)) {
                     name = jsonParser.getText();
                 } else if ("description".equals(fieldName)) {
-                    description = jsonParser.getText();
+                    description = jsonParser.getValueAsString();
                 } else if ("type".equals(fieldName)) {
                     type = jsonParser.getText();
                 } else if ("deployment_type".equals(fieldName)) {
@@ -541,7 +541,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("storage_limit".equals(fieldName)) {
                     storageLimit = jsonParser.getNumberValue();
                 } else if ("route_type".equals(fieldName)) {
-                    routeType = jsonParser.getText();
+                    routeType = jsonParser.getValueAsString();
                 } else if ("port".equals(fieldName)) {
                     port = jsonParser.getNumberValue();
                 } else if ("urls".equals(fieldName)) {
@@ -560,11 +560,11 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                         serverNodePortUrls.addAll(Arrays.asList(urlString.split(",")));
                     }
                 } else if ("service_id".equals(fieldName)) {
-                    serviceId = jsonParser.getText();
+                    serviceId = jsonParser.getValueAsString();
                 } else if ("pd_service_id".equals(fieldName)) {
-                    pdServiceId = jsonParser.getText();
+                    pdServiceId = jsonParser.getValueAsString();
                 } else if ("creator".equals(fieldName)) {
-                    creator = jsonParser.getText();
+                    creator = jsonParser.getValueAsString();
                 } else if ("create_time".equals(fieldName)) {
                     String val = jsonParser.getValueAsString();
                     try {

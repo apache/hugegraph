@@ -58,7 +58,7 @@ public class PDServiceDrainSubmissionTest {
         long sourceId = 4L;
         Metapb.Store source = store(sourceId);
         Mockito.when(stores.getStore(sourceId)).thenReturn(source);
-        Mockito.when(stores.getActiveStores())
+        Mockito.when(stores.getPlacementStores())
                .thenReturn(List.of(store(1L), store(2L), store(3L), source));
         Mockito.when(stores.checkStoreCanOffline(Mockito.any())).thenReturn(true);
 

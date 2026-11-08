@@ -58,9 +58,9 @@ such as `helm-1.8.0` therefore denotes an already released service, not an
 advance preview. Chart fixes may be released independently from a reviewed master
 commit after the service release; chart and service version numbers need not match.
 
-The manual workflow in [hugegraph/actions](https://github.com/hugegraph/actions)
-resolves its selected source ref to a fixed commit, validates and packages the
-chart, and installs that exact `.tgz` for its Kubernetes checks before publishing.
+The chart publishing workflow resolves its selected source ref to a fixed commit,
+validates and packages the chart, and installs that exact `.tgz` for its
+Kubernetes checks before publishing.
 Turning off `publish` runs validation without uploading to a registry.
 
 ## Install and mirror a chart offline
@@ -142,11 +142,8 @@ CPU architecture.
 SeaTunnel and Vermeer are disabled by default in every HugeGraph preset. When
 enabling either, also transfer its configured `apache/seatunnel` or
 `hugegraph/vermeer` image. Vermeer Master, Worker and token initialization use
-the same Vermeer image. Its default is the officially published
-`hugegraph/vermeer:helm-30b67d93e7d0`, pinned by a Linux amd64/arm64 OCI index
-digest. Preserve that index and the required platforms when mirroring it.
-The [Vermeer image reference](vermeer.md#image-compatibility) records the full
-digest, source commit, successful official publishing run and custom-tag override
-command. A tag override must also clear `vermeer.image.digest`, or set a different
-verified digest; the default digest otherwise continues to win. Hubble needs its
-native Vermeer adapter when selecting a custom build.
+the same Vermeer image, which defaults to `hugegraph/vermeer:latest`. Mirror the
+selected image and required platforms; pin a compatible tag or digest for a
+reproducible deployment. See [image compatibility](vermeer.md#image-compatibility)
+for required capabilities. Hubble needs its native Vermeer adapter when
+selecting a custom build.

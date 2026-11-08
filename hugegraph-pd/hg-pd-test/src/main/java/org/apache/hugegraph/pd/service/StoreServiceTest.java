@@ -758,7 +758,7 @@ public class StoreServiceTest {
     }
 
     @Test
-    public void testCheckStoreCanOffline() {
+    public void testInvalidReplicaPolicyRejectsStoreOffline() {
         // Setup
         final Metapb.Store currentStore = Metapb.Store.newBuilder().setId(0L)
                                                       .setAddress("address")
@@ -801,7 +801,7 @@ public class StoreServiceTest {
         final boolean result = service.checkStoreCanOffline(currentStore);
 
         // Verify the results
-        assertThat(result).isTrue();
+        assertThat(result).isFalse();
     }
 
     @Test

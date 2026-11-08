@@ -29,6 +29,15 @@ global:
 persistence:
   enabled: true
 
+# Stable initialization topology, separate from desired node replicas.
+# Online renders capture the first topology in a kept ConfigMap, or import the
+# existing PD environment on the first upgrade. Offline upgrades must pin all
+# three counts and render with --is-upgrade. This does not change membership.
+bootstrap:
+  pdReplicas: ""
+  storeReplicas: ""
+  initialStoreCount: ""
+
 fullnameOverride: ""
 nameOverride: ""
 
@@ -62,9 +71,8 @@ pd:
     # Shard replicas per partition, seeding PD at first bootstrap only.
     # Empty derives 3 when store.replicas is at least 3, else 1, so a fresh
     # multi-store install gets store-level HA instead of the image default
-    # of 1. The derivation skips 2 because PD clamps a shard count of 2 to
-    # 1 (two shards cannot elect a leader). An explicit value must be odd
-    # and must not exceed store.replicas.
+    # of 1. The derivation skips 2 because PD rejects even shard counts.
+    # An explicit value must be odd and must not exceed store.replicas.
     defaultShardCount: ""
     # Maximum shards per store, seeding PD at first bootstrap only. Also
     # fixes the initial partition count: store.replicas x this value /
@@ -478,8 +486,8 @@ hubble:
     digest: ""
     pullPolicy: Always
   port: 8088
-  # Keeps Hubble's per-instance H2 metadata across Pod replacement; see the
-  # README's Hubble section for the single-replica and H2 constraints.
+  # Keeps Hubble's per-instance H2 metadata and Text2GQL master key across Pod
+  # replacement; see docs/operations.md for storage and upgrade notes.
   # size and storageClassName apply at install time only; the PVC is kept
   # on helm uninstall.
   persistence:
@@ -489,7 +497,8 @@ hubble:
     storageClassName: ""
   resources: {}
   # When persistence is enabled and the pod runs as non-root, set a matching
-  # fsGroup here so H2 can write /hubble-data.
+  # fsGroup here so H2 can write /hubble-data. Keep runAsUser stable so Hubble
+  # still owns its existing Text2GQL master-key file after Pod replacement.
   podSecurityContext: {}
   securityContext:
     allowPrivilegeEscalation: false
@@ -606,11 +615,11 @@ vermeer:
   mode: standalone
   image:
     repository: hugegraph/vermeer
-    # Official matching build with file credentials, native admin login and token helper.
-    # Pin the multi-platform manifest; clear digest when selecting a different tag.
-    tag: helm-30b67d93e7d0
-    digest: sha256:f9b69ef134069b432de1c9964374d7fdbfa53245d1fe7dcbce1e75b82b69dc9e
-    pullPolicy: IfNotPresent
+    # Tracks development builds. Pin a compatible tag or digest for production.
+    tag: latest
+    # Optional immutable digest; when set it takes priority over tag.
+    digest: ""
+    pullPolicy: Always
   auth:
     # Token signing factor. existingSecret > value > a stable generated Secret.
     # File-backed signing keys require at least 16 characters; prefer 32 random characters.

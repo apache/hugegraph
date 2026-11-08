@@ -38,6 +38,8 @@ public class InAccurateUnionFilterIterator<T> implements ScanIterator {
 
     private T current;
 
+    private boolean closed;
+
     public InAccurateUnionFilterIterator(ScanIterator iterator, ToLongFunction<T> toLongFunction) {
         this.iterator = iterator;
         this.workBitmap = new Roaring64Bitmap();
@@ -49,7 +51,13 @@ public class InAccurateUnionFilterIterator<T> implements ScanIterator {
 
     @Override
     public boolean hasNext() {
-        current = null;
+        // keep the pending element; readBatchData probes hasNext() twice
+        if (this.closed) {
+            return false;
+        }
+        if (current != null) {
+            return true;
+        }
         while (iterator.hasNext()) {
             var element = (T) iterator.next();
             if (element == null) {
@@ -69,15 +77,17 @@ public class InAccurateUnionFilterIterator<T> implements ScanIterator {
 
     @Override
     public boolean isValid() {
-        return iterator.isValid();
+        return !this.closed && iterator.isValid();
     }
 
     @Override
     public <E> E next() {
-        if (current == null) {
+        if (!hasNext()) {
             throw new NoSuchElementException();
         }
-        return (E) current;
+        E result = (E) current;
+        current = null;
+        return result;
     }
 
     @Override
@@ -97,7 +107,12 @@ public class InAccurateUnionFilterIterator<T> implements ScanIterator {
 
     @Override
     public void close() {
-        iterator.close();
-        this.workBitmap.clear();
+        this.closed = true;
+        this.current = null;
+        try {
+            iterator.close();
+        } finally {
+            this.workBitmap.clear();
+        }
     }
 }

@@ -41,15 +41,17 @@ public class MachineInfo {
         if (this.ipAddressList != null) {
             return this.ipAddressList;
         }
-        this.ipAddressList = new ArrayList<>();
+        List<String> list = new ArrayList<>();
         List<InetAddress> inetAddresses = this.getLocalAllInetAddress();
         if (inetAddresses != null && !inetAddresses.isEmpty()) {
-            this.ipAddressList = inetAddresses.stream()
-                                              .map(InetAddress::getHostAddress)
-                                              .distinct()
-                                              .map(String::toLowerCase)
-                                              .collect(Collectors.toList());
+            list = inetAddresses.stream()
+                                .map(InetAddress::getHostAddress)
+                                .distinct()
+                                .map(String::toLowerCase)
+                                .collect(Collectors.toList());
         }
+        // Cache only after the lookup succeeded, so a failure is retried
+        this.ipAddressList = list;
         return this.ipAddressList;
     }
 
@@ -78,7 +80,7 @@ public class MachineInfo {
         try {
             interfaces = NetworkInterface.getNetworkInterfaces();
         } catch (SocketException e) {
-            throw new RuntimeException("Failed to get network interfaces");
+            throw new RuntimeException("Failed to get network interfaces", e);
         }
 
         List<InetAddress> result = new ArrayList<>();
@@ -109,7 +111,7 @@ public class MachineInfo {
         } catch (Exception e) {
             throw new RuntimeException(String.format(
                       "Failed to get mac address for inet address '%s'",
-                      inetAddr));
+                      inetAddr), e);
         }
         if (mac == null) {
             if (required) {

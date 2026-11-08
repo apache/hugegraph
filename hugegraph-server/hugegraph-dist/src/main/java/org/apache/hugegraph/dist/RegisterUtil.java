@@ -155,7 +155,7 @@ public class RegisterUtil {
                 plugin.register();
                 LOG.info("Loaded plugin '{}'", plugin.name());
             } catch (Exception e) {
-                throw new HugeException("Failed to load plugin '%s'", plugin.name(), e);
+                throw new HugeException("Failed to load plugin '%s'", e, plugin.name());
             }
         }
     }

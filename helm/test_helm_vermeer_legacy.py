@@ -34,6 +34,7 @@ class VermeerLegacyEnablementTest(unittest.TestCase):
             chart = Path(directory) / "chart"
             shutil.copytree(CHART, chart)
             old_values = yaml.safe_load((CHART / "values.yaml").read_text())
+            old_values["bootstrap"] = {"pdReplicas": 3, "storeReplicas": 3, "initialStoreCount": 3}
             old_values["vermeer"]["auth"].pop("admin")
             existing_values = Path(directory) / "existing-values.yaml"
             existing_values.write_text(yaml.safe_dump(old_values))
@@ -66,6 +67,7 @@ class VermeerLegacyEnablementTest(unittest.TestCase):
             chart = Path(directory) / "chart"
             shutil.copytree(CHART, chart)
             old_values = yaml.safe_load((CHART / "values.yaml").read_text())
+            old_values["bootstrap"] = {"pdReplicas": 3, "storeReplicas": 3, "initialStoreCount": 3}
             old_values.pop("vermeer")
             old_values["networkPolicy"].pop("vermeer", None)
             existing_values = Path(directory) / "existing-values.yaml"

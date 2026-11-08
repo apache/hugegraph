@@ -168,6 +168,7 @@ public class ConfigService implements RaftStateListener {
                 mConfig = Metapb.PDConfig.newBuilder()
                                          .setPartitionCount(pdConfig.getInitialPartitionCount())
                                          .setShardCount(pdConfig.getPartition().getShardCount())
+                                         .setMinStoreCount(Math.max(0, pdConfig.getMinStoreCount()))
                                          .setVersion(1)
                                          .setTimestamp(System.currentTimeMillis())
                                          .setMaxShardsPerStore(
@@ -187,6 +188,7 @@ public class ConfigService implements RaftStateListener {
         pdConfig.getPartition().setShardCount(mConfig.getShardCount());
         pdConfig.getPartition().setTotalCount(mConfig.getPartitionCount());
         pdConfig.getPartition().setMaxShardsPerStore(mConfig.getMaxShardsPerStore());
+        pdConfig.setMinStoreCount(Math.max(0, mConfig.getMinStoreCount()));
         return pdConfig;
     }
 

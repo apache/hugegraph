@@ -26,6 +26,7 @@ import java.io.StringWriter;
 import java.text.ParseException;
 import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -109,6 +110,8 @@ import org.apache.hugegraph.rpc.RpcProviderConfig;
 import org.apache.hugegraph.rpc.RpcServer;
 import org.apache.hugegraph.serializer.JsonSerializer;
 import org.apache.hugegraph.serializer.Serializer;
+import org.apache.hugegraph.schema.SchemaManager;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.server.RestServer;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
@@ -1364,6 +1367,54 @@ public final class GraphManager {
         newConfigs.put("update_time", timeStamp);
 
         return this.createGraph(graphspace, newName, creator, newConfigs, true);
+    }
+
+    /** Create a graph with the source schema only; graph elements are not copied. */
+    public HugeGraph cloneGraphSchema(String graphspace, String source, String target,
+                                      String nickname, String creator) {
+        HugeGraph sourceGraph = this.graph(spaceGraphName(graphspace, source));
+        E.checkArgumentNotNull(sourceGraph,
+                               "The clone source graph '%s' doesn't exist in graphspace '%s'",
+                               source, graphspace);
+        SchemaManager sourceSchema = sourceGraph.schema();
+        // Some schema stores do not persist edge-label hierarchy metadata. A
+        // normal label cannot then be distinguished from a parent or child.
+        // Refuse all edge labels until the storage contract can prove fidelity.
+        E.checkArgument(sourceSchema.getEdgeLabels().isEmpty(),
+                        "Schema cloning does not currently support graphs with edge labels");
+        Map<String, Object> overrides = new HashMap<>();
+        // A source template may have changed since it was applied. Copy the actual schema.
+        overrides.put(CoreOptions.SCHEMA_INIT_TEMPLATE.name(), "");
+        overrides.put("creator", creator);
+        if (nickname != null) {
+            overrides.put("nickname", nickname);
+        } else {
+            overrides.put("nickname", target);
+        }
+        HugeGraph graph = this.cloneGraph(graphspace, source, target, overrides);
+        try {
+            SchemaManager schema = graph.schema();
+            schema.copyFromWithoutEdges(sourceSchema);
+            E.checkState(sourceSchema.getEdgeLabels().isEmpty(),
+                         "Source edge labels changed during schema cloning");
+            // Synchronous builders wait for tasks, but a completed task can have failed.
+            checkCopiedSchema(schema.getPropertyKeys());
+            checkCopiedSchema(schema.getVertexLabels());
+            checkCopiedSchema(schema.getEdgeLabels());
+            checkCopiedSchema(schema.getIndexLabels());
+        } catch (RuntimeException failure) {
+            // The graph can already be visible to other clients. Never delete it implicitly.
+            LOG.warn("Schema copy to graph '{}' failed", target, failure);
+            throw new HugeException("Failed to copy schema to graph '%s'; " +
+                                    "the target may be partially created and needs inspection", target);
+        }
+        return graph;
+    }
+
+    private static void checkCopiedSchema(Collection<? extends SchemaElement> elements) {
+        for (SchemaElement element : elements) {
+            E.checkState(element.status().ok(), "A copied schema element is not ready");
+        }
     }
 
     private void loadGraph(Map<String, Map<String, Object>> graphConfigs) {

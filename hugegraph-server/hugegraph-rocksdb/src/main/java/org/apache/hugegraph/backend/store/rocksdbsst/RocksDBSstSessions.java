@@ -61,9 +61,9 @@ public class RocksDBSstSessions extends RocksDBSessions {
         }
     }
 
-    public RocksDBSstSessions(HugeConfig config, String dataPath, String database, String store,
+    public RocksDBSstSessions(HugeConfig config, String database, String store, String dataPath,
                               List<String> tableNames) throws RocksDBException {
-        this(config, dataPath, database, store);
+        this(config, database, store, dataPath);
         for (String table : tableNames) {
             this.createTable(table);
         }
@@ -203,21 +203,35 @@ public class RocksDBSstSessions extends RocksDBSessions {
 
     @Override
     protected synchronized void doClose() {
-        final String NO_ENTRIES = "Can't create sst file with no entries";
+        // RocksDB reports "Cannot create sst file with no entries"
+        final String NO_ENTRIES = "create sst file with no entries";
 
+        Throwable failure = null;
         for (SstFileWriter sst : this.tables.values()) {
-            E.checkState(sst.isOwningHandle(), "SstFileWriter closed");
-            try {
-                sst.finish();
-            } catch (RocksDBException e) {
-                if (e.getMessage().equals(NO_ENTRIES)) {
-                    continue;
+            try (sst) {
+                E.checkState(sst.isOwningHandle(), "SstFileWriter closed");
+                try {
+                    sst.finish();
+                } catch (RocksDBException e) {
+                    String message = e.getMessage();
+                    if (message == null || !message.contains(NO_ENTRIES)) {
+                        throw new BackendException("Failed to close SstFileWriter", e);
+                    }
                 }
-                throw new BackendException("Failed to close SstFileWriter", e);
+            } catch (RuntimeException | Error e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
             }
-            sst.close();
         }
         this.tables.clear();
+        if (failure instanceof RuntimeException exception) {
+            throw exception;
+        } else if (failure instanceof Error error) {
+            throw error;
+        }
     }
 
     /**

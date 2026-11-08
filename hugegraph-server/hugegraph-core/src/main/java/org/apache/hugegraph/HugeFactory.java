@@ -64,8 +64,8 @@ public class HugeFactory {
     }
 
     public static synchronized HugeGraph open(Configuration config) {
-        HugeConfig conf = config instanceof HugeConfig ?
-                          (HugeConfig) config : new HugeConfig(config);
+        HugeConfig conf = config instanceof HugeConfig hugeConfig ?
+                          hugeConfig : new HugeConfig(config);
         return open(conf);
     }
 

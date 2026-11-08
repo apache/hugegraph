@@ -34,6 +34,13 @@ use `latest` images; pin component `image.digest` values when needed.
 The source installation and configuration examples below assume a repository
 checkout and commands run from its root.
 
+The [stable bootstrap configuration](docs/operations.md#stable-bootstrap-topology)
+always records initialization inputs separately from node replicas. Use a PD
+image with separate bootstrap and runtime quorum checks. PD membership changes,
+Store admission and safe retirement remain manual operations. Growing from one
+Store to three does not change existing data from RF=1 to RF=3; replica policy
+is configured independently with `pd.partition.defaultShardCount`.
+
 ## Install from source and open Hubble
 
 ```bash
@@ -154,9 +161,9 @@ which already contain `curl`; no separate curl image is needed by default.
 See the [complete registry example](examples/values-internal-registry.yaml).
 When enabled, also mirror `apache/seatunnel` and/or `hugegraph/vermeer` at the
 configured versions. Vermeer token initialization reuses its own image.
-The optional Vermeer image is pinned to the officially published Linux
-amd64/arm64 index. See [verified image and custom overrides](docs/vermeer.md#image-compatibility)
-for its tag, digest, source and publishing run. Normal enablement needs no image override.
+The optional Vermeer image defaults to `latest` with `Always` pull policy, like
+the other HugeGraph components. See [image compatibility and upgrades](docs/vermeer.md#image-compatibility)
+for image settings and production pinning.
 
 ### Storage
 
@@ -181,6 +188,9 @@ PD/Store data between persistent and temporary storage.
 Vermeer adds separate Master and Worker data claims: two in standalone mode,
 or one Master claim plus one per Worker in cluster mode. Its storage flags
 inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and-recovery).
+
+Hubble persists its Text2GQL master key alongside H2. Existing releases may
+need a one-time API-key re-entry; see [Text2GQL credentials](docs/operations.md#hubble-text2gql-credentials).
 
 ### PD metadata namespace
 

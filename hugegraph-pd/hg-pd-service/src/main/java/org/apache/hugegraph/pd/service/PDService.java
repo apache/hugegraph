@@ -515,7 +515,7 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
             // Before going offline, check whether the number of active machines is greater than
             // the minimum threshold
             if (state.equals(Metapb.StoreState.Tombstone)) {
-                List<Metapb.Store> activeStores = storeNodeService.getActiveStores();
+                List<Metapb.Store> activeStores = storeNodeService.getPlacementStores();
                 if (lastStore.getState() == Metapb.StoreState.Up
                     && activeStores.size() - 1 < pdConfig.getMinStoreCount()) {
                     throw new PDException(Pdpb.ErrorType.LESS_ACTIVE_STORE_VALUE,
