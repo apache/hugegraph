@@ -171,8 +171,8 @@ public class IndexBuilder {
         for (Id id : element.schemaLabel().indexLabels()) {
             sink.accept(id);
         }
-        if (element instanceof BaseEdge) {
-            EdgeLabel label = (EdgeLabel) element.schemaLabel();
+        if (element instanceof BaseEdge edge) {
+            EdgeLabel label = edge.schemaLabel();
             if (label.hasFather()) {
                 // Preserve child-first order and repeated IDs from the engine's existing loops.
                 for (Id id : edgeLabelLookup.apply(label.fatherId()).indexLabels()) {

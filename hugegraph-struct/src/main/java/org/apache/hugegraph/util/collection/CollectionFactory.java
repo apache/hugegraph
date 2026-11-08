@@ -209,8 +209,8 @@ public class CollectionFactory {
                         "Must provide even arguments for " +
                         "CollectionFactory.newIntObjectMap");
         for (int i = 0; i < objects.length; i += 2) {
-            int key = objects[i] instanceof Id ?
-                      (int) ((Id) objects[i]).asLong() : (int) objects[i];
+            int key = objects[i] instanceof Id id ?
+                      (int) id.asLong() : (int) objects[i];
             map.put(key, (V) objects[i + 1]);
         }
         return map;
