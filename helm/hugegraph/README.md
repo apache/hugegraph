@@ -67,6 +67,12 @@ Then open `http://127.0.0.1:8088` and sign in as `admin`.
 
 Topology presets do not automatically enable SeaTunnel or Vermeer. Enable optional components explicitly and choose their own standalone or cluster mode.
 
+## Modes and entry points
+
+`mode: easy` defaults HTTP Services to NodePort; `mode: strict` defaults them to ClusterIP and enables NetworkPolicy isolation by default. The chart leaves authentication, Hubble and persistence enabled unless explicitly changed. A NetworkPolicy requires support from the cluster network plugin.
+
+For inherited settings, an explicit component value takes precedence. An unset component Service type inherits the mode default; an unset component storage flag inherits `persistence.enabled`. Explicit `false` is preserved. Separately, `global.imageRegistry` rewrites component image repository references. Existing explicit Service values remain in effect on upgrade, including with `--reuse-values`; see [SeaTunnel](docs/seatunnel.md) and [Vermeer](docs/vermeer.md#optional-native-administration) for their entry points.
+
 ## Common settings
 
 | Goal | Value |
@@ -82,6 +88,12 @@ Topology presets do not automatically enable SeaTunnel or Vermeer. Enable option
 | Choose public or private service entry | Component `service.type` or chart `mode` |
 
 Use `--set` for small overrides and a reviewed YAML file for repeatable installations. [`values.yaml`](values.yaml) is the authoritative option reference; examples show complete combinations without duplicating the full option table here.
+
+### Server service identity
+
+`server.serviceId` and `server.graphSpace` select the Server's PD service metadata. Both default to `DEFAULT`, preserving the image configuration; non-default values are passed to the Server image as `HG_SERVER_SERVICE_ID` and `HG_SERVER_GRAPHSPACE`. Create a non-default graph space before starting the assigned Server: these settings do not create it.
+
+Use a Server image that supports these mappings. They do not change the REST default graph-space path or select a Hubble service; `server.testGraphAlias` must also name an existing Gremlin binding. See the [container identity contract](../../docker/README.md#server-service-identity) for validation, compatibility and configuration details.
 
 ## Optional components
 

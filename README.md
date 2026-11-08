@@ -46,14 +46,15 @@ for attempt in $(seq 1 60); do
     break
   fi
   if [ "${attempt}" -eq 60 ]; then
+    printf 'Server did not become ready; inspect the logs before continuing.\n' >&2
     docker logs hugegraph
-    exit 1
+    break
   fi
   sleep 2
 done
 ```
 
-Run a small graph query:
+After the version request succeeds, run a small graph query. If the loop reports a timeout, resolve the startup failure before continuing:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/gremlin \
