@@ -88,6 +88,19 @@ public class EdgeLabelMapTest {
         }
     }
 
+    @Test
+    public void testTargetLabelErrorsNameTheTargetSide() {
+        EdgeLabel label = new EdgeLabel(null, IdGenerator.of(3), "knows");
+        IllegalStateException state = Assert.assertThrows(IllegalStateException.class,
+                                                          label::targetLabelName);
+        Assert.assertTrue(state.getMessage(), state.getMessage().contains("targetLabelName()"));
+
+        label.links(Pair.of(IdGenerator.of(1), IdGenerator.of(2)));
+        IllegalArgumentException argument = Assert.assertThrows(
+                IllegalArgumentException.class, () -> label.targetLabel(IdGenerator.of(4)));
+        Assert.assertTrue(argument.getMessage(), argument.getMessage().contains("target label"));
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> map(String json) throws Exception {
         return new ObjectMapper().readValue(json, LinkedHashMap.class);
