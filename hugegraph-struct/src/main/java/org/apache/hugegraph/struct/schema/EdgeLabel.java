@@ -152,7 +152,7 @@ public class EdgeLabel extends SchemaLabel {
     public String targetLabelName() {
         E.checkState(this.links.size() == 1,
                      "Only edge label has single vertex label pair can call " +
-                     "sourceLabelName(), but current edge label got %s",
+                     "targetLabelName(), but current edge label got %s",
                      this.links.size());
         return this.graph.vertexLabelOrNone(this.links.iterator().next().getRight()).name();
     }
@@ -166,7 +166,7 @@ public class EdgeLabel extends SchemaLabel {
 
     public void targetLabel(Id id) {
         E.checkArgument(this.links.isEmpty(),
-                        "Not allowed add source label to an edge label which " +
+                        "Not allowed add target label to an edge label which " +
                         "already has links");
         if (this.sourceLabel != NONE_ID) {
             this.links.add(Pair.of(this.sourceLabel, id));

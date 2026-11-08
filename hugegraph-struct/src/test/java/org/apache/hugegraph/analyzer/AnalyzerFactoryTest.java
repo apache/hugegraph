@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.analyzer;
 
+import java.util.Collections;
+import java.util.Set;
+
 import org.apache.hugegraph.config.ConfigException;
 import org.junit.Assert;
 import org.junit.Test;
@@ -35,5 +38,31 @@ public class AnalyzerFactoryTest {
             AnalyzerFactory.analyzer("word", "invalid");
         });
         Assert.assertTrue(exception.getMessage().contains("Unsupported segment mode"));
+    }
+
+    @Test
+    public void testRegisteredMixedCaseNameIsFound() {
+        // The registry is static and has no unregister, so use a fresh name per run
+        String name = "MixedCaseTestAnalyzer" + System.nanoTime();
+        AnalyzerFactory.register(name, FakeAnalyzer.class.getName());
+
+        Analyzer analyzer = AnalyzerFactory.analyzer(name, "m");
+
+        Assert.assertTrue(analyzer instanceof FakeAnalyzer);
+        Assert.assertEquals("m", ((FakeAnalyzer) analyzer).mode);
+    }
+
+    public static class FakeAnalyzer implements Analyzer {
+
+        private final String mode;
+
+        public FakeAnalyzer(String mode) {
+            this.mode = mode;
+        }
+
+        @Override
+        public Set<String> segment(String text) {
+            return Collections.singleton(text);
+        }
     }
 }

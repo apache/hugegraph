@@ -370,7 +370,7 @@ public class BinaryElementSerializer {
             return lookupGraph.edgeLabelOrNone(id.subLabelId());
         }
         EdgeLabel label = new EdgeLabel(schemaGraph, id.subLabelId(), UNDEF);
-        if (id.subLabelId() != id.edgeLabelId()) {
+        if (!id.subLabelId().equals(id.edgeLabelId())) {
             label.edgeLabelType(EdgeLabelType.SUB);
             label.fatherId(id.edgeLabelId());
         }
