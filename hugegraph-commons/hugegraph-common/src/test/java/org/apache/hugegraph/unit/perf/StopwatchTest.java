@@ -22,6 +22,7 @@ import org.junit.Test;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.perf.LightStopwatch;
 import org.apache.hugegraph.perf.NormalStopwatch;
+import org.apache.hugegraph.perf.PerfUtil.FastMap;
 import org.apache.hugegraph.perf.Stopwatch;
 import org.apache.hugegraph.perf.Stopwatch.Path;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -120,5 +121,51 @@ public class StopwatchTest extends BaseUnitTest {
         Assert.assertFalse(path.equals(null));
         Assert.assertFalse(path.equals("a"));
         Assert.assertTrue(path.equals(new Path("a")));
+    }
+
+    @Test
+    public void testFastMapReplaceEqualKey() {
+        FastMap<String, String> map = new FastMap<>();
+        String[] keys = {new String("a"), new String("b"),
+                         new String("c"), new String("d")};
+        for (String key : keys) {
+            map.put(key, "first");
+        }
+        for (String key : keys) {
+            String equal = new String(key);
+            Assert.assertEquals("first", map.put(equal, "second"));
+            Assert.assertEquals("second", map.get(key));
+            Assert.assertEquals("second", map.get(equal));
+        }
+        Assert.assertEquals(4, map.size());
+    }
+
+    @Test
+    public void testFastMapRemoveEqualKey() {
+        FastMap<String, String> map = new FastMap<>();
+        String[] keys = {new String("a"), new String("b"),
+                         new String("c"), new String("d")};
+        for (String key : keys) {
+            map.put(key, "first");
+        }
+        for (String key : keys) {
+            Assert.assertEquals("first", map.remove(new String(key)));
+            Assert.assertFalse(map.containsKey(key));
+            Assert.assertNull(map.get(key));
+        }
+        map.put("other", "second");
+        Assert.assertEquals("second", map.get("other"));
+    }
+
+    @Test
+    public void testFastMapNullKey() {
+        FastMap<String, String> map = new FastMap<>();
+        map.put(null, "null-value");
+        map.put("first", "first-value");
+        Assert.assertEquals("null-value", map.get(null));
+        Assert.assertEquals("null-value", map.put(null, "updated"));
+        Assert.assertEquals("updated", map.remove(null));
+        Assert.assertNull(map.get(null));
+        Assert.assertEquals("first-value", map.get("first"));
     }
 }
