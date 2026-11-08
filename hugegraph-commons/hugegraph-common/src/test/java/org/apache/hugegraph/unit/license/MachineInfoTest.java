@@ -162,4 +162,35 @@ public class MachineInfoTest {
         Assert.assertSame(addresses, info.getMacAddress());
         Assert.assertEquals(2, attempts[0]);
     }
+
+    @Test
+    public void testGetIpAddressRetriesAfterLookupFailure() {
+        RuntimeException failure = new RuntimeException("Controlled interface enumeration failure");
+        int[] attempts = {0};
+        MachineInfo info = new MachineInfo() {
+            @Override
+            public List<InetAddress> getLocalAllInetAddress() {
+                if (++attempts[0] == 1) {
+                    throw failure;
+                }
+                return Collections.singletonList(InetAddress.getLoopbackAddress());
+            }
+        };
+        Assert.assertSame(failure, Assert.assertThrows(RuntimeException.class, info::getIpAddress));
+        List<String> addresses = info.getIpAddress();
+        Assert.assertEquals(Collections.singletonList(
+                InetAddress.getLoopbackAddress().getHostAddress().toLowerCase()), addresses);
+        Assert.assertSame(addresses, info.getIpAddress());
+        Assert.assertEquals(2, attempts[0]);
+    }
+
+    @Test
+    public void testGetMacByUnboundAddressKeepsCause() throws Exception {
+        // 0.0.0.0 belongs to no interface, so the interface lookup returns null
+        InetAddress address = InetAddress.getByAddress(new byte[]{0, 0, 0, 0});
+        Assume.assumeTrue(NetworkInterface.getByInetAddress(address) == null);
+        Throwable exception = Assert.assertThrows(RuntimeException.class,
+                                                  () -> machineInfo.getMacByInetAddress(address));
+        Assert.assertTrue(exception.getCause() instanceof NullPointerException);
+    }
 }
