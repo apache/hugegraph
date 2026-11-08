@@ -43,6 +43,7 @@ import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.rocksdb.Checkpoint;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -223,10 +224,45 @@ public class LegacyGraphIdCheckerTest {
     @Test
     public void testFreshDataRootWithoutMetadataIsAccepted() throws Exception {
         Path root = this.temporary.newFolder().toPath();
-        LegacyGraphIdChecker.checkOffline(root.toString(), config);
-        LegacyGraphIdChecker.checkStore(root.toString(), config);
+        LegacyGraphIdChecker.InspectionResult result =
+                LegacyGraphIdChecker.checkOffline(root.toString(), config);
+        assertEquals(0, result.databases());
+        assertEquals(0, result.snapshots());
+        assertFalse(result.metadata());
+        LegacyGraphIdChecker.checkStore(root + ",", config);
         assertFalse(Files.exists(root.resolve("hgstore-metadata")));
         assertTrue(hashes(root).isEmpty());
+    }
+
+    @Test
+    public void testStartupChecksCheckpointWithoutLock() throws Exception {
+        Path root = this.temporary.newFolder().toPath();
+        Path database = root.resolve("db/00000_42");
+        createCheckpoint(database, LEGAL_KEY);
+        assertFalse(Files.exists(database.resolve("LOCK")));
+        Map<String, String> before = hashes(root);
+
+        LegacyGraphIdChecker.checkStore(root.toString(), config);
+        assertTrue(Files.isRegularFile(database.resolve("LOCK")));
+        assertEquals(0, Files.size(database.resolve("LOCK")));
+        Files.delete(database.resolve("LOCK"));
+        assertEquals(before, hashes(root));
+    }
+
+    @Test
+    public void testStartupRejectsLegacyCheckpointWithoutLock() throws Exception {
+        Path root = this.temporary.newFolder().toPath();
+        Path database = root.resolve("db/00000_42");
+        createCheckpoint(database, LEGACY_KEY);
+        assertFalse(Files.exists(database.resolve("LOCK")));
+        Map<String, String> before = hashes(root);
+
+        assertThrows(LegacyGraphIdChecker.StartupPreflightException.class,
+                     () -> LegacyGraphIdChecker.checkStore(root.toString(), config));
+        assertTrue(Files.isRegularFile(database.resolve("LOCK")));
+        assertEquals(0, Files.size(database.resolve("LOCK")));
+        Files.delete(database.resolve("LOCK"));
+        assertEquals(before, hashes(root));
     }
 
     @Test
@@ -341,6 +377,10 @@ public class LegacyGraphIdCheckerTest {
             IOException failure = assertThrows(IOException.class,
                     () -> LegacyGraphIdChecker.checkOffline(root.toString(), config));
             assertTrue(failure.getMessage(), failure.getMessage().contains("locked"));
+            LegacyGraphIdChecker.StartupPreflightException startup = assertThrows(
+                    LegacyGraphIdChecker.StartupPreflightException.class,
+                    () -> LegacyGraphIdChecker.checkStore(root.toString(), config));
+            assertTrue(startup.getMessage(), startup.getMessage().contains("locked"));
             assertEquals(before, hashes(root));
         } finally {
             writer.getOutputStream().close();
@@ -365,6 +405,17 @@ public class LegacyGraphIdCheckerTest {
         Map<String, String> before = hashes(root);
         assertThrows(IOException.class, () -> LegacyGraphIdChecker.checkOffline(root.toString(), config));
         assertEquals(before, hashes(root));
+    }
+
+    private void createCheckpoint(Path target, byte[] key) throws Exception {
+        Path source = this.temporary.newFolder().toPath().resolve("source");
+        write(source, "default", key, VALUE);
+        Files.createDirectories(target.getParent());
+        try (Options options = new Options();
+             RocksDB database = RocksDB.open(options, source.toString());
+             Checkpoint checkpoint = Checkpoint.create(database)) {
+            checkpoint.createCheckpoint(target.toString());
+        }
     }
 
     private static void storeLocation(Path root, Path location, int partition) throws Exception {

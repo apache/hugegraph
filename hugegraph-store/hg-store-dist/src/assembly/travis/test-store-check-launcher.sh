@@ -58,7 +58,10 @@ for provider in rocksdb topling; do
         expected="$TOP/topling/rocksdbjni.jar:$expected"
     fi
     run_checker "$provider" || { cat "$TEST_ROOT/output"; exit 1; }
-    mapfile -d '' -t args < "$TEST_ROOT/capture.args"
+    args=()
+    while IFS= read -r -d '' arg; do
+        args+=("$arg")
+    done < "$TEST_ROOT/capture.args"
     [[ ${#args[@]} -eq 10 ]]
     [[ "${args[0]}" == --add-opens=java.base/java.lang=ALL-UNNAMED ]]
     [[ "${args[1]}" == -Dloader.main=org.apache.hugegraph.store.node.GraphIdCheckCommand ]]

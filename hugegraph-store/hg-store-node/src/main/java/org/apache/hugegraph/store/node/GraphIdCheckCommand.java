@@ -91,9 +91,16 @@ public final class GraphIdCheckCommand {
                 }
             });
             RocksDBRuntime.verify(String.valueOf(options.getOrDefault("rocksdb.provider", "rocksdb")));
-            LegacyGraphIdChecker.checkOffline(data, LegacyGraphIdChecker.configuration(options));
-            System.out.println("No legacy GraphID prefix or invalid GraphID mapping found in persisted " +
-                               "databases and latest snapshots: " + data);
+            LegacyGraphIdChecker.InspectionResult result =
+                    LegacyGraphIdChecker.checkOffline(data, LegacyGraphIdChecker.configuration(options));
+            System.out.printf("Inspected %d databases, %d latest snapshots, metadata present: %s%n",
+                              result.databases(), result.snapshots(), result.metadata());
+            if (result.databases() == 0 && result.snapshots() == 0) {
+                System.out.println("No business databases or snapshots were inspected; verify that the data path is correct.");
+            } else {
+                System.out.println("No legacy GraphID prefix or invalid GraphID mapping found in persisted " +
+                                   "databases and latest snapshots: " + data);
+            }
             System.out.println("This read-only check does not certify historical ownership or backup completeness. " +
                                "See docs/graphid-upgrade.md before upgrading.");
             return 0;

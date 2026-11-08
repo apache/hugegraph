@@ -61,6 +61,56 @@ public class GraphIdCheckCommandTest {
     }
 
     @Test
+    public void testEmptyRootReportsZeroInspection() throws Exception {
+        Path config = this.temporary.newFolder("empty-conf").toPath();
+        Path root = this.temporary.newFolder("empty-data").toPath();
+        Files.writeString(config.resolve("application.yml"), "app:\n  data-path: '" + root + "'\n");
+        Process process = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), GraphIdCheckCommand.class.getName(),
+                "--check", "--config", config.toString())
+                .redirectErrorStream(true).start();
+        try {
+            assertTrue("Checker process timed out", process.waitFor(10, TimeUnit.SECONDS));
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertEquals(output, 0, process.exitValue());
+            assertTrue(output, output.contains("Inspected 0 databases, 0 latest snapshots"));
+            assertTrue(output, output.contains("No business databases or snapshots were inspected"));
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    @Test
+    public void testMetadataOnlyReportsZeroBusinessInspection() throws Exception {
+        RocksDB.loadLibrary();
+        Path config = this.temporary.newFolder("metadata-conf").toPath();
+        Path root = this.temporary.newFolder("metadata-data").toPath();
+        Path metadata = root.resolve("hgstore-metadata");
+        Files.createDirectory(metadata);
+        try (Options options = new Options().setCreateIfMissing(true);
+             RocksDB ignored = RocksDB.open(options, metadata.toString())) {
+            // An initialized metadata DB need not contain any Store partitions.
+        }
+        Files.writeString(config.resolve("application.yml"), "app:\n  data-path: '" + root + "'\n");
+        Process process = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), GraphIdCheckCommand.class.getName(),
+                "--check", "--config", config.toString())
+                .redirectErrorStream(true).start();
+        try {
+            assertTrue("Checker process timed out", process.waitFor(10, TimeUnit.SECONDS));
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertEquals(output, 0, process.exitValue());
+            assertTrue(output, output.contains("metadata present: true"));
+            assertTrue(output, output.contains("No business databases or snapshots were inspected"));
+            assertFalse(output, output.contains("No legacy GraphID prefix"));
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    @Test
     public void testLegacyDataReturnsFailureWithoutChangingKey() throws Exception {
         RocksDB.loadLibrary();
         Path config = this.temporary.newFolder("conf").toPath();

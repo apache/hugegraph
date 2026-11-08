@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -94,8 +95,12 @@ public final class LegacyGraphIdChecker {
     }
 
     /** A running Store may have unflushed writes with WAL disabled: never certify its disk view. */
-    public static void checkOffline(String dataPaths, HugeConfig config) throws IOException, RocksDBException {
-        inspect(dataPaths, config, true);
+    public static InspectionResult checkOffline(String dataPaths, HugeConfig config)
+            throws IOException, RocksDBException {
+        return inspect(dataPaths, config, true);
+    }
+
+    public record InspectionResult(int databases, int snapshots, boolean metadata) {
     }
 
     public static void checkDatabase(Path path, HugeConfig config) throws IOException, RocksDBException {
@@ -135,10 +140,10 @@ public final class LegacyGraphIdChecker {
         }
     }
 
-    private static void inspect(String dataPaths, HugeConfig config, boolean offline)
+    private static InspectionResult inspect(String dataPaths, HugeConfig config, boolean offline)
             throws IOException, RocksDBException {
         List<Path> roots = new ArrayList<>();
-        for (String value : dataPaths.split(",", -1)) {
+        for (String value : dataPaths.split(",")) {
             if (value.isBlank()) {
                 throw new IOException("Empty Store data path");
             }
@@ -148,7 +153,10 @@ public final class LegacyGraphIdChecker {
             }
             roots.add(root);
         }
-        try (DatabaseLocks locks = new DatabaseLocks()) {
+        if (roots.isEmpty()) {
+            throw new IOException("Empty Store data path");
+        }
+        try (DatabaseLocks locks = new DatabaseLocks(offline)) {
             Path metadata = roots.get(0).resolve("hgstore-metadata");
             boolean metadataExists = Files.exists(metadata, LinkOption.NOFOLLOW_LINKS);
             if (metadataExists) {
@@ -185,6 +193,7 @@ public final class LegacyGraphIdChecker {
             for (Path snapshot : snapshots) {
                 checkDatabase(snapshot, config);
             }
+            return new InspectionResult(databases.size(), snapshots.size(), metadataExists);
         }
     }
 
@@ -296,9 +305,27 @@ public final class LegacyGraphIdChecker {
 
         private final List<FileChannel> channels = new ArrayList<>();
         private final Set<Path> paths = new HashSet<>();
+        private final boolean offline;
+
+        private DatabaseLocks(boolean offline) {
+            this.offline = offline;
+        }
 
         private void add(Path database) throws IOException {
-            Path path = database.resolve("LOCK").toRealPath();
+            Path lockPath = database.resolve("LOCK");
+            if (!this.offline) {
+                try {
+                    // A checkpoint moved into db/ may not contain a LOCK yet. Create the same
+                    // stable inode RocksDB will use, without replacing an existing lock.
+                    Files.createFile(lockPath);
+                } catch (FileAlreadyExistsException ignored) {
+                    // The RocksDB writer or another checker already created it.
+                }
+            } else if (!Files.exists(lockPath)) {
+                throw new IOException("Cannot check offline without a RocksDB LOCK file: " + database +
+                                      ". Preserve the data and consult the upgrade guide.");
+            }
+            Path path = lockPath.toRealPath();
             if (!this.paths.add(path)) {
                 return;
             }

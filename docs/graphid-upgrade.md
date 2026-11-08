@@ -50,9 +50,18 @@ standard RocksDB classes; missing or unverified runtime assets fail the check.
 Do not point the command at a running Store: it refuses locked active databases,
 and a separate read-only database cannot observe another process's memtables.
 
+If a complete checkpoint-derived database has `CURRENT` but no `LOCK`, first stop
+the Store and disable automatic restart, preserve a complete backup, and confirm
+no other process can open the data directory. The offline check intentionally
+refuses this situation without writing to it. An operator can create an empty
+`LOCK` file in that verified database directory and repeat the check while the
+Store remains stopped. Do not use this procedure to repair a missing `CURRENT`
+or any other incomplete database directory.
+
 | Result | Meaning | Next step |
 | --- | --- | --- |
-| Exit 0 | No reserved-prefix rows or invalid GraphID mappings were found in the persisted databases and latest snapshots inspected | Keep the backups and follow the normal release upgrade procedure; this check does not certify the entire upgrade |
+| Exit 0 with inspected data | No reserved-prefix rows or invalid GraphID mappings were found in the persisted databases and latest snapshots inspected | Keep the backups and follow the normal release upgrade procedure; this check does not certify the entire upgrade |
+| Exit 0 with zero inspected databases and snapshots | The supplied roots may be empty or incorrect | Verify the data paths and repeat the check; no business databases or snapshots were inspected |
 | Exit 2 with `Legacy GraphID 0xFFFE` | The reported database/column family contains incompatible historical rows | Use the recovery path below before starting 1.8 on this data |
 | Exit 2 with an invalid mapping, lock, configuration or I/O error | Inspection could not establish a clean persisted state | Resolve the reported problem and run the check again; do not treat this as a clean result |
 
@@ -67,12 +76,14 @@ once per column family and reads GraphID metadata; it does not scan every
 business row. Retained versions are inspected without invoking the normal
 session opener, which can delete older versions.
 
-Store startup performs the same read-only inspection before the Store engine,
+Store startup performs the same inspection before the Store engine,
 RocksDB factory, Raft groups and Store registration initialize. On failure the
 process exits unsuccessfully instead of leaving a partially initialized Store
 advertising healthy partitions. The earlier configuration listener can still
 contact PD or synchronize local configuration. The guarantee here concerns the
-Store databases and registration, not all configuration activity.
+Store databases and registration, not all configuration activity. For a checkpoint
+without a RocksDB `LOCK` file, startup creates an empty `LOCK` before inspecting it;
+the offline command remains read-only and refuses a database with no lock file.
 
 Incoming snapshots are checked before opening or replacing the local partition
 database. A rejected snapshot does not advance the state machine's committed
