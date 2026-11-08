@@ -45,8 +45,9 @@ public class BatchMapperIterator<T, R> extends WrappedIterator<R> {
 
     @Override
     public void close() throws Exception {
-        this.resetBatchIterator();
-        super.close();
+        try (AutoCloseable origin = super::close) {
+            this.resetBatchIterator();
+        }
     }
 
     @Override
