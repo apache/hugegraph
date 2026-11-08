@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="330" viewBox="0 0 960 330" role="img" aria-labelledby="title desc">
-  <title id="title">Edge cache empty-result flow</title>
-  <desc id="desc">A transient empty backend response is not cached, while a later positive edge response is cached.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="390" viewBox="0 0 960 390" role="img" aria-labelledby="title desc">
+  <title id="title">Backend-aware empty edge cache flow</title>
+  <desc id="desc">Local backends retain empty-result caching; HStore skips empty-result caching so later reads can recover.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
       <path d="M0,0 L10,3 L0,6 Z" fill="#52606d"/>
@@ -9,30 +9,35 @@
       <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.16"/>
     </filter>
   </defs>
-  <rect width="960" height="330" rx="16" fill="#f8fafc"/>
-  <text x="32" y="34" font-family="sans-serif" font-size="18" font-weight="700" fill="#172b4d">Edge query cache policy</text>
+  <rect width="960" height="390" rx="16" fill="#f8fafc"/>
+  <text x="32" y="34" font-family="sans-serif" font-size="18" font-weight="700" fill="#172b4d">Empty edge result policy</text>
   <rect x="34" y="76" width="150" height="62" rx="12" fill="#dbeafe" stroke="#60a5fa" filter="url(#shadow)"/>
-  <text x="109" y="105" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#1e3a8a">Query</text>
-  <text x="109" y="125" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1e3a8a">same key</text>
+  <text x="109" y="105" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#1e3a8a">Edge query</text>
+  <text x="109" y="125" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1e3a8a">cache miss</text>
   <path d="M184 107 H258" stroke="#52606d" stroke-width="2.5" marker-end="url(#arrow)"/>
   <rect x="258" y="76" width="158" height="62" rx="12" fill="#e0e7ff" stroke="#818cf8" filter="url(#shadow)"/>
-  <text x="337" y="105" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#3730a3">Cache miss</text>
-  <text x="337" y="125" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3730a3">backend read</text>
+  <text x="337" y="105" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#3730a3">Backend read</text>
+  <text x="337" y="125" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3730a3">empty batch</text>
   <path d="M416 107 H492" stroke="#52606d" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="492" y="55" width="176" height="82" rx="12" fill="#fee2e2" stroke="#ef4444" filter="url(#shadow)"/>
-  <text x="580" y="87" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#991b1b">Empty batch</text>
-  <text x="580" y="110" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#991b1b">transient read</text>
-  <path d="M668 96 H748" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow)"/>
-  <rect x="748" y="55" width="178" height="82" rx="12" fill="#fff7ed" stroke="#f97316" filter="url(#shadow)"/>
-  <text x="837" y="87" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#9a3412">Skip cache</text>
-  <text x="837" y="110" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#9a3412">retry later</text>
-  <path d="M837 137 V214 H748" fill="none" stroke="#52606d" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="492" y="214" width="176" height="82" rx="12" fill="#dcfce7" stroke="#22c55e" filter="url(#shadow)"/>
-  <text x="580" y="246" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#166534">Edge batch</text>
-  <text x="580" y="269" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#166534">backend recovers</text>
-  <path d="M748 255 H668" stroke="#22c55e" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="258" y="214" width="158" height="82" rx="12" fill="#bbf7d0" stroke="#16a34a" filter="url(#shadow)"/>
-  <text x="337" y="246" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#166534">Cache positive</text>
-  <text x="337" y="269" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#166534">serve future hits</text>
-  <path d="M492 255 H416" stroke="#22c55e" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="492" y="76" width="158" height="62" rx="12" fill="#fff7ed" stroke="#f97316" filter="url(#shadow)"/>
+  <text x="571" y="105" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#9a3412">Backend type</text>
+  <text x="571" y="125" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#9a3412">local / HStore</text>
+  <path d="M571 138 V205 H430" fill="none" stroke="#22c55e" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M571 138 V300 H430" fill="none" stroke="#ef4444" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="592" y="177" font-family="sans-serif" font-size="12" fill="#166534">local</text>
+  <text x="592" y="254" font-family="sans-serif" font-size="12" fill="#991b1b">HStore</text>
+  <rect x="250" y="174" width="180" height="72" rx="12" fill="#dcfce7" stroke="#22c55e" filter="url(#shadow)"/>
+  <text x="340" y="203" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#166534">Cache empty</text>
+  <text x="340" y="225" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#166534">stable local miss</text>
+  <path d="M430 210 H754" stroke="#22c55e" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="754" y="174" width="174" height="72" rx="12" fill="#bbf7d0" stroke="#16a34a" filter="url(#shadow)"/>
+  <text x="841" y="203" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#166534">Fast repeats</text>
+  <text x="841" y="225" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#166534">one backend read</text>
+  <rect x="250" y="266" width="180" height="72" rx="12" fill="#fee2e2" stroke="#ef4444" filter="url(#shadow)"/>
+  <text x="340" y="295" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#991b1b">Skip cache</text>
+  <text x="340" y="317" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#991b1b">retry after refresh</text>
+  <path d="M430 302 H754" stroke="#ef4444" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="754" y="266" width="174" height="72" rx="12" fill="#fecaca" stroke="#dc2626" filter="url(#shadow)"/>
+  <text x="841" y="295" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#991b1b">No stale miss</text>
+  <text x="841" y="317" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#991b1b">more backend reads</text>
 </svg>
