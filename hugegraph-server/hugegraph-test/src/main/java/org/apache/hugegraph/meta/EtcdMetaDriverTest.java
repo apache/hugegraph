@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.meta;
 
+import java.net.URI;
 import java.nio.charset.Charset;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.testutil.Assert;
@@ -27,6 +29,7 @@ import org.mockito.Mockito;
 
 import io.etcd.jetcd.ByteSequence;
 import io.etcd.jetcd.Client;
+import io.etcd.jetcd.ClientBuilder;
 import io.etcd.jetcd.Watch;
 import io.etcd.jetcd.options.WatchOption;
 import io.etcd.jetcd.watch.WatchResponse;
@@ -130,6 +133,42 @@ public class EtcdMetaDriverTest {
         captureListener(watch).onNext(response);
 
         Assert.assertSame(response, received.get());
+    }
+
+    @Test
+    public void testBuilderAcceptsStringEndpoints() {
+        EtcdMetaDriver driver = new EtcdMetaDriver(Mockito.mock(Client.class));
+
+        ClientBuilder builder = driver.etcdMetaDriverBuilder(
+                "http://127.0.0.1:2379", "http://127.0.0.2:2379");
+
+        Assert.assertEquals(List.of(URI.create("http://127.0.0.1:2379"),
+                                    URI.create("http://127.0.0.2:2379")),
+                            List.copyOf(builder.endpoints()));
+    }
+
+    @Test
+    public void testBuilderAcceptsUriEndpoints() {
+        EtcdMetaDriver driver = new EtcdMetaDriver(Mockito.mock(Client.class));
+        URI first = URI.create("http://127.0.0.1:2379");
+        URI second = URI.create("http://127.0.0.2:2379");
+
+        ClientBuilder builder = driver.etcdMetaDriverBuilder(first, second);
+
+        Assert.assertEquals(List.of(first, second),
+                            List.copyOf(builder.endpoints()));
+    }
+
+    @Test
+    public void testBuilderRejectsMixedEndpoints() {
+        EtcdMetaDriver driver = new EtcdMetaDriver(Mockito.mock(Client.class));
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            driver.etcdMetaDriverBuilder(URI.create("http://127.0.0.1:2379"),
+                                         "http://127.0.0.2:2379");
+        }, e -> {
+            Assert.assertContains("Inconsistent endpoint", e.getMessage());
+        });
     }
 
     private static EtcdMetaDriver newDriver(Watch watch) {
