@@ -76,6 +76,47 @@ public class ContextGremlinServerHttpTest {
     }
 
     @Test
+    public void testStartAndStopFailureKeepBothCauses() throws Exception {
+        GremlinServer server = Mockito.mock(GremlinServer.class);
+        RuntimeException startFailure = new RuntimeException("Start failure");
+        RuntimeException stopFailure = new RuntimeException("Stop failure");
+        Mockito.when(server.start())
+               .thenReturn(CompletableFuture.failedFuture(startFailure));
+        Mockito.when(server.stop())
+               .thenReturn(CompletableFuture.failedFuture(stopFailure));
+
+        Assert.assertThrows(CompletionException.class, () -> {
+            HugeGremlinServer.startPrepared(server);
+        }, e -> {
+            Assert.assertInstanceOf(HugeException.class, e.getCause());
+            Assert.assertSame(startFailure, e.getCause().getCause());
+            Assert.assertEquals(1, e.getCause().getSuppressed().length);
+            Assert.assertSame(stopFailure, e.getCause().getSuppressed()[0].getCause());
+        });
+        Mockito.verify(server).stop();
+    }
+
+    @Test
+    public void testStartAndSynchronousStopFailureKeepBothCauses() throws Exception {
+        GremlinServer server = Mockito.mock(GremlinServer.class);
+        RuntimeException startFailure = new RuntimeException("Start failure");
+        RuntimeException stopFailure = new RuntimeException("Stop failure");
+        Mockito.when(server.start())
+               .thenReturn(CompletableFuture.failedFuture(startFailure));
+        Mockito.when(server.stop()).thenThrow(stopFailure);
+
+        Assert.assertThrows(CompletionException.class, () -> {
+            HugeGremlinServer.startPrepared(server);
+        }, e -> {
+            Assert.assertInstanceOf(HugeException.class, e.getCause());
+            Assert.assertSame(startFailure, e.getCause().getCause());
+            Assert.assertEquals(1, e.getCause().getSuppressed().length);
+            Assert.assertSame(stopFailure, e.getCause().getSuppressed()[0]);
+        });
+        Mockito.verify(server).stop();
+    }
+
+    @Test
     public void testOnlyStandardChannelizerIsAdapted() {
         try {
             Settings settings = new Settings();
