@@ -18,6 +18,7 @@ This directory contains source-specific documentation for Apache HugeGraph. It c
 | Understand shared module ownership and migration boundaries | [shared-foundation-migration.md](shared-foundation-migration.md) |
 | Deploy or operate Kubernetes resources | [Helm README](../helm/hugegraph/README.md) and [Helm docs index](../helm/hugegraph/docs/README.md) |
 | Run Docker or Compose environments | [Docker README](../docker/README.md) |
+| Navigate the repository with Serena | [Serena project context](../.serena/README.md) |
 
 Module-specific implementation details belong beside the module they describe. Contributor and agent navigation belongs in the root or module `AGENTS.md`; short tool-specific caches under `.serena/` must link back to these authoritative files.
 

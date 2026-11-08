@@ -4,7 +4,7 @@ Apache HugeGraph is a graph database with standalone and distributed deployment 
 
 ## Deployment modes
 
-- **Standalone:** HugeGraph Server uses embedded RocksDB. This is the shortest path for development and smaller deployments.
+- **Standalone:** HugeGraph Server uses embedded RocksDB by default. The HBase backend remains supported but is deprecated. RocksDB is the shortest path for development and smaller deployments.
 - **Distributed:** Server handles graph APIs, PD owns placement and metadata coordination, and HStore nodes own partition data and replication.
 
 ## Authoritative entry points

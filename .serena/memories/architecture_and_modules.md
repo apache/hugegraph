@@ -4,10 +4,13 @@
 Clients and ecosystem tools
           │
           ▼
-HugeGraph Server ─────► RocksDB                 (standalone)
+HugeGraph Server ─────────────────► RocksDB                 (standalone)
           │
-          └───────────► PD ─────► HStore nodes  (distributed)
+          ├─ metadata / placement lookup ─► PD ── coordinates ─► HStore nodes
+          └─ graph data requests ──────────────────────────────► HStore nodes  (distributed)
 ```
+
+PD supplies metadata, placement and membership information; Server sends graph data requests directly to the selected HStore nodes.
 
 ## Top-level ownership
 

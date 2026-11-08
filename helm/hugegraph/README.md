@@ -99,12 +99,29 @@ The chart can deploy HugeGraph AI's RAG service. Follow the [RAG guide](docs/rag
 
 ## Upgrade and verify
 
-Review the active values before upgrading:
+Review the active values, then use the same chart source as the installation.
+
+For a published OCI chart, select an explicit published version:
+
+```bash
+helm get values hugegraph -n hugegraph --all
+CHART_VERSION="REPLACE_WITH_PUBLISHED_VERSION"
+helm upgrade hugegraph oci://ghcr.io/hugegraph/hugegraph-helm \
+  --version "${CHART_VERSION}" -n hugegraph --reuse-values \
+  --wait --timeout 15m
+```
+
+For a source checkout, run the local-path command from the repository root:
 
 ```bash
 helm get values hugegraph -n hugegraph --all
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
   --wait --timeout 15m
+```
+
+Verify either upgrade with:
+
+```bash
 helm test hugegraph -n hugegraph --logs --timeout 5m
 ```
 

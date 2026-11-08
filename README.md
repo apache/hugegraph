@@ -35,22 +35,33 @@ Applications can use REST APIs, Gremlin, Cypher or client SDKs. Gremlin compatib
 
 ## Quick start
 
-Start a standalone server for local evaluation:
+Start a standalone server for local evaluation, bind it to the loopback interface and wait for the version endpoint before continuing:
 
 ```bash
-docker run -d --name hugegraph -p 8080:8080 hugegraph/hugegraph
-curl http://localhost:8080/versions
+docker run -d --name hugegraph \
+  -p 127.0.0.1:8080:8080 hugegraph/hugegraph
+
+for attempt in $(seq 1 60); do
+  if curl -fs http://127.0.0.1:8080/versions; then
+    break
+  fi
+  if [ "${attempt}" -eq 60 ]; then
+    docker logs hugegraph
+    exit 1
+  fi
+  sleep 2
+done
 ```
 
 Run a small graph query:
 
 ```bash
-curl -X POST http://localhost:8080/gremlin \
+curl -X POST http://127.0.0.1:8080/gremlin \
   -H 'Content-Type: application/json' \
   -d '{"gremlin":"g.V().limit(5)"}'
 ```
 
-The default image is intended for local evaluation. Pin a released image for repeatable deployments and enable authentication before exposing the service outside a trusted network. See the [server deployment guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/) for packages, configuration and production preparation.
+The loopback bind keeps this evaluation endpoint off ordinary remote interfaces while authentication is not enabled. Users of older Docker or unusual host-network setups should also restrict host firewall access explicitly. Pin a released image for repeatable deployments and enable authentication before exposing the service outside a trusted network. See the [server deployment guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/) for packages, configuration and production preparation.
 
 ## Deployment
 
@@ -62,15 +73,16 @@ The default image is intended for local evaluation. Pin a released image for rep
 | Binary installation | [Download and deployment guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/) |
 | Build or customize the source | [Building from source](docs/BUILDING.md) |
 
-A standalone deployment runs Server with embedded RocksDB. A distributed deployment separates query serving, metadata and placement, and partition storage:
+A standalone deployment runs Server with embedded RocksDB. In a distributed deployment, Server gets metadata and placement from PD but sends graph data requests directly to HStore nodes:
 
 ```text
 Clients and tools
        │
        ▼
-HugeGraph Server ─────► RocksDB                 (standalone)
+HugeGraph Server ─────────────────► RocksDB                 (standalone)
        │
-       └──────────────► PD ─────► HStore nodes  (distributed)
+       ├─ metadata / placement lookup ─► PD ── coordinates ─► HStore nodes
+       └─ graph data requests ──────────────────────────────► HStore nodes  (distributed)
 ```
 
 ## Repository modules
