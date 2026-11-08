@@ -74,10 +74,16 @@ the latest local snapshot for each partition. It also considers stored locations
 that are not remapped from the configured roots. It seeks the reserved prefix
 once per column family and reads GraphID metadata; it does not scan every
 business row. Retained versions are inspected without invoking the normal
-session opener, which can delete older versions.
+session opener, which can delete older versions. If a metadata-recorded partition
+has no matching database under either the configured roots or its stored location,
+the offline command refuses to certify the inspection. The location may be stale
+after migration; verify the Store paths, backups and partition ownership before
+proceeding. Normal startup retains its existing stale-location cleanup behavior.
 
-Store startup performs the same inspection before the Store engine,
-RocksDB factory, Raft groups and Store registration initialize. On failure the
+Store startup performs the same GraphID scans before the Store engine,
+RocksDB factory, Raft groups and Store registration initialize. Unlike the offline
+command, it does not reject a missing metadata-recorded partition location because
+normal startup removes stale locations for partitions that have migrated away. On failure the
 process exits unsuccessfully instead of leaving a partially initialized Store
 advertising healthy partitions. The earlier configuration listener can still
 contact PD or synchronize local configuration. The guarantee here concerns the

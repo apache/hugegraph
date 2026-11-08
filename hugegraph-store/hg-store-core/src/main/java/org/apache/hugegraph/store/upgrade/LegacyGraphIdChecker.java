@@ -178,8 +178,20 @@ public final class LegacyGraphIdChecker {
                         Metapb.PartitionStore location = Metapb.PartitionStore.parseFrom(iterator.value());
                         // Normal moved roots are remapped by PartitionManager.resetPartitionPath().
                         if (!discovered.contains(location.getPartitionId())) {
+                            if (offline && location.getStoreLocation().isBlank()) {
+                                throw new IOException("Cannot verify partition " + location.getPartitionId() +
+                                        ": its stored location is empty. Verify Store paths and partition " +
+                                        "ownership before upgrading.");
+                            }
+                            Set<Integer> storedPartitions = new HashSet<>();
                             discover(Path.of(location.getStoreLocation()), location.getPartitionId(),
-                                     databases, snapshots, new HashSet<>());
+                                     databases, snapshots, storedPartitions);
+                            if (offline && !storedPartitions.contains(location.getPartitionId())) {
+                                throw new IOException("Cannot verify partition " + location.getPartitionId() +
+                                        " at stored location " + location.getStoreLocation() +
+                                        ": no matching database was found. The location may be stale; " +
+                                        "verify Store paths and partition ownership before upgrading.");
+                            }
                         }
                     }
                     iterator.status();

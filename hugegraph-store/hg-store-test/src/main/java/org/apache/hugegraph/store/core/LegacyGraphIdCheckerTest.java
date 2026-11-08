@@ -343,6 +343,48 @@ public class LegacyGraphIdCheckerTest {
     }
 
     @Test
+    public void testOfflineRefusesUnverifiedStoredPartitionWithoutBlockingStartup() throws Exception {
+        Path root = this.temporary.newFolder().toPath();
+        Path missing = root.resolve("missing");
+        write(root.resolve("db/00000"), "g+v", LEGAL_KEY, VALUE);
+        storeLocation(root, missing, 7);
+        Map<String, String> before = hashes(root);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> LegacyGraphIdChecker.checkOffline(root.toString(), config));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("partition 7"));
+        assertTrue(failure.getMessage(), failure.getMessage().contains(missing.toString()));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("may be stale"));
+        LegacyGraphIdChecker.checkStore(root.toString(), config);
+        assertEquals(before, hashes(root));
+    }
+
+    @Test
+    public void testOfflineRefusesStoredRootWithoutMatchingDatabase() throws Exception {
+        Path root = this.temporary.newFolder().toPath();
+        Path stored = this.temporary.newFolder().toPath();
+        write(root.resolve("db/00000"), "g+v", LEGAL_KEY, VALUE);
+        write(stored.resolve("db/00008"), "g+v", LEGAL_KEY, VALUE);
+        storeLocation(root, stored, 7);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> LegacyGraphIdChecker.checkOffline(root.toString(), config));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("partition 7"));
+    }
+
+    @Test
+    public void testOfflineRefusesEmptyStoredLocation() throws Exception {
+        Path root = this.temporary.newFolder().toPath();
+        write(root.resolve("db/00000"), "g+v", LEGAL_KEY, VALUE);
+        storeLocation(root, Path.of(""), 7);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> LegacyGraphIdChecker.checkOffline(root.toString(), config));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("partition 7"));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("stored location is empty"));
+    }
+
+    @Test
     public void testMovedConfiguredPartitionSupersedesStoredLocation() throws Exception {
         Path root = this.temporary.newFolder().toPath();
         Path stored = this.temporary.newFolder().toPath();
