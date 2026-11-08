@@ -412,7 +412,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testTruncateClearsGraphRangeWithoutFiringWholePrefixTruncateCallbacks()
+     public void testTruncateClearsOnlyGraphKeyRange()
              throws Exception {
          RocksDBSession session = mock(RocksDBSession.class);
          SessionOperator op = mock(SessionOperator.class);
@@ -434,12 +434,9 @@ public class BusinessHandlerImplTest {
          verify(op, times(1)).deleteRange(any(), any());
          // ...and its graph id is released.
          verify(mockKeyCreator, times(1)).delGraphId(1, "g");
-         // A partition's RocksDB instance is shared across graphs, so a per-graph clear must NOT
-         // read the db identity for — nor fire — the whole-prefix truncate callbacks, which would
-         // purge co-tenant graphs' objects from cloud. (A whole-instance RocksDBSession.truncate()
-         // remains the only path that fires them.)
-         verify(session, never()).getGraphName();
-         verify(session, never()).getDbPath();
+         // A partition's RocksDB instance is shared across graphs, so the clear must not drop or
+         // recreate the whole instance.
+         verify(session, never()).truncate();
          // The session opened by truncate() is closed by try-with-resources.
          verify(session, times(1)).close();
      }

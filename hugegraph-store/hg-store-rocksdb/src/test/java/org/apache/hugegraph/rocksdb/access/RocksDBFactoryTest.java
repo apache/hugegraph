@@ -27,7 +27,6 @@ import static org.junit.Assume.assumeTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,7 +58,6 @@ import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.RocksdbChangedListener;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.mockito.ArgumentMatchers;
 import org.rocksdb.AbstractEventListener.EnabledEventCallback;
 import org.rocksdb.DBOptions;
 import org.rocksdb.LiveFileMetaData;
@@ -1133,75 +1131,24 @@ public class RocksDBFactoryTest {
         }
     }
 
-    @Test
-    public void testDefaultTruncateHooksAreNoOps() {
-        RocksdbChangedListener listener = new RocksdbChangedListener() {
-        };
-        listener.onDBTruncateBegin("db", "/path");
-        listener.onDBTruncated("db", "/path");
-        listener.onDBTruncateAbort("db", "/path");
-    }
-
     // =========================================================================
-    // RocksDBSession: truncate notifications / metadata checkpoint failure
+    // RocksDBSession: truncate / metadata checkpoint failure
     // =========================================================================
 
     @Test
-    public void testTruncateNotifiesBeginThenTruncated() throws Exception {
+    public void testTruncateRecreatesDroppedTables() throws Exception {
         Path parent = Files.createTempDirectory("hg-truncate-ok-");
         String dbName = "truncateok";
-        List<String> events = new CopyOnWriteArrayList<>();
-        RocksdbChangedListener recorder = truncateRecorder(dbName, events);
 
         RocksDBFactory factory = RocksDBFactory.getInstance();
         RocksDBSession session = factory.createGraphDB(parent.toString(), dbName, 0);
-        factory.addRocksdbChangedListener(recorder);
         try {
             session.createTables("t1", "t2");
             session.truncate();
 
-            assertEquals(List.of("begin", "truncated"), events);
             assertTrue("truncate must recreate the dropped tables",
                        session.tableIsExist("t1") && session.tableIsExist("t2"));
         } finally {
-            factory.removeRocksdbChangedListener(recorder);
-            session.close();
-            factory.destroyGraphDB(dbName);
-            factory.processPendingDestroys();
-            deleteRecursively(parent.toFile());
-        }
-    }
-
-    /**
-     * A truncate that fails partway must still deliver a terminal notification — an abort, not a
-     * "truncated" — so listeners leave their "truncating" state without purging remote data.
-     */
-    @Test
-    public void testTruncateFailureNotifiesAbortInsteadOfTruncated() throws Exception {
-        Path parent = Files.createTempDirectory("hg-truncate-fail-");
-        String dbName = "truncatefail";
-        List<String> events = new CopyOnWriteArrayList<>();
-        RocksdbChangedListener recorder = truncateRecorder(dbName, events);
-
-        RocksDBFactory factory = RocksDBFactory.getInstance();
-        RocksDBSession session = factory.createGraphDB(parent.toString(), dbName, 0);
-        factory.addRocksdbChangedListener(recorder);
-        try {
-            session.createTables("t1");
-            RocksDBSession failing = spy(session);
-            doThrow(new DBStoreException("simulated drop failure"))
-                    .when(failing).dropTables(ArgumentMatchers.<String>any());
-
-            try {
-                failing.truncate();
-                throw new AssertionError("truncate must propagate the drop failure");
-            } catch (DBStoreException expected) {
-                // expected
-            }
-
-            assertEquals(List.of("begin", "abort"), events);
-        } finally {
-            factory.removeRocksdbChangedListener(recorder);
             session.close();
             factory.destroyGraphDB(dbName);
             factory.processPendingDestroys();
@@ -1916,31 +1863,6 @@ public class RocksDBFactoryTest {
     // =========================================================================
     // Helpers
     // =========================================================================
-
-    private static RocksdbChangedListener truncateRecorder(String dbName, List<String> events) {
-        return new RocksdbChangedListener() {
-            @Override
-            public void onDBTruncateBegin(String db, String dbPath) {
-                if (dbName.equals(db)) {
-                    events.add("begin");
-                }
-            }
-
-            @Override
-            public void onDBTruncated(String db, String dbPath) {
-                if (dbName.equals(db)) {
-                    events.add("truncated");
-                }
-            }
-
-            @Override
-            public void onDBTruncateAbort(String db, String dbPath) {
-                if (dbName.equals(db)) {
-                    events.add("abort");
-                }
-            }
-        };
-    }
 
     private static LiveFileMetaData liveFile(String dir, String fileName, String cfName) {
         LiveFileMetaData md = mock(LiveFileMetaData.class);

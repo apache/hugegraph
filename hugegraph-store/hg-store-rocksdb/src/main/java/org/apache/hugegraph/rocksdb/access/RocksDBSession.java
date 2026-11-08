@@ -737,27 +737,8 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         tableNames.remove(defaultCF);
 
         log.info("truncate table: {}", String.join(",", tableNames));
-        // Notify listeners before table recreation so they can suppress cloud sync callbacks.
-        RocksDBFactory.getInstance().notifyTruncateBegin(this.graphName, this.dbPath);
-        boolean truncated = false;
-        try {
-            this.dropTables(tableNames.toArray(new String[0]));
-            this.createTables(tableNames.toArray(new String[0]));
-            truncated = true;
-        } finally {
-            // Guarantee a terminal notification either way. dropTables/createTables raise the
-            // unchecked DBStoreException; without this, a mid-truncate failure would leave the
-            // begin-notification unmatched and listeners (e.g. cloud storage) stuck in a
-            // "truncating" state forever, silently disabling their sync/cleanup for this DB.
-            if (truncated) {
-                // Success: content cleared — listeners may purge remote state.
-                RocksDBFactory.getInstance().notifyTruncate(this.graphName, this.dbPath);
-            } else {
-                // Failure: undo the "truncating" suppression WITHOUT purging, since the data that
-                // was meant to be cleared may still be present locally and must stay recoverable.
-                RocksDBFactory.getInstance().notifyTruncateAbort(this.graphName, this.dbPath);
-            }
-        }
+        this.dropTables(tableNames.toArray(new String[0]));
+        this.createTables(tableNames.toArray(new String[0]));
     }
 
     public void flush(boolean wait) {

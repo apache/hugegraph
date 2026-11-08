@@ -18,7 +18,6 @@
 package org.apache.hugegraph.rocksdb.access;
 
 import java.io.File;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -672,42 +671,6 @@ public final class RocksDBFactory {
     }
 
     /**
-     * Notifies all registered listeners that a RocksDB truncate operation is about to start.
-     *
-     * @param dbName  the graph / partition name
-     * @param dbPath  the absolute path of the RocksDB directory
-     */
-    public void notifyTruncateBegin(String dbName, String dbPath) {
-        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncateBegin(dbName, dbPath));
-    }
-
-    /**
-     * Notifies all registered listeners that a RocksDB has been truncated.
-     * This should be called after the database content has been cleared to allow
-     * listeners (e.g., cloud storage) to clean up remote state.
-     *
-     * @param dbName  the graph / partition name
-     * @param dbPath  the absolute path of the RocksDB directory
-     */
-    public void notifyTruncate(String dbName, String dbPath) {
-        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncated(dbName, dbPath));
-    }
-
-    /**
-     * Notifies all registered listeners that a RocksDB truncate operation FAILED partway (after
-     * {@link #notifyTruncateBegin} but before completion). Listeners must undo any "truncation in
-     * progress" suppression they applied in {@link RocksdbChangedListener#onDBTruncateBegin}
-     * <em>without</em> purging remote state — the truncate did not complete, so the data that was
-     * meant to be cleared may still be present locally and must remain recoverable.
-     *
-     * @param dbName  the graph / partition name
-     * @param dbPath  the absolute path of the RocksDB directory
-     */
-    public void notifyTruncateAbort(String dbName, String dbPath) {
-        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncateAbort(dbName, dbPath));
-    }
-
-    /**
      * Flushes the MemTable of the named RocksDB session to disk, creating an SST file.
      * This triggers {@link RocksdbChangedListener#onTableFileCreated} for every registered
      * listener (including cloud-storage upload).
@@ -992,21 +955,6 @@ public final class RocksDBFactory {
         }
 
         default void onDBDeleted(String dbName, String filePath) {
-        }
-
-        default void onDBTruncateBegin(String dbName, String filePath) {
-        }
-
-        default void onDBTruncated(String dbName, String filePath) {
-        }
-
-        /**
-         * Called when a truncate operation failed after {@link #onDBTruncateBegin} but before
-         * completion. Implementations must clear any "truncation in progress" suppression they
-         * started, WITHOUT purging remote state (the data intended for clearing may still exist
-         * locally and must stay recoverable).
-         */
-        default void onDBTruncateAbort(String dbName, String filePath) {
         }
 
         default void onDBSessionReleased(RocksDBSession dbSession) {

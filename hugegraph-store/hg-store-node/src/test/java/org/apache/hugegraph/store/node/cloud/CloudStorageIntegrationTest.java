@@ -870,64 +870,6 @@ public class CloudStorageIntegrationTest {
                    "sst2 must be marked confirmed after upload");
     }
 
-    // =========================================================================
-    // 17b. A failed truncate clears the "truncating" latch via the abort callback
-    // =========================================================================
-
-    @Test
-    public void truncateAbort_clearsLatchImmediately_withoutPurgingRemote() throws Exception {
-        // RocksDBSession.truncate() calls notifyTruncateAbort in a finally when drop/create throws,
-        // so the listener clears suppression at once and must NOT purge remote (data may still
-        // exist locally).
-        Path dbDir = mkdirs("hugegraph/db");
-        // Seed remote data that a wrongful purge-on-abort would destroy.
-        store.put("hugegraph/db/000001.sst", bytes("still-needed"));
-
-        CloudStorageEventListener listener = listenerFor(store, dataRoot);
-
-        listener.onDBTruncateBegin("hugegraph", dbDir.toString());
-        assertTrue(listener.isActivelyTruncating("hugegraph"),
-                   "Latch must be active after truncate begins");
-
-        // Simulate truncate() failing partway → finally fires the abort notification.
-        listener.onDBTruncateAbort("hugegraph", dbDir.toString());
-
-        assertFalse(listener.isActivelyTruncating("hugegraph"),
-                    "Abort must clear the truncating latch immediately");
-        assertFalse(listener.isInTruncationGracePeriodForTest("hugegraph"),
-                    "Abort must not leave the DB in the truncation grace period");
-        assertTrue(store.fileExists("hugegraph/db/000001.sst"),
-                   "Abort must NOT purge remote state (data may still be present locally)");
-    }
-
-    @Test
-    public void truncatePurgeFailure_retriesUntilRemoteIsPurged() throws Exception {
-        // graph.clear() → onDBTruncated must purge the remote prefix. If that purge fails, stale
-        // remote objects could resurrect cleared data on a future restore, so the failure must not
-        // be ignored: the listener retries the purge until it succeeds.
-        Path dbDir = mkdirs("hugegraph/db");
-        store.put("hugegraph/db/000001.sst", bytes("cleared-data"));
-        store.put("hugegraph/db/CURRENT", bytes("MANIFEST-000001"));
-
-        CloudStorageEventListener listener = listenerFor(store, dataRoot);
-
-        // First purge attempt fails (simulated transient cloud error).
-        store.setPrefixDeleteFailure(true);
-        listener.onDBTruncateBegin("hugegraph", dbDir.toString());
-        listener.onDBTruncated("hugegraph", dbDir.toString());
-
-        assertTrue(store.fileExists("hugegraph/db/000001.sst"),
-                   "Stale object must still be present right after a failed purge");
-
-        // Recovery: subsequent purges succeed; the scheduled retry must clean up the stale objects.
-        store.setPrefixDeleteFailure(false);
-        boolean purged = awaitCondition(
-                () -> !store.fileExists("hugegraph/db/000001.sst"), 8_000);
-        assertTrue(purged,
-                   "A failed truncate purge must be retried until the stale remote prefix "
-                   + "is clean");
-    }
-
     @Test
     public void delete_purgeFailing_marksPendingAndBlocksHydrationUntilCleanup()
             throws Exception {
@@ -971,8 +913,8 @@ public class CloudStorageIntegrationTest {
 
     @Test
     public void delete_purgeFailure_retriesUntilCleanupCompletes() throws Exception {
-        // Same safety level as truncate: a failed delete purge must be retried until the remote
-        // prefix is purged and the local marker cleared.
+        // A failed delete purge must be retried until the remote prefix is purged and the local
+        // marker cleared.
         Path dbDir = mkdirs("delfail/db");
         store.put("delfail/db/000001.sst", bytes("stale"));
 
@@ -1038,28 +980,6 @@ public class CloudStorageIntegrationTest {
                    "Invalid marker should remain for explicit operator inspection");
     }
 
-    @Test
-    public void startupPendingTruncateMarker_validMarker_isReplayedAndPurged() throws Exception {
-        // Simulate a crash after truncate completed locally but remote purge intent remained pending.
-        store.put("truncstart/db/000001.sst", bytes("stale"));
-        Path markerDir = dataRoot.resolve(CloudStorageEventListener.PENDING_TRUNCATE_DIR);
-        Files.createDirectories(markerDir);
-
-        // Markers are empty files; the Base64 filename alone carries the prefix.
-        String markerName = java.util.Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("truncstart/db".getBytes(StandardCharsets.UTF_8));
-        Files.createFile(markerDir.resolve(markerName));
-
-        // New listener instance => startup marker scan + deferred truncate purge scheduling.
-        listenerFor(store, dataRoot);
-
-        boolean cleaned = awaitCondition(
-                () -> !store.fileExists("truncstart/db/000001.sst") && !markerDirHasEntry(markerDir),
-                10_000);
-        assertTrue(cleaned,
-                   "A valid startup truncate marker must trigger purge replay and marker cleanup");
-    }
-
     /** True if {@code dir} exists and contains at least one entry. */
     private static boolean markerDirHasEntry(Path dir) {
         if (!Files.isDirectory(dir)) {
@@ -1119,30 +1039,6 @@ public class CloudStorageIntegrationTest {
             assertEquals(3, syncCount.get(), "Retries must stop once a publish succeeds");
             assertEquals(0, listener.publishFailureCount("hugegraph"),
                          "Success must clear the backoff state");
-        } finally {
-            listener.close();
-        }
-    }
-
-    @Test
-    public void metadataSync_defersDirtyDbWhileTruncating_thenPublishesAfterAbort()
-            throws Exception {
-        Path dbDir = mkdirs("hugegraph/db");
-        AtomicInteger syncCount = new AtomicInteger(0);
-        CloudStorageEventListener listener = countingListener(50L, syncCount, () -> true);
-        try {
-            listener.markMetadataDirty("hugegraph");
-            listener.onDBTruncateBegin("hugegraph", dbDir.toString());
-            // Marks requested during the truncate are kept (not dropped), but not published.
-            listener.markMetadataDirty("hugegraph");
-            Thread.sleep(250L);
-            assertEquals(0, syncCount.get(),
-                         "A truncating DB must not republish metadata over the purge");
-
-            // The mark was deferred, not dropped: once the truncate ends it is published.
-            listener.onDBTruncateAbort("hugegraph", dbDir.toString());
-            assertTrue(awaitCondition(() -> syncCount.get() >= 1, 3_000),
-                       "The deferred mark must be published after the truncate ends");
         } finally {
             listener.close();
         }
