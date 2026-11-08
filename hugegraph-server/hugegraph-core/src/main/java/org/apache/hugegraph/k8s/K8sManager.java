@@ -79,12 +79,12 @@ public class K8sManager {
         }
         try {
             File file = new File(CoreOptions.K8S_OPERATOR_TEMPLATE.defaultValue());
-            FileReader reader = new FileReader(file);
-            int length = (int) file.length();
-            char[] buffer = new char[length];
-            reader.read(buffer, 0, length);
-            this.operatorTemplate = new String(buffer);
-            reader.close();
+            try (FileReader reader = new FileReader(file)) {
+                int length = (int) file.length();
+                char[] buffer = new char[length];
+                reader.read(buffer, 0, length);
+                this.operatorTemplate = new String(buffer);
+            }
         } catch (IOException ignored) {
         }
     }
