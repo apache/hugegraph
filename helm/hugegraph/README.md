@@ -71,7 +71,9 @@ Topology presets do not automatically enable SeaTunnel or Vermeer. Enable option
 
 `mode: easy` defaults HTTP Services to NodePort; `mode: strict` defaults them to ClusterIP and enables NetworkPolicy isolation by default. The chart leaves authentication, Hubble and persistence enabled unless explicitly changed. A NetworkPolicy requires support from the cluster network plugin.
 
-For inherited settings, an explicit component value takes precedence. An unset component Service type inherits the mode default; an unset component storage flag inherits `persistence.enabled`. Explicit `false` is preserved. Separately, `global.imageRegistry` rewrites component image repository references. Existing explicit Service values remain in effect on upgrade, including with `--reuse-values`; see [SeaTunnel](docs/seatunnel.md) and [Vermeer](docs/vermeer.md#optional-native-administration) for their entry points.
+For inherited settings, an explicit component value takes precedence. An unset component Service type inherits the mode default; an unset component storage flag inherits `persistence.enabled`. Explicit `false` is preserved. Separately, `global.imageRegistry` prefixes unqualified image references such as `hugegraph/server`; already-qualified references such as `ghcr.io/team/server` or `localhost:5000/team/server` are unchanged. To move a qualified image, set its component `image.repository` explicitly; also update qualified `server.waitImage` or `store.waitImage` overrides if used. See the [private registry example](examples/values-internal-registry.yaml).
+
+Existing explicit Service values remain in effect on upgrade, including with `--reuse-values`; see [SeaTunnel](docs/seatunnel.md) and [Vermeer](docs/vermeer.md#optional-native-administration) for their entry points.
 
 ## Common settings
 
@@ -81,7 +83,7 @@ For inherited settings, an explicit component value takes precedence. An unset c
 | Disable Server authentication for a trusted local environment | `server.auth.enabled=false` |
 | Disable persistent storage for a disposable new installation | `persistence.enabled=false` |
 | Select a StorageClass | `pd.storage.storageClassName`, `store.storage.storageClassName`, `hubble.persistence.storageClassName` |
-| Use an internal image registry | `global.imageRegistry` |
+| Prefix unqualified image references with an internal registry | `global.imageRegistry` |
 | Enable SeaTunnel | `seatunnel.enabled=true` |
 | Enable Vermeer | `vermeer.enabled=true` |
 | Change Server, PD or Store replicas | `server.replicas`, `pd.replicas`, `store.replicas` |
