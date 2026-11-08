@@ -206,22 +206,32 @@ public class RocksDBSstSessions extends RocksDBSessions {
         // RocksDB reports "Cannot create sst file with no entries"
         final String NO_ENTRIES = "create sst file with no entries";
 
+        Throwable failure = null;
         for (SstFileWriter sst : this.tables.values()) {
-            E.checkState(sst.isOwningHandle(), "SstFileWriter closed");
-            try {
-                sst.finish();
-            } catch (RocksDBException e) {
-                String message = e.getMessage();
-                if (message != null && message.contains(NO_ENTRIES)) {
-                    // Nothing to write for an empty table, just release it
-                    sst.close();
-                    continue;
+            try (sst) {
+                E.checkState(sst.isOwningHandle(), "SstFileWriter closed");
+                try {
+                    sst.finish();
+                } catch (RocksDBException e) {
+                    String message = e.getMessage();
+                    if (message == null || !message.contains(NO_ENTRIES)) {
+                        throw new BackendException("Failed to close SstFileWriter", e);
+                    }
                 }
-                throw new BackendException("Failed to close SstFileWriter", e);
+            } catch (RuntimeException | Error e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
             }
-            sst.close();
         }
         this.tables.clear();
+        if (failure instanceof RuntimeException exception) {
+            throw exception;
+        } else if (failure instanceof Error error) {
+            throw error;
+        }
     }
 
     /**
