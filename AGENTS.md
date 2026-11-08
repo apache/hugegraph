@@ -1,62 +1,58 @@
 # AGENTS.md
 
-Repository-specific guidance; module files add local details.
+Repository-specific guidance for coding agents. Module files add local ownership, commands and failure modes.
 
-## Key relationships
+## System map
 
 ```text
-Server (hugegraph-server): graph engine + REST/Gremlin API
-  ├─ RocksDB: embedded backend
-  └─ HStore adapter → Store client → Store: partition data + Raft
+Server: graph engine and user APIs
+  ├─ RocksDB: embedded standalone backend
+  └─ HStore adapter → Store client → Store partition data and Raft
 
-PD: placement + metadata; consulted by Server and Store
-Struct: shared types/codecs; separate implementations also exist in Server
-Commons: shared utilities; independent compiler and test settings
+PD: placement and metadata coordination
+Struct: shared graph types and codecs
+Commons: shared utilities and RPC infrastructure
 ```
 
 ## Load on demand
 
-| Work area | Read when working there |
+| Work area | Read first |
 |---|---|
-| Graph engine, API, backends | [Server](hugegraph-server/AGENTS.md) |
-| Placement, metadata, PD client | [PD](hugegraph-pd/AGENTS.md) |
-| Distributed storage and client | [Store](hugegraph-store/AGENTS.md) |
-| Shared data types and serialization | [Struct](hugegraph-struct/AGENTS.md) |
-| Utilities and RPC | [Commons](hugegraph-commons/AGENTS.md) |
-| Container deployment | [Docker guide](docker/README.md) |
-| PR requirements | [Contribution guide](docs/CONTRIBUTING.md) |
+| Documentation ownership and durable links | [Repository docs index](docs/README.md) |
+| Graph engine, API and backends | [Server guidance](hugegraph-server/AGENTS.md) |
+| Placement, metadata and PD clients | [PD guidance](hugegraph-pd/AGENTS.md) |
+| Distributed storage and Store clients | [Store guidance](hugegraph-store/AGENTS.md) |
+| Shared graph types and serialization | [Struct guidance](hugegraph-struct/AGENTS.md) |
+| Utilities and RPC | [Commons guidance](hugegraph-commons/AGENTS.md) |
+| Docker deployment | [Docker guide](docker/README.md) |
+| Kubernetes deployment | [Helm guide](helm/hugegraph/README.md) |
+| Contribution requirements | [Contribution guide](docs/CONTRIBUTING.md) |
 
 ## Repository constraints
 
-- Use existing module boundaries; keep unrelated refactors out of a fix.
-- User-visible feature, configuration or deployment behavior changes must ship with matching docs.
-  Update in-repository docs in the same PR; link a paired `apache/hugegraph-doc` PR when website
-  docs are affected and coordinate both merges. A follow-up issue alone does not satisfy this rule.
-  Internal-only changes can use `Doc - No Need`.
-- Keep README as an entry point; link detailed deployment instructions instead of duplicating them.
-- Keep AGENTS.md under 100 lines where practical. Shared rules belong here, local exceptions
-  in module files. Keep key relationships, common commands and non-obvious pitfalls inline;
-  reference existing sources for versions, configuration details and lengthy procedures.
+- Keep changes inside the module that owns the behavior; exclude unrelated cleanup from a functional fix.
+- A user-visible feature, configuration or deployment change requires matching documentation in the same change. Link a coordinated `apache/hugegraph-doc` change when the website is affected; a follow-up issue alone is not sufficient.
+- Keep root and module READMEs as entry points. Put detailed procedures in a focused document and link it from the relevant index.
+- Treat `docs/README.md` as the repository documentation map. New durable Markdown files must be linked from it or from a module-local index.
+- Treat `.serena/` as a small navigation cache. Do not store duplicated procedures, fixed release numbers, timestamps, review history, pull-request links or commit hashes there.
+- Write documentation for the current contract and operational boundary, not as a development diary. Keep prose paragraphs as logical lines; wrap near 160 characters only when necessary for review.
 
 ## Build and validation
 
-Commands run from the repository root. Java 17 and Maven 3.6.3+;
-versions come from [pom.xml](pom.xml), including `${revision}`.
+Run commands from the repository root. Java and Maven requirements are defined by [pom.xml](pom.xml) and summarized in [BUILDING.md](docs/BUILDING.md).
 
 ```bash
 mvn clean install -DskipTests
 mvn clean install -pl hugegraph-server -am -DskipTests
 ```
 
-For separate distributed-module builds, install `hugegraph-struct` first,
-then build PD, Store and Server. Module guidance covers tests and CI prerequisites.
-Commons tests require `-DskipCommonsTests=false`; a successful build does not imply its tests ran.
+For separate distributed-module builds, install `hugegraph-struct` first, then build PD, Store and Server. Commons tests require `-DskipCommonsTests=false`; a successful aggregate build does not imply those tests ran.
 
-- Java style: 120 columns, 4 spaces, no star imports; see [.editorconfig](.editorconfig).
-- Before pushing code: `mvn editorconfig:format`,
-  `mvn clean compile -Dmaven.javadoc.skip=true`, and relevant module tests.
-  Documentation-only changes need link/path checks and `git diff --check`.
-- PD/Store `.proto` builds generate Java into each `hg-*-grpc/src/main/java/` directory;
-  see the corresponding gRPC module POM before editing or cleaning generated sources.
-- New dependencies require updating [release LICENSE/NOTICE/licenses](install-dist/release-docs/)
-  and [dependency inventory](install-dist/scripts/dependency/known-dependencies.txt).
+Before pushing code, run `mvn editorconfig:format`, `mvn clean compile -Dmaven.javadoc.skip=true` and the tests selected by the affected modules. Documentation-only changes require relative-link review, rendered-heading review and `git diff --check`.
+
+## Non-obvious boundaries
+
+- Server changes commonly require both Server and PD/Store CI because the HStore path crosses module boundaries.
+- PD and Store protocol builds generate Java into their gRPC modules; inspect the module POM before editing or deleting generated sources.
+- New dependencies require updates to `install-dist/release-docs/` and `install-dist/scripts/dependency/known-dependencies.txt`.
+- Read versions, plugin settings and module membership from Maven configuration instead of copying them into agent notes.
