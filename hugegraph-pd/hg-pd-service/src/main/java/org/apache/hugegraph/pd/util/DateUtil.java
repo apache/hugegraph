@@ -65,7 +65,7 @@ public class DateUtil {
         try {
             return DateUtils.parseDate(date, getDefaultPattern());
         } catch (ParseException e) {
-            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getMessage());
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getMessage(), e);
         }
     }
 

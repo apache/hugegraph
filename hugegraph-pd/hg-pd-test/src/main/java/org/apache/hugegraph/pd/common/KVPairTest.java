@@ -61,7 +61,14 @@ public class KVPairTest {
 
     @Test
     public void testHashCode() {
+        Assert.assertEquals("key".hashCode() * 13 + 1, this.pair.hashCode());
+        Assert.assertEquals(new KVPair<>("key", 1).hashCode(), this.pair.hashCode());
 
+        KVPair<String, Integer> nullKey = new KVPair<>(null, 1);
+        Assert.assertEquals(1, nullKey.hashCode());
+        Assert.assertEquals(new KVPair<>(null, 1), nullKey);
+        Assert.assertEquals(new KVPair<String, Integer>(null, 1).hashCode(),
+                            nullKey.hashCode());
     }
 
     @Test
