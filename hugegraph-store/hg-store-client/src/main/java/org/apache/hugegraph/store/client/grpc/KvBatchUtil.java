@@ -97,7 +97,7 @@ class KvBatchUtil {
 
         if (prefixList == null || prefixList.isEmpty()) {
             throw new RuntimeException(
-                    "The start-list of ScanQuery shouldn't to be invalid in ScanMethod.PREFIX " +
+                    "The prefix-list of ScanQuery shouldn't to be invalid in ScanMethod.PREFIX " +
                     "mode.");
         }
 
