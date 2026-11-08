@@ -406,9 +406,13 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
         QueryResults<HugeEdge> fetched = super.fetchEdgeBatch(query);
         if (!fetched.batches().hasNext()) {
-            // An empty backend response may be transient (for example while
-            // a distributed owner is being refreshed). Never turn it into a
-            // negative cache entry that survives until cache expiry.
+            // A distributed backend can transiently return an empty batch
+            // while an owner or partition leader is being refreshed. Do not
+            // turn that response into a negative cache entry. Local backends
+            // retain the existing negative cache for stable empty queries.
+            if (!this.store().provider().isHstore()) {
+                this.cacheEdgeBatch(cacheKey, batchLabel, Collections.emptyList());
+            }
             return fetched;
         }
         return fetched.mapBatches(batch -> {

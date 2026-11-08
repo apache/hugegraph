@@ -747,9 +747,7 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             Edge warm = QueryResults.one(transaction.queryEdgesByVertex(first.id()));
             Assert.assertEquals(edge.id(), warm.id());
             Assert.assertTrue(offheap.hits() > hits);
-            // Positive edge candidates are served from cache. A nested query
-            // that previously returned no batch is deliberately retried.
-            Mockito.verify(store, Mockito.atMost(1)).query(Mockito.any(Query.class));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
         } finally {
             transaction.close();
             AutoCloseable nativeCache = Whitebox.getInternalState(offheap, "cache");
@@ -841,7 +839,7 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
-    public void testEmptyEdgeBatchesAreNotCached() {
+    public void testEmptyEdgeBatchesRespectBatchCountLimit() {
         this.persistEdges(1);
         ConditionQuery root = this.edgeCacheRequest();
         Id label = this.graph.edgeLabel("person_know_person").id();
@@ -862,17 +860,20 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             for (int i = 0; i < 100; i++) {
                 Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(i)).isEmpty());
             }
-            Mockito.verify(store, Mockito.times(100)).query(Mockito.any(Query.class));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+            Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(100)).isEmpty());
+            Mockito.verify(store, Mockito.times(1)).query(Mockito.any(Query.class));
         } finally {
             transaction.close();
         }
     }
 
     @Test
-    public void testTransientEmptyEdgeBatchIsNotReused() {
+    public void testTransientEmptyEdgeBatchIsNotReusedOnHstore() {
         List<Id> ids = this.persistEdges(1);
         ConditionQuery root = this.edgeCacheRequest();
         BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        this.markAsHstore(store);
         CachedGraphTransaction transaction = new CachedGraphTransaction(this.params,
                                                                          store);
         try {
@@ -888,6 +889,52 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         } finally {
             transaction.close();
         }
+    }
+
+    @Test
+    public void testRepeatedEmptyEdgeCostDiffersByBackendType() {
+        this.persistEdges(1);
+        ConditionQuery root = this.edgeCacheRequest();
+        BackendStore local = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction localTransaction = new CachedGraphTransaction(
+                this.params, local);
+        BackendStore distributed = Mockito.spy(this.params.loadGraphStore());
+        this.markAsHstore(distributed);
+        CachedGraphTransaction distributedTransaction = new CachedGraphTransaction(
+                this.params, distributed);
+        try {
+            localTransaction.clearCache(null, false);
+            distributedTransaction.clearCache(null, false);
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(local).query(Mockito.any(Query.class));
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(distributed).query(Mockito.any(Query.class));
+            Mockito.clearInvocations(local, distributed);
+
+            for (int i = 0; i < 100; i++) {
+                Assert.assertTrue(this.fetchEdgeIds(localTransaction, root).isEmpty());
+            }
+            Mockito.verify(local, Mockito.times(1)).query(Mockito.any(Query.class));
+
+            // Both transactions use the graph-level cache. Clear the local
+            // negative entry before measuring distributed reads.
+            distributedTransaction.clearCache(null, false);
+            Mockito.clearInvocations(distributed);
+            for (int i = 0; i < 100; i++) {
+                Assert.assertTrue(this.fetchEdgeIds(distributedTransaction, root).isEmpty());
+            }
+            Mockito.verify(distributed, Mockito.times(100))
+                   .query(Mockito.any(Query.class));
+        } finally {
+            localTransaction.close();
+            distributedTransaction.close();
+        }
+    }
+
+    private void markAsHstore(BackendStore store) {
+        BackendStoreProvider provider = Mockito.spy(store.provider());
+        Mockito.doReturn(true).when(provider).isHstore();
+        Whitebox.setInternalState(store, "provider", provider);
     }
 
     private List<Id> persistEdges(int count) {
