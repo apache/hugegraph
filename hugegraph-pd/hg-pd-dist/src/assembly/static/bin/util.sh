@@ -203,12 +203,17 @@ CRONTAB_LOCK_TIMEOUT_S=30
 
 function crontab_lock_acquire() {
     if command_available flock; then
-        local open_err
-        open_err="$(eval "exec ${CRONTAB_LOCK_FD}>\"\$CRONTAB_LOCK_FILE\"" 2>&1)"
-        if [ $? -ne 0 ]; then
-            echo "ERROR: cannot open crontab lock file '$CRONTAB_LOCK_FILE': $open_err" >&2
+        local open_err_file
+        open_err_file=$(mktemp "${TMPDIR:-/tmp}/.hugegraph-crontab-lock-err.XXXXXX") || {
+            echo "ERROR: cannot create temp file to open crontab lock" >&2
+            return 1
+        }
+        if ! eval "exec ${CRONTAB_LOCK_FD}>\"\$CRONTAB_LOCK_FILE\"" 2>"$open_err_file"; then
+            echo "ERROR: cannot open crontab lock file '$CRONTAB_LOCK_FILE': $(cat "$open_err_file")" >&2
+            rm -f "$open_err_file"
             return 1
         fi
+        rm -f "$open_err_file"
         if ! flock -w "$CRONTAB_LOCK_TIMEOUT_S" "$CRONTAB_LOCK_FD"; then
             eval "exec ${CRONTAB_LOCK_FD}>&-" 2>/dev/null
             echo "ERROR: timed out waiting for the crontab lock" >&2
