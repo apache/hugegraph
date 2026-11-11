@@ -25,9 +25,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Serializable;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,7 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.store.business.itrv2.FileObjectIterator;
 import org.apache.hugegraph.store.business.itrv2.io.SortShuffleSerializer;
 
-public class SortShuffle<T extends Serializable> {
+public class SortShuffle<T extends Serializable> implements AutoCloseable {
 
     private static final int BATCH_SIZE = 1000000;
 
@@ -56,6 +58,8 @@ public class SortShuffle<T extends Serializable> {
     private final SortShuffleSerializer<T> serializer;
 
     private final Deque<String> files = new ArrayDeque<>();
+
+    private final List<FileObjectIterator<T>> iterators = new ArrayList<>();
 
     public SortShuffle(Comparator<T> comparator, SortShuffleSerializer<T> serializer) {
         this.comparator = comparator;
@@ -99,13 +103,16 @@ public class SortShuffle<T extends Serializable> {
     /**
      * Delete file/directory and close resource
      */
+    @Override
     public void close() {
+        this.iterators.forEach(FileObjectIterator::close);
+        this.iterators.clear();
         if (this.files.size() > 0) {
             while (this.files.size() > 0) {
                 new File(files.pop()).delete();
             }
-            new File(path).delete();
         }
+        new File(path).delete();
         this.files.clear();
         this.queue.clear();
     }
@@ -125,16 +132,16 @@ public class SortShuffle<T extends Serializable> {
         }
 
         var fn = getFileName();
-        OutputStream fos = new FileOutputStream(fn);
-        queue.stream().sorted(this.comparator).forEach(t -> {
-            try {
-                serializer.write(fos, t);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+        try (OutputStream fos = new FileOutputStream(fn)) {
+            Iterator<T> sorted = queue.stream().sorted(this.comparator).iterator();
+            while (sorted.hasNext()) {
+                serializer.write(fos, sorted.next());
             }
-        });
+        } catch (IOException | RuntimeException e) {
+            new File(fn).delete();
+            throw e;
+        }
         this.files.add(fn);
-        fos.close();
     }
 
     private synchronized String getFileName() {
@@ -146,42 +153,42 @@ public class SortShuffle<T extends Serializable> {
      */
     private void minorMerge(String f1, String f2) throws IOException {
         String fn = getFileName();
-        OutputStream fos = new FileOutputStream(fn);
+        try (OutputStream fos = new FileOutputStream(fn);
+             InputStream fis1 = new FileInputStream(f1);
+             InputStream fis2 = new FileInputStream(f2)) {
+            T o1 = serializer.read(fis1);
+            T o2 = serializer.read(fis2);
 
-        InputStream fis1 = new FileInputStream(f1);
-        InputStream fis2 = new FileInputStream(f2);
+            // read sorted fn1 and f2, write to new file
+            while (o1 != null && o2 != null) {
+                if (comparator.compare(o1, o2) < 0) {
+                    serializer.write(fos, o1);
+                    o1 = serializer.read(fis1);
+                } else {
+                    serializer.write(fos, o2);
+                    o2 = serializer.read(fis2);
+                }
+            }
 
-        T o1 = serializer.read(fis1);
-        T o2 = serializer.read(fis2);
-
-        // read sorted fn1 and f2, write to new file
-        while (o1 != null && o2 != null) {
-            if (comparator.compare(o1, o2) < 0) {
+            if (o1 != null) {
                 serializer.write(fos, o1);
-                o1 = serializer.read(fis1);
-            } else {
+                while ((o1 = serializer.read(fis1)) != null) {
+                    serializer.write(fos, o1);
+                }
+            }
+
+            if (o2 != null) {
                 serializer.write(fos, o2);
-                o2 = serializer.read(fis2);
+                while ((o2 = serializer.read(fis2)) != null) {
+                    serializer.write(fos, o2);
+                }
             }
+        } catch (IOException | RuntimeException e) {
+            new File(fn).delete();
+            this.files.addFirst(f2);
+            this.files.addFirst(f1);
+            throw e;
         }
-
-        if (o1 != null) {
-            serializer.write(fos, o1);
-            while ((o1 = serializer.read(fis1)) != null) {
-                serializer.write(fos, o1);
-            }
-        }
-
-        if (o2 != null) {
-            serializer.write(fos, o2);
-            while ((o2 = serializer.read(fis2)) != null) {
-                serializer.write(fos, o2);
-            }
-        }
-
-        fis1.close();
-        fis2.close();
-        fos.close();
 
         new File(f1).delete();
         new File(f2).delete();
@@ -212,10 +219,12 @@ public class SortShuffle<T extends Serializable> {
      */
     public Iterator<T> getIterator() throws IOException {
         if (files.size() == 0) {
-            return queue.iterator();
+            return queue.stream().sorted(this.comparator).iterator();
         }
 
-        return new FileObjectIterator<>(files.getFirst(), this.serializer);
+        FileObjectIterator<T> iterator = new FileObjectIterator<>(files.getFirst(), this.serializer);
+        this.iterators.add(iterator);
+        return iterator;
     }
 
 }

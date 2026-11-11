@@ -36,8 +36,8 @@ public abstract class GrpcClosure<V> implements RaftClosure {
      * Set the output result to raftClosure, for Follower, raftClosure is empty.
      */
     public static <V> void setResult(RaftClosure raftClosure, V result) {
-        while (raftClosure instanceof DefaultRaftClosure) {
-            raftClosure = ((DefaultRaftClosure) raftClosure).getClosure();
+        while (raftClosure instanceof DefaultRaftClosure defaultClosure) {
+            raftClosure = defaultClosure.getClosure();
         }
         GrpcClosure closure = (GrpcClosure) raftClosure;
         if (closure != null) {

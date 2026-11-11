@@ -200,8 +200,8 @@ public class HstoreSessionsImpl extends HstoreSessions {
         try {
             this.session.deleteGraph();
             hgStoreClient.getPdClient().delGraph(this.graphName);
-        } catch (PDException ignored) {
-
+        } catch (PDException e) {
+            throw new BackendException("Failed to remove graph '%s' from PD", e, this.graphName);
         } finally {
             // The graph is gone from PD, or partly deleted: register it again before reuse
             infoInitializedGraph.remove(this.graphName);

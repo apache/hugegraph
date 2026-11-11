@@ -64,12 +64,10 @@ public class HugePrimaryKeyStrategy
                 continue;
             }
 
-            if (!(step instanceof AddPropertyStep)) {
+            if (!(step instanceof AddPropertyStep<?> propertyStep)) {
                 curAddStep = null;
                 continue;
             }
-
-            AddPropertyStep<?> propertyStep = (AddPropertyStep<?>) step;
 
             if (propertyStep.getCardinality() == Cardinality.single
                 || propertyStep.getCardinality() == null) {

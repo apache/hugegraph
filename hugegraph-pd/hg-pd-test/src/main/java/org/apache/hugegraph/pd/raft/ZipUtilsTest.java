@@ -53,6 +53,10 @@ public class ZipUtilsTest {
         CRC64 compressSum = new CRC64();
         ZipUtils.compress(root.getPath(), "snapshot", archive.getPath(), compressSum);
         Assert.assertTrue(archive.length() > 0);
+        byte[] archiveBytes = Files.readAllBytes(archive.toPath());
+        CRC64 archiveSum = new CRC64();
+        archiveSum.update(archiveBytes, 0, archiveBytes.length);
+        Assert.assertEquals(archiveSum.getValue(), compressSum.getValue());
 
         File reader = tmp.newFolder("reader");
         CRC64 decompressSum = new CRC64();
@@ -112,6 +116,30 @@ public class ZipUtilsTest {
         Assert.assertThrows(IOException.class,
                             () -> ZipUtils.decompress(missing.getPath(), tmp.getRoot().getPath(),
                                                       new CRC64()));
+    }
+
+    @Test
+    public void testCompressMissingDirectoryFailsWithIOException() throws IOException {
+        File root = tmp.newFolder("missing-writer");
+        File archive = new File(root, "snapshot.zip");
+
+        IOException exception = Assert.assertThrows(IOException.class,
+                                                   () -> ZipUtils.compress(root.getPath(),
+                                                                           "missing", archive.getPath(),
+                                                                           new CRC64()));
+
+        Assert.assertTrue(exception.getMessage().contains("missing"));
+    }
+
+    @Test
+    public void testCompressRegularFileAsDirectoryFailsWithIOException() throws IOException {
+        File root = tmp.newFolder("file-writer");
+        write(new File(root, "snapshot"), "not a directory");
+        File archive = new File(root, "snapshot.zip");
+
+        Assert.assertThrows(IOException.class,
+                            () -> ZipUtils.compress(root.getPath(), "snapshot", archive.getPath(),
+                                                    new CRC64()));
     }
 
     private long checksumOf(String content) throws IOException {

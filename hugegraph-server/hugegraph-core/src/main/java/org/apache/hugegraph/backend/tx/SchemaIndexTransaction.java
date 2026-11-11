@@ -67,8 +67,7 @@ public class SchemaIndexTransaction extends AbstractTransaction {
     @Watched(prefix = "index")
     @Override
     public QueryResults<BackendEntry> query(Query query) {
-        if (query instanceof ConditionQuery) {
-            ConditionQuery q = (ConditionQuery) query;
+        if (query instanceof ConditionQuery q) {
             if (q.allSysprop() && q.conditionsSize() == 1 &&
                 q.containsCondition(HugeKeys.NAME)) {
                 return this.queryByName(q);

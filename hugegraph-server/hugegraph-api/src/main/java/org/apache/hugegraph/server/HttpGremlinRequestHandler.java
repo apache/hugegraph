@@ -42,12 +42,10 @@ public class HttpGremlinRequestHandler extends HttpGremlinEndpointHandler {
 
     @Override
     public void channelRead(ChannelHandlerContext context, Object message) {
-        if (!(message instanceof FullHttpRequest)) {
+        if (!(message instanceof FullHttpRequest request)) {
             super.channelRead(context, message);
             return;
         }
-
-        FullHttpRequest request = (FullHttpRequest) message;
         try {
             /*
              * TinkerPop 3.8.1 releases the request before resolving aliases,

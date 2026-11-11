@@ -17,12 +17,16 @@
 
 package org.apache.hugegraph.pd.raft;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.After;
 import org.junit.Assert;
@@ -179,5 +183,36 @@ public class RaftEngineLeaderAddressTest {
             Assert.assertTrue(e.getCause() instanceof IllegalStateException);
             Assert.assertEquals("Leader is not ready", e.getCause().getMessage());
         }
+    }
+
+    @Test(timeout = 10000)
+    public void testGetMembersMarksUnresponsivePeerOffline() throws Exception {
+        PeerId hanging = new PeerId("10.0.0.2", 8610);
+        PeerId alive = new PeerId(LEADER_IP, 8610);
+        List<PeerId> peers = new ArrayList<>();
+        peers.add(hanging);
+        peers.add(alive);
+        when(mockNode.listPeers()).thenReturn(peers);
+        when(mockNode.listLearners()).thenReturn(Collections.emptyList());
+        when(mockNode.getLeaderId()).thenReturn(alive);
+
+        RaftRpcProcessor.GetMemberResponse response = new RaftRpcProcessor.GetMemberResponse();
+        response.setRaftAddress(LEADER_IP + ":8610");
+        response.setGrpcAddress(LEADER_GRPC_ADDRESS);
+        response.setDatePath("./pd_data");
+        response.setRestAddress(LEADER_IP + ":8620");
+        // A peer that never answers must not block the whole member listing
+        when(mockRpcClient.getGrpcAddress(hanging.getEndpoint().toString()))
+                .thenReturn(new CompletableFuture<>());
+        when(mockRpcClient.getGrpcAddress(alive.getEndpoint().toString()))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        List<Metapb.Member> members = RaftEngine.getInstance().getMembers();
+        Assert.assertEquals(2, members.size());
+        Assert.assertEquals(Metapb.StoreState.Offline, members.get(0).getState());
+        Assert.assertEquals("10.0.0.2:8610", members.get(0).getRaftUrl());
+        Assert.assertEquals(Metapb.StoreState.Up, members.get(1).getState());
+        Assert.assertEquals(Metapb.ShardRole.Leader, members.get(1).getRole());
+        Assert.assertEquals(LEADER_GRPC_ADDRESS, members.get(1).getGrpcUrl());
     }
 }

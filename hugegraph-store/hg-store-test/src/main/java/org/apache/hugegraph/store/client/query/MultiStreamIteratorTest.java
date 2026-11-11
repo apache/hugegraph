@@ -20,15 +20,20 @@ package org.apache.hugegraph.store.client.query;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hugegraph.store.HgKvIterator;
+import org.apache.hugegraph.store.query.func.AggregationFunctionParam;
+import org.apache.hugegraph.structure.KvElement;
 import org.junit.Test;
 
 public class MultiStreamIteratorTest {
@@ -74,5 +79,53 @@ public class MultiStreamIteratorTest {
         verify(second).close();
         verify(third).close();
         assertFalse(composite.hasNext());
+    }
+
+    @Test
+    public void testFinalAggregationHasNextIsIdempotent() {
+        List<KvElement> rows = List.of(countRow("a"), countRow("a"), countRow("b"),
+                                       countRow("c"));
+        StreamFinalAggregationIterator<KvElement> iterator =
+                new StreamFinalAggregationIterator<>(new RowIterator(rows),
+                                                     List.of(AggregationFunctionParam.ofCount()));
+        // A second probe must not overwrite the pending group with the next one.
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.hasNext());
+        assertGroup(iterator.next(), "a", 2L);
+        assertTrue(iterator.hasNext());
+        assertGroup(iterator.next(), "b", 1L);
+        assertTrue(iterator.hasNext());
+        assertTrue(iterator.hasNext());
+        assertGroup(iterator.next(), "c", 1L);
+        assertFalse(iterator.hasNext());
+        assertFalse(iterator.hasNext());
+    }
+
+    private static KvElement countRow(String key) {
+        return KvElement.of(List.of(key), List.of(new AtomicLong(1)));
+    }
+
+    private static void assertGroup(KvElement group, String key, long count) {
+        assertEquals(List.of(key), group.getKeys());
+        assertEquals(List.of(count), group.getValues());
+    }
+
+    private static class RowIterator implements HgKvIterator<KvElement> {
+
+        private final Iterator<KvElement> rows;
+
+        private RowIterator(List<KvElement> rows) {
+            this.rows = rows.iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            return this.rows.hasNext();
+        }
+
+        @Override
+        public KvElement next() {
+            return this.rows.next();
+        }
     }
 }

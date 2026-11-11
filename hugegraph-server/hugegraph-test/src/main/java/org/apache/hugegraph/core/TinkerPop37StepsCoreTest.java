@@ -523,16 +523,16 @@ public class TinkerPop37StepsCoreTest extends BaseCoreTest {
                                                   HugeCountStrategy.class);
             }
             GraphTraversal<Vertex, Vertex> traversal = source.V();
-            if (key instanceof T) {
-                traversal = traversal.has((T) key, predicate.clone());
+            if (key instanceof T token) {
+                traversal = traversal.has(token, predicate.clone());
             } else {
                 traversal = traversal.has((String) key, predicate.clone());
             }
             Assert.assertEquals(Arrays.asList(expected),
                                 traversal.values("name").order().toList());
             GraphTraversal<Vertex, Vertex> counted = source.V();
-            if (key instanceof T) {
-                counted = counted.has((T) key, predicate.clone());
+            if (key instanceof T token) {
+                counted = counted.has(token, predicate.clone());
             } else {
                 counted = counted.has((String) key, predicate.clone());
             }

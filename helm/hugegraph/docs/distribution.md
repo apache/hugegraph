@@ -48,19 +48,19 @@ helm install hugegraph ./hugegraph-helm -n hugegraph \
 ```
 
 Development packages append a workflow run number to the source chart version,
-for example `0.2.0-dev.123`. They may use `latest` service images. Helm OCI tags
+for example `0.4.0-dev.123`. They may use `latest` service images. Helm OCI tags
 come from the chart's SemVer version; `helm-dev` and `latest` are not Chart versions.
 
 Formal packages use the exact `Chart.version` maintained in source, for example
-`0.2.0`. They are published only after the corresponding HugeGraph service release
+`0.4.0`. They are published only after the corresponding HugeGraph service release
 exists and the chart selects published fixed component images. A source tag
 such as `helm-1.8.0` therefore denotes an already released service, not an
 advance preview. Chart fixes may be released independently from a reviewed master
 commit after the service release; chart and service version numbers need not match.
 
-The manual workflow in [hugegraph/actions](https://github.com/hugegraph/actions)
-resolves its selected source ref to a fixed commit, validates and packages the
-chart, and installs that exact `.tgz` for its Kubernetes checks before publishing.
+The chart publishing workflow resolves its selected source ref to a fixed commit,
+validates and packages the chart, and installs that exact `.tgz` for its
+Kubernetes checks before publishing.
 Turning off `publish` runs validation without uploading to a registry.
 
 ## Install and mirror a chart offline
@@ -138,3 +138,12 @@ default Store wait container and Helm test hook reuse component images. Explicit
 shown in the [private registry example](../examples/values-internal-registry.yaml).
 The mirror must preserve the selected image references and support the cluster's
 CPU architecture.
+
+SeaTunnel and Vermeer are disabled by default in every HugeGraph preset. When
+enabling either, also transfer its configured `apache/seatunnel` or
+`hugegraph/vermeer` image. Vermeer Master, Worker and token initialization use
+the same Vermeer image, which defaults to `hugegraph/vermeer:latest`. Mirror the
+selected image and required platforms; pin a compatible tag or digest for a
+reproducible deployment. See [image compatibility](vermeer.md#image-compatibility)
+for required capabilities. Hubble needs its native Vermeer adapter when
+selecting a custom build.

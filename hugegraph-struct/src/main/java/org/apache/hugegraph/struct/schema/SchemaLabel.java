@@ -175,13 +175,13 @@ public abstract class SchemaLabel extends SchemaElement
         E.checkNotNull(graph, "graph");
         E.checkNotNull(type, "type");
         E.checkNotNull(label, "label");
-        if (label instanceof Number) {
-            return IdGenerator.of(((Number) label).longValue());
-        } else if (label instanceof String) {
+        if (label instanceof Number number) {
+            return IdGenerator.of(number.longValue());
+        } else if (label instanceof String name) {
             if (type.isVertex()) {
-                return graph.vertexLabel((String) label).id();
+                return graph.vertexLabel(name).id();
             } else if (type.isEdge()) {
-                return graph.edgeLabel((String) label).id();
+                return graph.edgeLabel(name).id();
             } else {
                 throw new HugeException(
                         "Not support query from '%s' with label '%s'",

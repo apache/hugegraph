@@ -130,8 +130,8 @@ public class QueryExecutor {
                     return 0;
                 }
                 if (o1 != null && o2 != null) {
-                    if (o1 instanceof KvElement && o2 instanceof KvElement) {
-                        return ((KvElement) o1).compareTo((KvElement) o2);
+                    if (o1 instanceof KvElement first && o2 instanceof KvElement second) {
+                        return first.compareTo(second);
                     }
                     if (!(o1 instanceof KvElement)) {
                         throw new IllegalStateException(

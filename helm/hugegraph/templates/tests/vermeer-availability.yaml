@@ -1,0 +1,91 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{ include "hugegraph.resolveValues" . }}
+{{- if (.Values.vermeer | default dict).enabled }}
+# Keep one main container per test Pod: Helm's --logs does not select a container.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "hugegraph.server.name" . | trunc 50 | trimSuffix "-" }}-vermeer-test"
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  initContainers:
+    {{- include "hugegraph.vermeer.tokenInit" (dict "root" . "uid" "100" "gid" "101" "resources" .Values.server.testResources) | nindent 4 }}
+  containers:
+    - name: vermeer
+      image: {{ .Values.server.waitImage | quote }}
+      {{- if .Values.server.__waitImageInherited }}
+      imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+      {{- end }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 100
+      {{- with .Values.server.testResources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          URL="http://{{ include "hugegraph.vermeer.masterName" . }}:{{ .Values.vermeer.master.httpPort }}/api/v1/workers/availability"
+          TOKEN=$(cat /var/run/hugegraph/vermeer/token)
+          START=$(date +%s)
+          DEADLINE_S="${HG_TEST_DEADLINE_S:-150}"
+          while :; do
+            # Scope readiness to the same service credential Hubble uses.
+            # A globally registered Worker may belong to another space.
+            if OUT=$(printf 'header = "Authorization: Bearer %s"\n' "${TOKEN}" |
+                curl --config - -fsS --connect-timeout 3 --max-time 20 "${URL}") &&
+                printf '%s' "${OUT}" | grep -Eq '"available"[[:space:]]*:[[:space:]]*true'; then
+              echo 'helm test: Vermeer service token and allocated Worker availability OK'
+              exit 0
+            fi
+            if [ $(( $(date +%s) - START )) -ge "${DEADLINE_S}" ]; then
+              echo 'helm test: Vermeer unavailable for the Hubble service space; inspect Worker allocation and authentication' >&2
+              exit 1
+            fi
+            sleep 5
+          done
+      volumeMounts:
+        - name: vermeer-token
+          mountPath: /var/run/hugegraph/vermeer
+          readOnly: true
+  volumes:
+    {{- include "hugegraph.vermeer.tokenVolumes" . | nindent 4 }}
+{{- end }}

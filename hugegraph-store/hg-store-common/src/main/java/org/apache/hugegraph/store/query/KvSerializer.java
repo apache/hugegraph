@@ -115,34 +115,21 @@ public class KvSerializer {
      */
     private static Object read(ByteBuffer buffer) {
         var b = buffer.get();
-        switch (b) {
-            case TYPE_INT:
-                return readInt(buffer);
-            case TYPE_AT_INT:
-                return new AtomicInteger(readInt(buffer));
-            case TYPE_LONG:
-                return readLong(buffer);
-            case TYPE_AT_LONG:
-                return new AtomicLong(readLong(buffer));
-            case TYPE_FLOAT:
-                return readFloat(buffer);
-            case TYPE_AT_FLOAT:
-                return new AtomicFloat(readFloat(buffer));
-            case TYPE_DOUBLE:
-                return readDouble(buffer);
-            case TYPE_AT_DOUBLE:
-                return new AtomicDouble(readDouble(buffer));
-            case TYPE_STRING:
-                return readString(buffer);
-            case TYPE_BIG_DECIMAL:
-                return readBigDecimal(buffer);
-            case TYPE_TUPLE2:
-                return readTuple2(buffer);
-            case TYPE_NULL:
-                return null;
-            default:
-                throw new RuntimeException("unsupported type " + b);
-        }
+        return switch (b) {
+            case TYPE_INT -> readInt(buffer);
+            case TYPE_AT_INT -> new AtomicInteger(readInt(buffer));
+            case TYPE_LONG -> readLong(buffer);
+            case TYPE_AT_LONG -> new AtomicLong(readLong(buffer));
+            case TYPE_FLOAT -> readFloat(buffer);
+            case TYPE_AT_FLOAT -> new AtomicFloat(readFloat(buffer));
+            case TYPE_DOUBLE -> readDouble(buffer);
+            case TYPE_AT_DOUBLE -> new AtomicDouble(readDouble(buffer));
+            case TYPE_STRING -> readString(buffer);
+            case TYPE_BIG_DECIMAL -> readBigDecimal(buffer);
+            case TYPE_TUPLE2 -> readTuple2(buffer);
+            case TYPE_NULL -> null;
+            default -> throw new RuntimeException("unsupported type " + b);
+        };
     }
 
     /**
@@ -167,60 +154,60 @@ public class KvSerializer {
             buffer = writeByte(buffer, TYPE_NULL);
             return buffer;
         }
-        if (o instanceof Integer) {
+        if (o instanceof Integer integer) {
             buffer = writeByte(buffer, TYPE_INT);
-            buffer = writeInt(buffer, (Integer) o);
+            buffer = writeInt(buffer, integer);
             return buffer;
         }
-        if (o instanceof Long) {
+        if (o instanceof Long longValue) {
             buffer = writeByte(buffer, TYPE_LONG);
-            buffer = writeLong(buffer, (Long) o);
+            buffer = writeLong(buffer, longValue);
             return buffer;
         }
-        if (o instanceof Float) {
+        if (o instanceof Float floatValue) {
             buffer = writeByte(buffer, TYPE_FLOAT);
-            buffer = writeFloat(buffer, (Float) o);
+            buffer = writeFloat(buffer, floatValue);
             return buffer;
         }
-        if (o instanceof Double) {
+        if (o instanceof Double doubleValue) {
             buffer = writeByte(buffer, TYPE_DOUBLE);
-            buffer = writeDouble(buffer, (Double) o);
+            buffer = writeDouble(buffer, doubleValue);
             return buffer;
         }
-        if (o instanceof BigDecimal) {
+        if (o instanceof BigDecimal decimal) {
             buffer = writeByte(buffer, TYPE_BIG_DECIMAL);
-            buffer = writeBigDecimal(buffer, (BigDecimal) o);
+            buffer = writeBigDecimal(buffer, decimal);
             return buffer;
         }
-        if (o instanceof String) {
+        if (o instanceof String string) {
             buffer = writeByte(buffer, TYPE_STRING);
-            buffer = writeString(buffer, (String) o);
+            buffer = writeString(buffer, string);
             return buffer;
         }
-        if (o instanceof AtomicInteger) {
+        if (o instanceof AtomicInteger integer) {
             buffer = writeByte(buffer, TYPE_AT_INT);
-            buffer = writeInt(buffer, ((AtomicInteger) o).get());
+            buffer = writeInt(buffer, integer.get());
             return buffer;
         }
-        if (o instanceof AtomicLong) {
+        if (o instanceof AtomicLong longValue) {
             buffer = writeByte(buffer, TYPE_AT_LONG);
-            buffer = writeLong(buffer, ((AtomicLong) o).get());
+            buffer = writeLong(buffer, longValue.get());
             return buffer;
         }
-        if (o instanceof AtomicFloat) {
+        if (o instanceof AtomicFloat floatValue) {
             buffer = writeByte(buffer, TYPE_AT_FLOAT);
-            buffer = writeFloat(buffer, ((AtomicFloat) o).get());
+            buffer = writeFloat(buffer, floatValue.get());
             return buffer;
         }
-        if (o instanceof AtomicDouble) {
+        if (o instanceof AtomicDouble doubleValue) {
             buffer = writeByte(buffer, TYPE_AT_DOUBLE);
-            buffer = writeDouble(buffer, ((AtomicDouble) o).get());
+            buffer = writeDouble(buffer, doubleValue.get());
             return buffer;
         }
-        if (o instanceof Tuple2) {
+        if (o instanceof Tuple2 tuple) {
             buffer = writeByte(buffer, TYPE_TUPLE2);
-            buffer = write(buffer, ((Tuple2) o).getV1());
-            buffer = write(buffer, ((Tuple2) o).getV2());
+            buffer = write(buffer, tuple.getV1());
+            buffer = write(buffer, tuple.getV2());
             return buffer;
         }
         throw new RuntimeException("unsupported type " + o.getClass().getName());

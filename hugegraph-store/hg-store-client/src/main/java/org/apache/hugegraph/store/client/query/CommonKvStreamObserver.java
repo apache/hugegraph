@@ -125,8 +125,8 @@ public class CommonKvStreamObserver<R, T> implements StreamObserver<R> {
             log.error("handling server data for query {}, got error: ", this.queryId, e);
             result = ResultState.ERROR;
             iterator = new ErrorMessageIterator<>(e.getMessage());
-            if (e instanceof Error) {
-                throw (Error) e;
+            if (e instanceof Error error) {
+                throw error;
             }
         } finally {
             synchronized (this.stateLock) {

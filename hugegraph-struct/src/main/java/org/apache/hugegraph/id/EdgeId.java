@@ -212,10 +212,9 @@ public class EdgeId implements Id {
 
     @Override
     public boolean equals(Object object) {
-        if (!(object instanceof EdgeId)) {
+        if (!(object instanceof EdgeId other)) {
             return false;
         }
-        EdgeId other = (EdgeId) object;
         if (this.directed) {
             return this.ownerVertexId.equals(other.ownerVertexId) &&
                    this.direction == other.direction &&

@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.business.itrv2;
 
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
@@ -35,6 +36,7 @@ public class MapLimitIterator<T> implements ScanIterator {
     private final ScanIterator iterator;
     private final Set<T> set;
     private T current = null;
+    private boolean closed;
 
     public MapLimitIterator(ScanIterator iterator) {
         this.iterator = iterator;
@@ -55,7 +57,13 @@ public class MapLimitIterator<T> implements ScanIterator {
      */
     @Override
     public boolean hasNext() {
-        current = null;
+        // keep the pending element; readBatchData probes hasNext() twice
+        if (this.closed) {
+            return false;
+        }
+        if (current != null) {
+            return true;
+        }
         while (iterator.hasNext()) {
             var tmp = (T) iterator.next();
             if (tmp != null && !set.contains(tmp)) {
@@ -80,7 +88,12 @@ public class MapLimitIterator<T> implements ScanIterator {
      */
     @Override
     public <T1> T1 next() {
-        return (T1) current;
+        if (!hasNext()) {
+            throw new NoSuchElementException();
+        }
+        T1 result = (T1) current;
+        current = null;
+        return result;
     }
 
     /**
@@ -90,7 +103,7 @@ public class MapLimitIterator<T> implements ScanIterator {
      */
     @Override
     public boolean isValid() {
-        return iterator.isValid();
+        return !this.closed && iterator.isValid();
     }
 
     /**
@@ -129,7 +142,12 @@ public class MapLimitIterator<T> implements ScanIterator {
      */
     @Override
     public void close() {
-        iterator.close();
-        this.set.clear();
+        this.closed = true;
+        this.current = null;
+        try {
+            iterator.close();
+        } finally {
+            this.set.clear();
+        }
     }
 }

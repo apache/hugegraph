@@ -52,56 +52,43 @@ public abstract class IdGenerator {
     }
 
     public static Id of(Object id) {
-        if (id instanceof Id) {
-            return (Id) id;
-        } else if (id instanceof String) {
-            return of((String) id);
-        } else if (id instanceof Number) {
-            return of(((Number) id).longValue());
-        } else if (id instanceof UUID) {
-            return of((UUID) id);
+        if (id instanceof Id value) {
+            return value;
+        } else if (id instanceof String string) {
+            return of(string);
+        } else if (id instanceof Number number) {
+            return of(number.longValue());
+        } else if (id instanceof UUID uuid) {
+            return of(uuid);
         }
         return new ObjectId(id);
     }
 
     public static Id of(byte[] bytes, IdType type) {
-        switch (type) {
-            case LONG:
-                return new LongId(bytes);
-            case UUID:
-                return new UuidId(bytes);
-            case STRING:
-                return new StringId(bytes);
-            default:
-                throw new AssertionError("Invalid id type " + type);
-        }
+        return switch (type) {
+            case LONG -> new LongId(bytes);
+            case UUID -> new UuidId(bytes);
+            case STRING -> new StringId(bytes);
+            default -> throw new AssertionError("Invalid id type " + type);
+        };
     }
 
     public static Id ofStoredString(String id, IdType type) {
-        switch (type) {
-            case LONG:
-                return of(LongEncoding.decodeSignedB64(id));
-            case UUID:
-                byte[] bytes = StringEncoding.decodeBase64(id);
-                return of(bytes, IdType.UUID);
-            case STRING:
-                return of(id);
-            default:
-                throw new AssertionError("Invalid id type " + type);
-        }
+        return switch (type) {
+            case LONG -> of(LongEncoding.decodeSignedB64(id));
+            case UUID -> of(StringEncoding.decodeBase64(id), IdType.UUID);
+            case STRING -> of(id);
+            default -> throw new AssertionError("Invalid id type " + type);
+        };
     }
 
     public static String asStoredString(Id id) {
-        switch (id.type()) {
-            case LONG:
-                return LongEncoding.encodeSignedB64(id.asLong());
-            case UUID:
-                return StringEncoding.encodeBase64(id.asBytes());
-            case STRING:
-                return id.asString();
-            default:
-                throw new AssertionError("Invalid id type " + id.type());
-        }
+        return switch (id.type()) {
+            case LONG -> LongEncoding.encodeSignedB64(id.asLong());
+            case UUID -> StringEncoding.encodeBase64(id.asBytes());
+            case STRING -> id.asString();
+            default -> throw new AssertionError("Invalid id type " + id.type());
+        };
     }
 
     public static IdType idType(Id id) {
@@ -199,10 +186,9 @@ public abstract class IdGenerator {
 
         @Override
         public boolean equals(Object obj) {
-            if (!(obj instanceof StringId)) {
+            if (!(obj instanceof StringId other)) {
                 return false;
             }
-            StringId other = (StringId) obj;
             if (this.id != null) {
                 return this.id.equals(other.asString());
             } else if (other.bytes == null) {
@@ -280,10 +266,10 @@ public abstract class IdGenerator {
 
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof Number)) {
+            if (!(other instanceof Number number)) {
                 return false;
             }
-            return this.id == ((Number) other).longValue();
+            return this.id == number.longValue();
         }
 
         @Override
@@ -387,10 +373,10 @@ public abstract class IdGenerator {
 
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof UuidId)) {
+            if (!(other instanceof UuidId id)) {
                 return false;
             }
-            return this.uuid.equals(((UuidId) other).uuid);
+            return this.uuid.equals(id.uuid);
         }
 
         @Override
@@ -453,10 +439,10 @@ public abstract class IdGenerator {
 
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof ObjectId)) {
+            if (!(other instanceof ObjectId id)) {
                 return false;
             }
-            return Objects.equals(this.object, ((ObjectId) other).object);
+            return Objects.equals(this.object, id.object);
         }
 
         @Override

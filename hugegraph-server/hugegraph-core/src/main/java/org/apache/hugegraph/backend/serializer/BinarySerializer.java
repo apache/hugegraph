@@ -780,8 +780,8 @@ public class BinarySerializer extends AbstractSerializer {
 
     private BinaryId writeEdgeId(Id id) {
         EdgeId edgeId;
-        if (id instanceof EdgeId) {
-            edgeId = (EdgeId) id;
+        if (id instanceof EdgeId matchedEdgeId) {
+            edgeId = matchedEdgeId;
         } else {
             edgeId = EdgeId.parse(id.asString());
         }

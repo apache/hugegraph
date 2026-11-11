@@ -18,8 +18,10 @@
 package org.apache.hugegraph.pd.common;
 
 import org.apache.hugegraph.pd.common.MetadataKeyHelperTest;
+import org.apache.hugegraph.pd.model.PartitionTest;
 import org.apache.hugegraph.pd.service.IdServiceTest;
 import org.apache.hugegraph.pd.service.KvServiceTest;
+import org.apache.hugegraph.pd.util.DateUtilTest;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -34,7 +36,9 @@ import lombok.extern.slf4j.Slf4j;
         KvServiceTest.class,
         HgAssertTest.class,
         KVPairTest.class,
-        IdServiceTest.class
+        IdServiceTest.class,
+        PartitionTest.class,
+        DateUtilTest.class
 })
 @Slf4j
 public class CommonSuiteTest {

@@ -122,6 +122,7 @@ public final class ApiVersion {
      * [0.70] PR-2242: Add edge-existence RESTful API
      * [0.71] PR-2286: Support Arthas API & Metric API prometheus format
      * [0.72] PR-3159: Support GraphSpace-wide default-role management APIs
+     * [0.73] Support same-GraphSpace schema-only graph cloning
      */
 
     /**

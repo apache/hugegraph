@@ -27,6 +27,7 @@ public class MapValueFilterIterator<K> implements Iterator<K> {
     Iterator<Map.Entry<K, Integer>> mapIterator;
     private final IntPredicate filter;
     private K value;
+    private boolean ready;
 
     public MapValueFilterIterator(Map<K, Integer> map, IntPredicate filter) {
         this.mapIterator = map.entrySet().iterator();
@@ -35,10 +36,14 @@ public class MapValueFilterIterator<K> implements Iterator<K> {
 
     @Override
     public boolean hasNext() {
+        if (this.ready) {
+            return true;
+        }
         while (mapIterator.hasNext()) {
             Map.Entry<K, Integer> entry = mapIterator.next();
             if (filter.test(entry.getValue())) {
                 value = entry.getKey();
+                this.ready = true;
                 return true;
             }
         }
@@ -48,10 +53,12 @@ public class MapValueFilterIterator<K> implements Iterator<K> {
 
     @Override
     public K next() {
-        if (value == null) {
+        if (!hasNext()) {
             throw new NoSuchElementException();
         }
-
-        return value;
+        K result = this.value;
+        this.value = null;
+        this.ready = false;
+        return result;
     }
 }

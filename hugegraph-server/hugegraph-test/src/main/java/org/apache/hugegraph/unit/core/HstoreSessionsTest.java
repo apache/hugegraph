@@ -29,6 +29,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.pd.client.PDClient;
+import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.hstore.HstoreSessions;
@@ -76,6 +79,32 @@ public class HstoreSessionsTest {
             }
             Assert.assertTrue(pool.closed());
             Mockito.verify(provider, Mockito.times(2)).createSession(Mockito.anyString(), Mockito.isNull());
+        } finally {
+            Whitebox.setInternalState(HstoreSessionsImpl.class, "hgStoreClient", previous);
+            Whitebox.setInternalState(HstoreSessionsImpl.class, "initializedNode", initialized);
+        }
+    }
+
+    @Test
+    public void testClearReportsPdDeletionFailureAndCanRetry() throws Exception {
+        Boolean initialized = Whitebox.getInternalState(HstoreSessionsImpl.class, "initializedNode");
+        HgStoreClient previous = Whitebox.getInternalState(HstoreSessionsImpl.class, "hgStoreClient");
+        HgStoreClient client = Mockito.mock(HgStoreClient.class);
+        HgStoreSession storeSession = Mockito.mock(HgStoreSession.class);
+        PDClient pd = Mockito.mock(PDClient.class);
+        Mockito.when(client.openSession(Mockito.anyString())).thenReturn(storeSession);
+        Mockito.when(client.getPdClient()).thenReturn(pd);
+        PDException failure = new PDException(1003, "PD delete failed");
+        Mockito.doThrow(failure).doReturn(null).when(pd).delGraph("shop/g");
+        Whitebox.setInternalState(HstoreSessionsImpl.class, "initializedNode", Boolean.TRUE);
+        Whitebox.setInternalState(HstoreSessionsImpl.class, "hgStoreClient", client);
+        try {
+            HstoreSessionsImpl pool = new HstoreSessionsImpl(FakeObjects.newConfig(), "shop", "g");
+            BackendException error = Assert.assertThrows(BackendException.class, pool::clear);
+            Assert.assertSame(failure, error.getCause());
+            pool.clear();
+            Mockito.verify(pd, Mockito.times(2)).delGraph("shop/g");
+            Mockito.verify(storeSession, Mockito.times(2)).deleteGraph("shop/g");
         } finally {
             Whitebox.setInternalState(HstoreSessionsImpl.class, "hgStoreClient", previous);
             Whitebox.setInternalState(HstoreSessionsImpl.class, "initializedNode", initialized);

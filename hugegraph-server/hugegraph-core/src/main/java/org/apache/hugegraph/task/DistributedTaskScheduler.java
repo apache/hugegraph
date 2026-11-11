@@ -306,8 +306,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         callable.task(task);
         callable.graph(this.graph());
 
-        if (callable instanceof TaskCallable.SysTaskCallable) {
-            ((TaskCallable.SysTaskCallable<?>) callable).params(this.graph);
+        if (callable instanceof TaskCallable.SysTaskCallable<?> sysTaskCallable) {
+            sysTaskCallable.params(this.graph);
         }
     }
 
@@ -694,8 +694,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                             }
                         }
                     }
-                    if (workerFailure instanceof Error) {
-                        throw (Error) workerFailure;
+                    if (workerFailure instanceof Error matchedError) {
+                        throw matchedError;
                     }
                     if (workerFailure != null) {
                         throw (RuntimeException) workerFailure;

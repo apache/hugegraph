@@ -624,6 +624,9 @@ public final class PerfUtil {
         }
 
         public V get(Object key) {
+            if (key == null) {
+                return this.hashMap.get(null);
+            }
             if (key == this.key1) {
                 return this.val1;
             } else if (key == this.key2) {
@@ -636,7 +639,17 @@ public final class PerfUtil {
         }
 
         public V put(K key, V value) {
-            if (this.key1 == null) {
+            if (key == null) {
+                return this.hashMap.put(null, value);
+            }
+            // Update the slot already holding this key before taking a free one
+            if (this.key1 != null && (key == this.key1 || key.equals(this.key1))) {
+                this.val1 = value;
+            } else if (this.key2 != null && (key == this.key2 || key.equals(this.key2))) {
+                this.val2 = value;
+            } else if (this.key3 != null && (key == this.key3 || key.equals(this.key3))) {
+                this.val3 = value;
+            } else if (this.key1 == null) {
                 this.key1 = key;
                 this.val1 = value;
             } else if (this.key2 == null) {
@@ -651,13 +664,16 @@ public final class PerfUtil {
         }
 
         public V remove(Object key) {
-            if (key == this.key1) {
+            if (key == null) {
+                return this.hashMap.remove(null);
+            }
+            if (this.key1 != null && (key == this.key1 || key.equals(this.key1))) {
                 this.key1 = null;
                 this.val1 = null;
-            } else if (key == this.key2) {
+            } else if (this.key2 != null && (key == this.key2 || key.equals(this.key2))) {
                 this.key2 = null;
                 this.val2 = null;
-            } else if (key == this.key3) {
+            } else if (this.key3 != null && (key == this.key3 || key.equals(this.key3))) {
                 this.key3 = null;
                 this.val3 = null;
             }

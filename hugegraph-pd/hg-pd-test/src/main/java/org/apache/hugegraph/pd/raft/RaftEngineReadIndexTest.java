@@ -40,6 +40,7 @@ import com.alipay.sofa.jraft.closure.ReadIndexClosure;
 import com.alipay.sofa.jraft.error.RaftError;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -70,6 +71,17 @@ public class RaftEngineReadIndexTest {
     public void setUp() {
         RaftEngine engine = RaftEngine.getInstance();
         this.originalRaftNode = engine.getRaftNode();
+        RaftStateMachine machine = Whitebox.getInternalState(engine, "stateMachine");
+        this.leaderTerm = Whitebox.getInternalState(machine, "leaderTerm");
+        this.originalLeaderTerm = this.leaderTerm.get();
+        // The engine's alive-peers refresher calls listAlivePeers() on whatever node
+        // the singleton holds whenever this machine reports a leader, and a call from
+        // that thread while a stubbing runs here is what Mockito reports as an
+        // unfinished stubbing. Keep the machine not-leader while the mock is
+        // installed: the refresher then leaves the mock alone, and the tests below
+        // announce a term only once every stubbing has completed.
+        this.leaderTerm.set(-1L);
+
         this.mockNode = mock(Node.class);
         doAnswer(invocation -> {
             ReadIndexClosure closure = invocation.getArgument(1);
@@ -87,9 +99,6 @@ public class RaftEngineReadIndexTest {
         PDConfig.Raft config = new PDConfig().new Raft();
         config.setRpcTimeout(1000);
         Whitebox.setInternalState(engine, "config", config);
-        RaftStateMachine machine = Whitebox.getInternalState(engine, "stateMachine");
-        this.leaderTerm = Whitebox.getInternalState(machine, "leaderTerm");
-        this.originalLeaderTerm = this.leaderTerm.get();
     }
 
     @After
@@ -206,8 +215,9 @@ public class RaftEngineReadIndexTest {
     @Test
     public void testReadIndexInTermKeepsTheTermTakenBeforeTheWait() throws PDException {
         // The node loses the leadership of term 5 and wins term 7 during the wait. The
-        // caller must get 5: its write is then rejected, as the wait began in another term
-        this.leaderTerm.set(5L);
+        // caller must get 5: its write is then rejected, as the wait began in another
+        // term. Stub before announcing term 5: the refresher leaves the mock alone
+        // only while the machine reports no leader
         doAnswer(invocation -> {
             this.leaderTerm.set(7L);
             ReadIndexClosure closure = invocation.getArgument(1);
@@ -215,6 +225,7 @@ public class RaftEngineReadIndexTest {
             closure.run(Status.OK());
             return null;
         }).when(this.mockNode).readIndex(any(byte[].class), any(ReadIndexClosure.class));
+        this.leaderTerm.set(5L);
 
         Assert.assertEquals(5L, RaftEngine.getInstance().waitReadIndexInTerm());
     }
@@ -391,5 +402,19 @@ public class RaftEngineReadIndexTest {
         });
 
         Assert.assertEquals(Pdpb.ErrorType.NOT_LEADER_VALUE, e.getErrorCode());
+    }
+
+    @Test
+    public void testNoLeakedTaskPollerTouchesTheNodeMock() throws InterruptedException {
+        // A suite class that fails to stop its TaskScheduleService leaves a pool
+        // that polls RaftEngine.isLeader() every second, and a call from that
+        // thread while another test stubs this mock surfaces as Mockito's
+        // unfinished stubbing. No such call may reach the mock here.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            verify(this.mockNode, never()).isLeader(anyBoolean());
+            Thread.sleep(20);
+        }
+        verify(this.mockNode, never()).isLeader(anyBoolean());
     }
 }

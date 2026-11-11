@@ -260,10 +260,9 @@ public class MemoryConsumerTest extends MemoryManageTest {
 
         @Override
         public boolean equals(Object obj) {
-            if (!(obj instanceof TestObject)) {
+            if (!(obj instanceof TestObject other)) {
                 return false;
             }
-            TestObject other = (TestObject) obj;
             return this.x == other.x && this.y.equals(other.y);
         }
     }

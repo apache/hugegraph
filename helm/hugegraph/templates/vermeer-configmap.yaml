@@ -1,0 +1,51 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{ include "hugegraph.resolveValues" . }}
+{{- if .Values.vermeer.enabled }}
+{{- include "hugegraph.validateValues" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hugegraph.vermeer.configName" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vermeer-master
+data:
+  master.ini: |
+    [default]
+    run_mode=master
+    log_level=info
+    debug_mode=release
+    http_peer=0.0.0.0:{{ .Values.vermeer.master.httpPort }}
+    grpc_peer={{ ternary "127.0.0.1" "0.0.0.0" (eq .Values.vermeer.mode "standalone") }}:{{ .Values.vermeer.master.grpcPort }}
+    master_peer=127.0.0.1:{{ .Values.vermeer.master.grpcPort }}
+    auth=token
+    task_strategy=1
+    task_parallel_num=1
+    start_chan_size=10
+    ticker_interval=1
+  worker.ini: |
+    [default]
+    run_mode=worker
+    log_level=info
+    debug_mode=release
+    http_peer=0.0.0.0:{{ .Values.vermeer.worker.httpPort }}
+    master_peer={{ if eq .Values.vermeer.mode "standalone" }}127.0.0.1{{ else }}{{ include "hugegraph.vermeer.masterName" . }}-internal.{{ .Release.Namespace }}.svc{{ end }}:{{ .Values.vermeer.master.grpcPort }}
+    worker_group=$
+    auth=none
+{{- end }}

@@ -306,8 +306,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         assert aggregate.func() == AggregateFunc.COUNT;
         assert query.noLimit();
         Iterator<BackendColumn> results = this.queryBy(session, query);
-        if (results instanceof Countable) {
-            return ((Countable) results).count();
+        if (results instanceof Countable countable) {
+            return countable.count();
         }
         return IteratorUtils.count(results);
     }
@@ -413,14 +413,12 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
 
         // Query by prefix
-        if (query instanceof IdPrefixQuery) {
-            IdPrefixQuery pq = (IdPrefixQuery) query;
+        if (query instanceof IdPrefixQuery pq) {
             return this.queryByPrefix(session, pq);
         }
 
         // Query by range
-        if (query instanceof IdRangeQuery) {
-            IdRangeQuery rq = (IdRangeQuery) query;
+        if (query instanceof IdRangeQuery rq) {
             return this.queryByRange(session, rq);
         }
 
@@ -453,8 +451,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             byte[] ownerKey = this.getOwnerScanDelegate().get();
             int scanType = Session.SCAN_ANY |
                            (query.withProperties() ? 0 : Session.SCAN_KEY_ONLY);
-            byte[] queryBytes = query instanceof ConditionQuery ?
-                                ((ConditionQuery) query).bytes() : null;
+            byte[] queryBytes = query instanceof ConditionQuery conditionQuery ?
+                                conditionQuery.bytes() : null;
             // LOG.debug("query {} with ownerKeyFrom: {}, ownerKeyTo: {}, " +
             //          "keyFrom: null, keyTo: null, scanType: {}, " +
             //          "conditionQuery: {}, position: {}",
@@ -466,8 +464,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
                                 page.position());
         }
         return session.scan(this.table(),
-                            query instanceof ConditionQuery ?
-                            ((ConditionQuery) query).bytes() : null);
+                            query instanceof ConditionQuery conditionQuery ?
+                            conditionQuery.bytes() : null);
     }
 
     protected BackendColumnIterator queryById(Session session, Id id) {

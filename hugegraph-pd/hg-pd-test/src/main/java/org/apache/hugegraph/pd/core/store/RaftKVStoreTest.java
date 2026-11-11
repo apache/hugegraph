@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.core.store;
 
+import java.lang.reflect.Constructor;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
@@ -131,9 +132,9 @@ public class RaftKVStoreTest {
     }
 
     @Test
-    public void testWriteOnNonLeaderIsRejectedAndNotApplied() throws PDException {
+    public void testWriteOnNonLeaderIsRejectedAndNotApplied() throws Exception {
         // A RaftEngine that has not joined a group is never leader
-        RaftKVStore notLeader = new RaftKVStore(new RaftEngine(), this.store);
+        RaftKVStore notLeader = new RaftKVStore(newEngine(), this.store);
 
         PDException e = Assert.assertThrows(PDException.class, () -> notLeader.put(KEY, VALUE));
 
@@ -235,5 +236,11 @@ public class RaftKVStoreTest {
         Assert.assertEquals(Pdpb.ErrorType.UNKNOWN_VALUE, e.getErrorCode());
         Assert.assertTrue(e.getMessage(),
                           e.getMessage().contains("Error code = " + Pdpb.ErrorType.UNKNOWN_VALUE));
+    }
+
+    private static RaftEngine newEngine() throws Exception {
+        Constructor<RaftEngine> constructor = RaftEngine.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
     }
 }

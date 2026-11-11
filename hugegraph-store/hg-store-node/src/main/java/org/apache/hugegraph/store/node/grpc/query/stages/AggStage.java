@@ -94,8 +94,7 @@ public class AggStage implements QueryStage {
             for (int i = 0; i < functionSize; i++) {
                 var function = maps.get(kv.getKeys()).get(i);
                 Object value = kv.getValues().get(i);
-                if (function instanceof AggregationFunctions.AvgFunction) {
-                    var avgFunction = (AggregationFunctions.AvgFunction) function;
+                if (function instanceof AggregationFunctions.AvgFunction avgFunction) {
                     value = transValue(avgFunction.getFiledClassType(), value);
                 }
                 function.iterate(value);

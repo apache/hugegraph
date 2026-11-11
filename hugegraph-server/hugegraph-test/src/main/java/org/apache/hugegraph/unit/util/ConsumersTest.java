@@ -18,14 +18,18 @@
 package org.apache.hugegraph.unit.util;
 
 import java.util.Arrays;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.util.Consumers;
 import org.junit.Test;
@@ -172,8 +176,8 @@ public class ConsumersTest {
                     Thread.currentThread().interrupt();
                     throw new AssertionError(e);
                 }
-                if (terminalFailure instanceof Error) {
-                    throw (Error) terminalFailure;
+                if (terminalFailure instanceof Error matchedError) {
+                    throw matchedError;
                 } else if (terminalFailure != null) {
                     throw (RuntimeException) terminalFailure;
                 }
@@ -365,6 +369,169 @@ public class ConsumersTest {
             worker.shutdownNow();
             Assert.assertTrue(worker.awaitTermination(5L, TimeUnit.SECONDS));
         }
+    }
+
+    @Test(timeout = 15000)
+    public void testAwaitPreservesCallerInterruptAndCancelsWorker() throws Throwable {
+        this.checkAwaitInterrupt(false);
+    }
+
+    @Test(timeout = 15000)
+    public void testAwaitInterruptedWhileQueueingEndCancelsWorker() throws Throwable {
+        this.checkAwaitInterrupt(true);
+    }
+
+    private void checkAwaitInterrupt(boolean fullQueue) throws Throwable {
+        ExecutorService worker = Executors.newFixedThreadPool(1);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicBoolean workerInterrupted = new AtomicBoolean();
+        AtomicBoolean callerInterrupted = new AtomicBoolean();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Consumers<Integer> consumers = new Consumers<>(worker, value -> {
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                workerInterrupted.set(true);
+                Thread.currentThread().interrupt();
+            }
+        }, completed::countDown, 1);
+        Thread caller = new Thread(() -> {
+            try {
+                consumers.await();
+            } catch (Throwable e) {
+                failure.set(e);
+                callerInterrupted.set(Thread.currentThread().isInterrupted());
+            }
+        }, "consumer-await-interrupt-test");
+        try {
+            consumers.start("await-interrupt");
+            consumers.provide(1);
+            Assert.assertTrue(entered.await(5L, TimeUnit.SECONDS));
+            if (fullQueue) {
+                consumers.provide(2);
+                consumers.provide(3);
+            }
+            caller.start();
+            // Keep the worker blocked until the caller reaches the selected await phase.
+            awaitCall(caller, fullQueue ? ArrayBlockingQueue.class : CountDownLatch.class,
+                      fullQueue ? "offer" : "await");
+            caller.interrupt();
+            caller.join(5000L);
+            Assert.assertFalse(caller.isAlive());
+            Assert.assertTrue(failure.get() instanceof HugeException);
+            Assert.assertTrue(failure.get().getCause() instanceof InterruptedException);
+            Assert.assertTrue(callerInterrupted.get());
+            Assert.assertTrue(completed.await(5L, TimeUnit.SECONDS));
+            Assert.assertTrue(workerInterrupted.get());
+            worker.shutdown();
+            Assert.assertTrue(worker.awaitTermination(5L, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            caller.interrupt();
+            caller.join(5000L);
+            worker.shutdownNow();
+            Assert.assertTrue(worker.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test(timeout = 15000)
+    public void testInterruptedProducerReportsUnacceptedInputAndCancelsOnAwait() throws Throwable {
+        ExecutorService worker = Executors.newFixedThreadPool(1);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicInteger processed = new AtomicInteger();
+        AtomicBoolean producerInterrupted = new AtomicBoolean();
+        AtomicReference<Throwable> provideFailure = new AtomicReference<>();
+        AtomicReference<Throwable> awaitFailure = new AtomicReference<>();
+        Consumers<Integer> consumers = new Consumers<>(worker, value -> {
+            processed.incrementAndGet();
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, completed::countDown, 1);
+        Thread producer = new Thread(() -> {
+            try {
+                consumers.provide(4);
+            } catch (Throwable e) {
+                provideFailure.set(e);
+                producerInterrupted.set(Thread.currentThread().isInterrupted());
+            } finally {
+                try {
+                    consumers.await();
+                } catch (Throwable e) {
+                    awaitFailure.set(e);
+                }
+            }
+        }, "consumer-provide-interrupt-test");
+        try {
+            consumers.start("provide-interrupt");
+            consumers.provide(1);
+            Assert.assertTrue(entered.await(5L, TimeUnit.SECONDS));
+            consumers.provide(2);
+            consumers.provide(3);
+            producer.start();
+            awaitCall(producer, ArrayBlockingQueue.class, "offer");
+            producer.interrupt();
+            producer.join(5000L);
+            Assert.assertFalse(producer.isAlive());
+            Assert.assertTrue(provideFailure.get() instanceof InterruptedException);
+            Assert.assertTrue(producerInterrupted.get());
+            Assert.assertTrue(awaitFailure.get() instanceof HugeException);
+            Assert.assertTrue(completed.await(5L, TimeUnit.SECONDS));
+            Assert.assertEquals(1, processed.get());
+            worker.shutdown();
+            Assert.assertTrue(worker.awaitTermination(5L, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            producer.interrupt();
+            producer.join(5000L);
+            worker.shutdownNow();
+            Assert.assertTrue(worker.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    public void testWrapCheckedExceptionPreservesCause() {
+        Exception original = new Exception("outer failure", new Exception("root failure"));
+        HugeException wrapped = Assert.assertThrows(HugeException.class, () -> Consumers.wrapException(original));
+        Assert.assertSame(original, wrapped.getCause());
+        Assert.assertEquals("Error when running task: root failure", wrapped.getMessage());
+    }
+
+    @Test
+    public void testWrapCheckedExceptionWithoutMessagePreservesCause() {
+        InterruptedException original = new InterruptedException();
+        HugeException wrapped = Assert.assertThrows(HugeException.class, () -> Consumers.wrapException(original));
+        Assert.assertSame(original, wrapped.getCause());
+        Assert.assertEquals("Error when running task: null", wrapped.getMessage());
+    }
+
+    @Test
+    public void testWrapRuntimeExceptionPreservesIdentity() {
+        for (IllegalStateException original : new IllegalStateException[]{
+                new IllegalStateException("task failed"), new IllegalStateException()}) {
+            Assert.assertSame(original, Assert.assertThrows(IllegalStateException.class,
+                    () -> Consumers.wrapException(original)));
+        }
+    }
+
+    private static void awaitCall(Thread thread, Class<?> type, String method) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+        while (System.nanoTime() < deadline) {
+            if (Arrays.stream(thread.getStackTrace()).anyMatch(frame ->
+                    frame.getClassName().equals(type.getName()) && frame.getMethodName().equals(method))) {
+                return;
+            }
+            Thread.sleep(1L);
+        }
+        Assert.fail("Thread did not reach " + type.getSimpleName() + "." + method);
     }
 
     private static void awaitGate(CountDownLatch gate) {

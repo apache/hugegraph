@@ -177,20 +177,17 @@ public class BaseVertex extends BaseElement implements Cloneable {
 
     @Override
     public Object sysprop(HugeKeys key) {
-        switch (key) {
-            case ID:
-                return this.id();
-            case LABEL:
-                return this.schemaLabel().id();
-            case PRIMARY_VALUES:
-                return this.name();
-            case PROPERTIES:
-                return this.getPropertiesMap();
-            default:
+        return switch (key) {
+            case ID -> this.id();
+            case LABEL -> this.schemaLabel().id();
+            case PRIMARY_VALUES -> this.name();
+            case PROPERTIES -> this.getPropertiesMap();
+            default -> {
                 E.checkArgument(false,
                         "Invalid system property '%s' of Vertex", key);
-                return null;
-        }
+                yield null;
+            }
+        };
     }
 
     public VertexLabel schemaLabel() {

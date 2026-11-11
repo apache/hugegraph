@@ -182,6 +182,13 @@ public class PDCoreTestBase {
 
     @AfterClass
     public static void shutdownService() {
+        // Stop the task pollers before the engine they poll, as the server's
+        // shutdown hook does. A poller left running keeps calling isLeader() on
+        // whatever node the singleton holds, which breaks tests that mock the
+        // node afterwards.
+        if (taskService != null) {
+            taskService.shutDown();
+        }
         var instance = RaftEngine.getInstance();
         if (instance != null) {
             instance.shutDown();

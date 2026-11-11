@@ -39,6 +39,8 @@ public class InAccurateIntersectionIterator<T> implements ScanIterator {
 
     private T current;
 
+    private boolean closed;
+
     public InAccurateIntersectionIterator(ScanIterator iterator, ToLongFunction<T> toLongFunction) {
         //todo what if size == 1?
         assert (iterator instanceof MultiListIterator &&
@@ -50,7 +52,13 @@ public class InAccurateIntersectionIterator<T> implements ScanIterator {
 
     @Override
     public boolean hasNext() {
-        current = null;
+        // keep the pending element; readBatchData probes hasNext() twice
+        if (this.closed) {
+            return false;
+        }
+        if (current != null) {
+            return true;
+        }
         while (iterator.hasNext()) {
             var element = (T) iterator.next();
             if (element == null) {
@@ -71,15 +79,17 @@ public class InAccurateIntersectionIterator<T> implements ScanIterator {
 
     @Override
     public boolean isValid() {
-        return iterator.isValid();
+        return !this.closed && iterator.isValid();
     }
 
     @Override
     public <E> E next() {
-        if (current == null) {
+        if (!hasNext()) {
             throw new NoSuchElementException();
         }
-        return (E) current;
+        E result = (E) current;
+        current = null;
+        return result;
     }
 
     @Override
@@ -99,7 +109,12 @@ public class InAccurateIntersectionIterator<T> implements ScanIterator {
 
     @Override
     public void close() {
-        iterator.close();
-        this.workBitmap.clear();
+        this.closed = true;
+        this.current = null;
+        try {
+            iterator.close();
+        } finally {
+            this.workBitmap.clear();
+        }
     }
 }

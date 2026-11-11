@@ -192,10 +192,9 @@ public class BinaryBackendEntry implements BackendEntry {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof BinaryBackendEntry)) {
+        if (!(obj instanceof BinaryBackendEntry other)) {
             return false;
         }
-        BinaryBackendEntry other = (BinaryBackendEntry) obj;
         if (this.id() != other.id() && !this.id().equals(other.id())) {
             return false;
         }

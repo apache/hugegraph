@@ -17,9 +17,12 @@
 
 package org.apache.hugegraph.serializer;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashSet;
+import java.util.Random;
 import java.util.UUID;
 
 import org.apache.hugegraph.backend.BinaryId;
@@ -32,6 +35,7 @@ import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.Bytes;
+import org.apache.hugegraph.util.StringEncoding;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.function.ThrowingRunnable;
@@ -263,6 +267,71 @@ public class BytesBufferTest {
         wrapped.writeShort((short) 1);
         Assert.assertThrows(IllegalStateException.class, () -> wrapped.writeShort((short) 2));
         Assert.assertEquals(2, wrapped.position());
+    }
+
+    @Test
+    public void testIncrementalWritesDoNotRepeatedlyCopyTheEntireBuffer() {
+        int blockSize = 4096;
+        byte[] block = new byte[blockSize];
+        byte[] expected = new byte[1024 * 1024];
+        BytesBuffer buffer = BytesBuffer.allocate(BytesBuffer.DEFAULT_CAPACITY);
+        int capacity = buffer.array().length;
+        int growths = 0;
+        for (int offset = 0; offset < expected.length; offset += blockSize) {
+            byte value = (byte) (offset / blockSize);
+            Arrays.fill(block, value);
+            Arrays.fill(expected, offset, offset + blockSize, value);
+            buffer.write(block);
+            if (buffer.array().length != capacity) {
+                capacity = buffer.array().length;
+                growths++;
+            }
+        }
+        Assert.assertTrue("Incremental writes must use amortized buffer growth", growths <= 12);
+        Assert.assertArrayEquals(expected, buffer.bytes());
+    }
+
+    @Test
+    public void testGrowthClampsToConfiguredMaximumWithoutLosingBytes() throws Exception {
+        Field field = BytesBuffer.class.getDeclaredField("maxBufferCapacity");
+        field.setAccessible(true);
+        Object previous = field.get(null);
+        try {
+            field.set(null, 257);
+            BytesBuffer buffer = BytesBuffer.allocate(64);
+            byte[] expected = new byte[257];
+            Arrays.fill(expected, (byte) 0x5a);
+            buffer.write(expected, 0, 65);
+            Assert.assertTrue(buffer.array().length <= 257);
+            buffer.write(expected, 65, expected.length - 65);
+            Assert.assertEquals(257, buffer.array().length);
+            Assert.assertArrayEquals(expected, buffer.bytes());
+            assertIllegalArgument(() -> buffer.write((byte) 1), "exceeds max buffer capacity");
+            Assert.assertEquals(257, buffer.position());
+            Assert.assertArrayEquals(expected, buffer.bytes());
+        } finally {
+            field.set(null, previous);
+        }
+    }
+
+    @Test
+    public void testIncompressibleTextRoundTripsAcrossBufferGrowth() {
+        Assert.assertArrayEquals(Bytes.fromHex("4c5a34426c6f636b12030000000300000022b24c0d" +
+                                               "6162634c5a34426c6f636b12000000000000000000000000"),
+                                 StringEncoding.compress("abc"));
+        byte[] bytes = new byte[256 * 1024];
+        new Random(7).nextBytes(bytes);
+        String text = Base64.getEncoder().encodeToString(bytes);
+        byte[] compressed = StringEncoding.compress(text);
+        Assert.assertEquals(text, StringEncoding.decompress(compressed));
+    }
+
+    @Test
+    public void testDecompressionGrowsForHighlyCompressibleText() {
+        String text = "x".repeat(1024 * 1024);
+        byte[] compressed = StringEncoding.compress(text);
+        Assert.assertTrue(compressed.length < text.length() / 10);
+        Assert.assertEquals(text, StringEncoding.decompress(compressed));
     }
 
     private static BytesBuffer wrap(int... values) {

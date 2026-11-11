@@ -70,18 +70,13 @@ public interface Id extends Comparable<Id>, Serializable {
 
         public static IdType valueOfPrefix(String id) {
             E.checkArgument(id != null && !id.isEmpty(), "Invalid id '%s'", id);
-            switch (id.charAt(0)) {
-                case 'L':
-                    return IdType.LONG;
-                case 'U':
-                    return IdType.UUID;
-                case 'S':
-                    return IdType.STRING;
-                case 'E':
-                    return IdType.EDGE;
-                default:
-                    return IdType.UNKNOWN;
-            }
+            return switch (id.charAt(0)) {
+                case 'L' -> IdType.LONG;
+                case 'U' -> IdType.UUID;
+                case 'S' -> IdType.STRING;
+                case 'E' -> IdType.EDGE;
+                default -> IdType.UNKNOWN;
+            };
         }
     }
 }

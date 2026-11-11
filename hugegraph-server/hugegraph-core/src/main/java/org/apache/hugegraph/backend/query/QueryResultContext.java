@@ -56,8 +56,7 @@ public final class QueryResultContext {
         for (Query current = query; current != null; current = current.originQuery()) {
             chain.add(current);
             visibility = current;
-            if (current instanceof ConditionQuery) {
-                ConditionQuery condition = (ConditionQuery) current;
+            if (current instanceof ConditionQuery condition) {
                 if (optimized == OptimizedType.NONE) {
                     optimized = condition.optimized();
                 }
@@ -71,8 +70,8 @@ public final class QueryResultContext {
         }
         this.queries = Collections.unmodifiableList(chain);
         this.inputIds = Collections.unmodifiableList(new ArrayList<>(query.ids()));
-        this.mustSortByInputIds = !inputOrderSatisfied && query instanceof IdQuery &&
-                                 ((IdQuery) query).mustSortByInput();
+        this.mustSortByInputIds = !inputOrderSatisfied && query instanceof IdQuery idQuery &&
+                                 idQuery.mustSortByInput();
         this.matchQuery = match;
         this.resultsFilter = filter;
         this.optimizedType = optimized;

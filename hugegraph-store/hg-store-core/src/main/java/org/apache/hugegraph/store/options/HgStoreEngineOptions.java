@@ -153,7 +153,8 @@ public class HgStoreEngineOptions {
          */
         private double aveLogEntrySizeRatio = 0.95;
         private boolean useRocksDBSegmentLogStorage = true;
-        private int maxSegmentFileSize = 64 * 1024 * 1024;
+        private int maxSegmentFileSize = Integer.getInteger("jraft.log_storage.segment.max.size.bytes",
+                                                            1024 * 1024 * 1024);
     }
 
     @Data

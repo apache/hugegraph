@@ -37,6 +37,12 @@ import org.apache.hugegraph.backend.store.rocksdb.RocksDBSnapshotRestoreTest;
 import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
 import org.apache.hugegraph.backend.tx.GraphTransactionTest;
 import org.apache.hugegraph.core.memory.MemoryManageTest;
+import org.apache.hugegraph.job.EphemeralJobBuilderTest;
+import org.apache.hugegraph.job.algorithm.AlgorithmConsumerLifecycleTest;
+import org.apache.hugegraph.job.algorithm.AlgorithmExecutionTest;
+import org.apache.hugegraph.job.algorithm.AlgorithmJsonMapTest;
+import org.apache.hugegraph.job.algorithm.CountAlgorithmTest;
+import org.apache.hugegraph.job.system.DeleteExpiredJobTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
@@ -44,6 +50,7 @@ import org.apache.hugegraph.opencypher.CypherOpProcessorTest;
 import org.apache.hugegraph.store.client.OrderedScanSecurityTest;
 import org.apache.hugegraph.tinkerpop.HugeGraphTestInfrastructureTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
+import org.apache.hugegraph.task.TaskCallableTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.cypher.CypherErrorTest;
 import org.apache.hugegraph.unit.api.cypher.CypherTemporalFunctionTest;
@@ -53,6 +60,8 @@ import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.filter.VertexAuthorizationTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
+import org.apache.hugegraph.unit.api.job.RebuildAPITest;
+import org.apache.hugegraph.unit.api.profile.ProfileAPITest;
 import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
 import org.apache.hugegraph.unit.api.space.SchemaTemplateAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
@@ -76,6 +85,7 @@ import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.GraphSpaceInfoLocaleTest;
 import org.apache.hugegraph.unit.core.GraphManagerStoresWaitTest;
+import org.apache.hugegraph.unit.core.GraphSchemaCloneTest;
 import org.apache.hugegraph.unit.core.MetaManagerClusterTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
@@ -100,6 +110,7 @@ import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
 import org.apache.hugegraph.unit.core.SchemaElementTest;
 import org.apache.hugegraph.unit.core.SchemaTaskSecurityTest;
+import org.apache.hugegraph.unit.core.HstoreChannelSecurityTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
@@ -130,6 +141,7 @@ import org.apache.hugegraph.unit.serializer.TextSerializerTest;
 import org.apache.hugegraph.unit.store.RamIntObjectMapTest;
 import org.apache.hugegraph.unit.traversal.ConcurrentVerticesConsumerTest;
 import org.apache.hugegraph.unit.traversal.ShortestPathTraverserTest;
+import org.apache.hugegraph.unit.util.AlgorithmConsumersTest;
 import org.apache.hugegraph.unit.util.CompressUtilTest;
 import org.apache.hugegraph.unit.util.ConsumersTest;
 import org.apache.hugegraph.unit.util.JsonUtilTest;
@@ -148,6 +160,8 @@ import org.junit.runners.Suite;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        RebuildAPITest.class,
+        ProfileAPITest.class,
         /* api filter */
         AccessLogFilterTest.class,
         CompressInterceptorTest.class,
@@ -200,6 +214,7 @@ import org.junit.runners.Suite;
         DataTypeTest.class,
         GraphSpaceInfoLocaleTest.class,
         GraphManagerStoresWaitTest.class,
+        GraphSchemaCloneTest.class,
         MetaManagerClusterTest.class,
         DirectionsTest.class,
         SerialEnumTest.class,
@@ -229,6 +244,7 @@ import org.junit.runners.Suite;
         QueryListTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
+        HstoreChannelSecurityTest.class,
         SchemaTaskSecurityTest.class,
         OrderedScanSecurityTest.class,
         RolePermissionTest.class,
@@ -248,6 +264,9 @@ import org.junit.runners.Suite;
         SystemSchemaStoreTest.class,
         ServerInfoManagerTest.class,
         TaskSchedulerServerInfoTest.class,
+        TaskCallableTest.class,
+        EphemeralJobBuilderTest.class,
+        DeleteExpiredJobTest.class,
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,
         HugeGraphTestInfrastructureTest.class,
@@ -289,6 +308,11 @@ import org.junit.runners.Suite;
 
         /* utils */
         ConsumersTest.class,
+        AlgorithmConsumersTest.class,
+        AlgorithmConsumerLifecycleTest.class,
+        AlgorithmExecutionTest.class,
+        AlgorithmJsonMapTest.class,
+        CountAlgorithmTest.class,
         VersionTest.class,
         JsonUtilTest.class,
         StringEncodingTest.class,

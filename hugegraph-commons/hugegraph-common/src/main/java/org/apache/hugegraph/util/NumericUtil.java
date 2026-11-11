@@ -327,14 +327,8 @@ public final class NumericUtil {
      *          a positive int if first is numerically greater than second.
      */
     public static int compareNumber(Object first, Number second) {
-        if (first == null) {
-            E.checkArgument(first != null,
-                            "The first parameter can't be null");
-        }
-        if (second == null) {
-            E.checkArgument(second != null,
-                            "The second parameter can't be null");
-        }
+        E.checkArgument(first != null, "The first parameter can't be null");
+        E.checkArgument(second != null, "The second parameter can't be null");
 
         if (first instanceof Number && first instanceof Comparable &&
             first.getClass().equals(second.getClass())) {

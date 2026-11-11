@@ -395,8 +395,7 @@ public class StoreAPI extends API {
      * @return Returns a string indicating the service's health status. Typically, an empty
      * string indicates the service is healthy.
      */
-    // TODO: bounded metadata-store LOCK retry is tracked separately in
-    // https://github.com/apache/hugegraph/issues/3226; this probe reads only Raft state.
+    // This probe reads only Raft state; metadata-store open failures fail PD startup instead.
     @GetMapping(value = "/health", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> checkHealthy() {
         String state = RaftEngine.getInstance().getRaftStatus().getState();

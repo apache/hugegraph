@@ -74,11 +74,9 @@ public class HugeVertexProperty<V> extends HugeProperty<V>
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof VertexProperty)) {
+        if (!(obj instanceof VertexProperty<?> other)) {
             return false;
         }
-        @SuppressWarnings("unchecked")
-        VertexProperty<V> other = (VertexProperty<V>) obj;
         return this.id().equals(other.id());
     }
 

@@ -334,4 +334,80 @@ public class BatchMapperIteratorTest extends BaseUnitTest {
         ((BatchMapperIterator<?, ?>) results).close();
         Assert.assertTrue(vals.closed());
     }
+
+    @Test
+    public void testCloseClosesCurrentBatchIterator() throws Exception {
+        CloseableItor<Integer> vals = new CloseableItor<>(DATA3.iterator());
+        List<CloseableItor<Integer>> batches = new ArrayList<>();
+
+        BatchMapperIterator<Integer, Integer> results;
+        results = new BatchMapperIterator<>(3, vals, batch -> {
+            CloseableItor<Integer> itor = new CloseableItor<>(batch.iterator());
+            batches.add(itor);
+            return itor;
+        });
+
+        Assert.assertEquals(4, results.next());
+        Assert.assertEquals(1, batches.size());
+        Assert.assertFalse(batches.get(0).closed());
+
+        results.close();
+        Assert.assertTrue(batches.get(0).closed());
+        Assert.assertTrue(vals.closed());
+    }
+
+    @Test
+    public void testBatchCloseFailureKeepsCause() {
+        Exception failure = new Exception("Controlled close failure");
+
+        BatchMapperIterator<Integer, Integer> results;
+        results = new BatchMapperIterator<>(1, DATA1.iterator(), batch -> {
+            return new CloseableItor<>(batch.iterator(), failure);
+        });
+
+        Assert.assertEquals(1, results.next());
+        // Exhausting the batch closes it, and its close() fails
+        Throwable exception = Assert.assertThrows(IllegalStateException.class, () -> {
+            results.hasNext();
+        });
+        Assert.assertSame(failure, exception.getCause());
+    }
+
+    @Test
+    public void testCloseWithFailingBatchKeepsCause() {
+        Exception failure = new Exception("Controlled close failure");
+        CloseableItor<Integer> origin = new CloseableItor<>(DATA2.iterator());
+
+        BatchMapperIterator<Integer, Integer> results;
+        results = new BatchMapperIterator<>(2, origin, batch -> {
+            return new CloseableItor<>(batch.iterator(), failure);
+        });
+
+        Assert.assertEquals(2, results.next());
+        Throwable exception = Assert.assertThrows(IllegalStateException.class, () -> {
+            results.close();
+        });
+        Assert.assertSame(failure, exception.getCause());
+        Assert.assertTrue(origin.closed());
+    }
+
+    @Test
+    public void testClosePreservesBothFailures() {
+        Exception batchFailure = new Exception("Batch close failure");
+        Exception originFailure = new Exception("Origin close failure");
+        CloseableItor<Integer> origin = new CloseableItor<>(DATA2.iterator(), originFailure);
+        BatchMapperIterator<Integer, Integer> results =
+                new BatchMapperIterator<>(2, origin,
+                                          batch -> new CloseableItor<>(batch.iterator(),
+                                                                       batchFailure));
+
+        Assert.assertEquals(2, results.next());
+        Throwable exception = Assert.assertThrows(IllegalStateException.class, () -> {
+            results.close();
+        });
+        Assert.assertSame(batchFailure, exception.getCause());
+        Assert.assertTrue(origin.closed());
+        Assert.assertEquals(1, exception.getSuppressed().length);
+        Assert.assertSame(originFailure, exception.getSuppressed()[0]);
+    }
 }

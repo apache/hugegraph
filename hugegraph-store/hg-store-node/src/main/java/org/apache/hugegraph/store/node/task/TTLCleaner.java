@@ -131,29 +131,24 @@ public class TTLCleaner implements Runnable {
     public BiFunction<byte[], byte[], Boolean> getJudge(String graph, String table) {
 
         try {
-            switch (table) {
-                case HugeServerTables.VERTEX_TABLE:
-                    return (key, value) -> {
-                        DirectHugeElement el = serializer.parseSchemaVertex(
-                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
-                        return predicate(el);
-                    };
-                case HugeServerTables.OUT_EDGE_TABLE:
-                case HugeServerTables.IN_EDGE_TABLE:
-                    return (key, value) -> {
-                        DirectHugeElement el = serializer.parseSchemaEdge(
-                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
-                        return predicate(el);
-                    };
-                case HugeServerTables.INDEX_TABLE:
-                    return (key, value) -> {
-                        DirectHugeElement el = serializer.parseSchemaIndex(
-                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
-                        return predicate(el);
-                    };
-                default:
-                    throw new UnsupportedOperationException("unsupported table");
-            }
+            return switch (table) {
+                case HugeServerTables.VERTEX_TABLE -> (key, value) -> {
+                    DirectHugeElement el = serializer.parseSchemaVertex(
+                            BusinessHandlerImpl.getGraphSupplier(graph), key, value);
+                    return predicate(el);
+                };
+                case HugeServerTables.OUT_EDGE_TABLE, HugeServerTables.IN_EDGE_TABLE -> (key, value) -> {
+                    DirectHugeElement el = serializer.parseSchemaEdge(
+                            BusinessHandlerImpl.getGraphSupplier(graph), key, value);
+                    return predicate(el);
+                };
+                case HugeServerTables.INDEX_TABLE -> (key, value) -> {
+                    DirectHugeElement el = serializer.parseSchemaIndex(
+                            BusinessHandlerImpl.getGraphSupplier(graph), key, value);
+                    return predicate(el);
+                };
+                default -> throw new UnsupportedOperationException("unsupported table");
+            };
 
         } catch (Exception e) {
             log.error("failed to parse entry: ", e);

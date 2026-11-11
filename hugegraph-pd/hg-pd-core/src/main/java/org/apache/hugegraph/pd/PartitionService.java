@@ -405,7 +405,7 @@ public class PartitionService implements RaftStateListener {
     /**
      * Delete the diagram and all partitions of the diagram
      */
-    public Metapb.Graph delGraph(String graphName) throws PDException {
+    public synchronized Metapb.Graph delGraph(String graphName) throws PDException {
         log.info("delGraph {}", graphName);
         Metapb.Graph graph = getGraph(graphName);
         getPartitions(graphName).forEach(partition -> {
@@ -417,6 +417,16 @@ public class PartitionService implements RaftStateListener {
             partitionMeta.removePartitionStats(graphName);
         }
         return graph;
+    }
+
+    /**
+     * Apply a quota update only while the graph exists, serialized with deletion.
+     */
+    public synchronized Metapb.Graph updateGraphIfExists(Metapb.Graph graph) throws PDException {
+        if (this.getGraph(graph.getGraphName()) == null) {
+            return null;
+        }
+        return this.updateGraph(graph);
     }
 
     /**

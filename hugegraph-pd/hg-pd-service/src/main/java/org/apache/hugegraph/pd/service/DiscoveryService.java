@@ -59,7 +59,7 @@ public class DiscoveryService extends DiscoveryServiceGrpc.DiscoveryServiceImplB
     @PostConstruct
     public void init() throws PDException {
         log.info("PDService init………… {}", pdConfig);
-        RaftEngine.getInstance().init(pdConfig.getRaft());
+        RaftStartup.init(pdConfig);
         RaftEngine.getInstance().addStateListener(this);
         register = new RegistryService(pdConfig);
         licenseVerifierService = new LicenseVerifierService(pdConfig);

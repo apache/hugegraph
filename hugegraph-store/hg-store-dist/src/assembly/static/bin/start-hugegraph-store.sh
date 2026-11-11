@@ -217,7 +217,32 @@ if [ "$JAVA_OPTIONS_ENV" = "" ]; then
              >> "${OUTPUT}"
         exit 1
     fi
-    JAVA_OPTIONS_ARR=("-Xms${MIN_MEM}m" "-Xmx${XMX}m" "-XX:MetaspaceSize=256M"
+    # Cap direct memory at the heap size picked here, the JVM's own unset default, so the
+    # RocksDB auto-sizing (RocksdbMemoryBudget) counts a limit the JVM actually enforces.
+    # Leave it out when -j sets the heap or the cap itself, or JAVA_TOOL_OPTIONS or
+    # JDK_JAVA_OPTIONS sets the cap: a fixed cap from the computed heap would no longer match
+    # a -j -Xmx, and the JVM then defaults it to that heap.
+    DIRECT_MEMORY_OPTION="-XX:MaxDirectMemorySize=${XMX}m"
+    # Split -j the way it reaches the JVM below (unquoted: spaces, tabs and newlines)
+    for opt in ${USER_OPTION}; do
+        case "$opt" in
+            -Xmx* | -XX:MaxHeapSize=* | -XX:MaxDirectMemorySize=*) DIRECT_MEMORY_OPTION="" ;;
+        esac
+    done
+    # The JVM reads JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS before the command line, so a cap
+    # there would lose to this one; keep it instead. The JVM drops quotes anywhere in a token
+    # there, so drop them too. A false match, such as the text inside a quoted -D value, only
+    # leaves the cap to the JVM, whose default is this same heap.
+    ENV_JVM_OPTIONS=" ${JAVA_TOOL_OPTIONS:-} ${JDK_JAVA_OPTIONS:-} "
+    ENV_JVM_OPTIONS="${ENV_JVM_OPTIONS//[\"\']/}"
+    case "${ENV_JVM_OPTIONS//[$'\t\r\n']/ }" in
+        *" -XX:MaxDirectMemorySize="*) DIRECT_MEMORY_OPTION="" ;;
+    esac
+    JAVA_OPTIONS_ARR=("-Xms${MIN_MEM}m" "-Xmx${XMX}m")
+    # Only add the cap when it survived the suppression checks above; an empty
+    # element here would reach the JVM as a literal "" argv entry.
+    [ -n "$DIRECT_MEMORY_OPTION" ] && JAVA_OPTIONS_ARR+=("$DIRECT_MEMORY_OPTION")
+    JAVA_OPTIONS_ARR+=("-XX:MetaspaceSize=256M"
                   "-XX:+HeapDumpOnOutOfMemoryError" "-XX:HeapDumpPath=${LOGS}")
 
     # Split user-supplied options on whitespace (legacy behaviour).

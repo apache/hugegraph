@@ -73,6 +73,9 @@ public class StreamFinalAggregationIterator<E> implements HgKvIterator<E> {
 
     @Override
     public boolean hasNext() {
+        if (data != null) {
+            return true;
+        }
 
         while (iterator.hasNext()) {
             var next = (KvElement) iterator.next();
@@ -145,26 +148,20 @@ public class StreamFinalAggregationIterator<E> implements HgKvIterator<E> {
                                      .map((Function<AggregationFunctionParam,
                                              AggregationFunction>) param -> {
                                          var filedType = param.getFieldType().getGenericType();
-                                         switch (param.getFunctionType()) {
-                                             case SUM:
-                                                 return new AggregationFunctions.SumFunction(
-                                                         param.getField(), getSupplier(filedType));
-                                             case MIN:
-                                                 return new AggregationFunctions.MinFunction(
-                                                         param.getField(), getSupplier(filedType));
-                                             case MAX:
-                                                 return new AggregationFunctions.MaxFunction(
-                                                         param.getField(), getSupplier(filedType));
-                                             case AVG:
-                                                 return new AggregationFunctions.AvgFunction(
-                                                         getSupplier(filedType));
-                                             case COUNT:
-                                                 return new AggregationFunctions.CountFunction();
-                                             default:
-                                                 throw new RuntimeException(
-                                                         "unsupported function type: " +
-                                                         param.getFunctionType());
-                                         }
+                                         return switch (param.getFunctionType()) {
+                                             case SUM -> new AggregationFunctions.SumFunction(
+                                                     param.getField(), getSupplier(filedType));
+                                             case MIN -> new AggregationFunctions.MinFunction(
+                                                     param.getField(), getSupplier(filedType));
+                                             case MAX -> new AggregationFunctions.MaxFunction(
+                                                     param.getField(), getSupplier(filedType));
+                                             case AVG -> new AggregationFunctions.AvgFunction(
+                                                     getSupplier(filedType));
+                                             case COUNT -> new AggregationFunctions.CountFunction();
+                                             default -> throw new RuntimeException(
+                                                     "unsupported function type: " +
+                                                     param.getFunctionType());
+                                         };
                                      })
                                      .collect(Collectors.toList());
     }

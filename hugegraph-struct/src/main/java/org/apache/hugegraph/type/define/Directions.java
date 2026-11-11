@@ -54,15 +54,12 @@ public enum Directions implements SerialEnum {
     }
 
     public HugeType type() {
-        switch (this) {
-            case OUT:
-                return HugeType.EDGE_OUT;
-            case IN:
-                return HugeType.EDGE_IN;
-            default:
-                throw new IllegalArgumentException(String.format(
+        return switch (this) {
+            case OUT -> HugeType.EDGE_OUT;
+            case IN -> HugeType.EDGE_IN;
+            default -> throw new IllegalArgumentException(String.format(
                           "Can't convert direction '%s' to HugeType", this));
-        }
+        };
     }
 
     public Directions opposite() {
@@ -76,14 +73,11 @@ public enum Directions implements SerialEnum {
 
 
     public static Directions convert(HugeType edgeType) {
-        switch (edgeType) {
-            case EDGE_OUT:
-                return OUT;
-            case EDGE_IN:
-                return IN;
-            default:
-                throw new IllegalArgumentException(String.format(
+        return switch (edgeType) {
+            case EDGE_OUT -> OUT;
+            case EDGE_IN -> IN;
+            default -> throw new IllegalArgumentException(String.format(
                           "Can't convert type '%s' to Direction", edgeType));
-        }
+        };
     }
 }

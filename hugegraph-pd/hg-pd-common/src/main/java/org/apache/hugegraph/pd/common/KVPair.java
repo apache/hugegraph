@@ -96,7 +96,7 @@ public class KVPair<K, V> implements Serializable {
         // these two parameters:
         //  name: a  value: aa
         //  name: aa value: a
-        return key.hashCode() * 13 + (value == null ? 0 : value.hashCode());
+        return Objects.hashCode(key) * 13 + (value == null ? 0 : value.hashCode());
     }
 
     /**
@@ -120,8 +120,7 @@ public class KVPair<K, V> implements Serializable {
         if (this == o) {
             return true;
         }
-        if (o instanceof KVPair) {
-            KVPair pair = (KVPair) o;
+        if (o instanceof KVPair<?, ?> pair) {
             if (!Objects.equals(key, pair.key)) {
                 return false;
             }

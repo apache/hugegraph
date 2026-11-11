@@ -46,10 +46,9 @@ public class TkEntry {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof TkEntry)) {
+        if (!(o instanceof TkEntry tk)) {
             return false;
         }
-        TkEntry tk = (TkEntry) o;
         return Objects.equals(table, tk.table) && Arrays.equals(key, tk.key);
     }
 

@@ -132,8 +132,8 @@ public class NestedIterator extends WrappedIterator<Edge> {
             if (!this.nearest || !this.visited.contains(vertexId)) {
                 // update parent edge cache pointer
                 int parentEdgePointer = -1;
-                if (this.parentIterator instanceof NestedIterator) {
-                    parentEdgePointer = ((NestedIterator) this.parentIterator).currentEdgePointer();
+                if (this.parentIterator instanceof NestedIterator parent) {
+                    parentEdgePointer = parent.currentEdgePointer();
                 }
 
                 this.parentEdgePointerMap.put(makeEdgeIndex(edge), parentEdgePointer);
@@ -150,8 +150,7 @@ public class NestedIterator extends WrappedIterator<Edge> {
     public List<HugeEdge> pathEdges() {
         List<HugeEdge> edges = new ArrayList<>();
         HugeEdge currentEdge = this.currentEdge;
-        if (this.parentIterator instanceof NestedIterator) {
-            NestedIterator parent = (NestedIterator) this.parentIterator;
+        if (this.parentIterator instanceof NestedIterator parent) {
             int parentEdgePointer = this.parentEdgePointerMap.get(makeEdgeIndex(currentEdge));
             edges.addAll(parent.pathEdges(parentEdgePointer));
         }
@@ -162,8 +161,7 @@ public class NestedIterator extends WrappedIterator<Edge> {
     private List<HugeEdge> pathEdges(int edgePointer) {
         List<HugeEdge> edges = new ArrayList<>();
         HugeEdge edge = this.cache.get(edgePointer);
-        if (this.parentIterator instanceof NestedIterator) {
-            NestedIterator parent = (NestedIterator) this.parentIterator;
+        if (this.parentIterator instanceof NestedIterator parent) {
             int parentEdgePointer = this.parentEdgePointerMap.get(makeEdgeIndex(edge));
             edges.addAll(parent.pathEdges(parentEdgePointer));
         }

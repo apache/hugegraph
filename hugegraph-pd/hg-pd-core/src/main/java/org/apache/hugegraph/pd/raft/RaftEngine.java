@@ -55,10 +55,18 @@ import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftError;
 import com.alipay.sofa.jraft.option.NodeOptions;
 import com.alipay.sofa.jraft.option.RpcOptions;
-import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
+import com.alipay.sofa.jraft.rpc.ProtobufMsgFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
+import com.alipay.sofa.jraft.rpc.impl.PingRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.AppendEntriesRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.GetFileRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.InstallSnapshotRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.ReadIndexRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.RequestVoteRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.TimeoutNowRequestProcessor;
 import com.alipay.sofa.jraft.util.Endpoint;
+import com.alipay.sofa.jraft.util.RpcFactoryHelper;
 
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -95,7 +103,7 @@ public class RaftEngine {
     private volatile int alivePeerCount = -1;
     private ScheduledExecutorService alivePeersRefresher;
 
-    public RaftEngine() {
+    private RaftEngine() {
         this.stateMachine = new RaftStateMachine();
     }
 
@@ -181,7 +189,23 @@ public class RaftEngine {
     private RpcServer createRaftRpcServer(String raftAddr, List<PeerId> peers,
                                           boolean ipWhitelistEnabled) {
         Endpoint endpoint = JRaftUtils.getEndPoint(raftAddr);
-        RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(endpoint);
+        RpcServer rpcServer = RpcFactoryHelper.rpcFactory().createRpcServer(endpoint);
+        // Register the protobuf codecs for raft messages, which
+        // RaftRpcServerFactory's static block did as a side effect
+        ProtobufMsgFactory.load();
+        // Register raft replication processors only: jraft's CLI processors would
+        // change peers or the leader bypassing the checks of RaftEngine#changePeerList
+        // and PDService#updatePdRaft
+        AppendEntriesRequestProcessor appendEntriesProcessor =
+                new AppendEntriesRequestProcessor(null);
+        rpcServer.registerConnectionClosedEventListener(appendEntriesProcessor);
+        rpcServer.registerProcessor(appendEntriesProcessor);
+        rpcServer.registerProcessor(new GetFileRequestProcessor(null));
+        rpcServer.registerProcessor(new InstallSnapshotRequestProcessor(null));
+        rpcServer.registerProcessor(new RequestVoteRequestProcessor(null));
+        rpcServer.registerProcessor(new PingRequestProcessor(null));
+        rpcServer.registerProcessor(new TimeoutNowRequestProcessor(null));
+        rpcServer.registerProcessor(new ReadIndexRequestProcessor(null));
         configureRaftServerIpWhitelist(peers, rpcServer, ipWhitelistEnabled);
         RaftRpcProcessor.registerProcessor(rpcServer, this);
         rpcServer.init(null);
@@ -194,8 +218,8 @@ public class RaftEngine {
             log.info("PD Raft IP whitelist is disabled");
             return;
         }
-        if (rpcServer instanceof BoltRpcServer) {
-            ((BoltRpcServer) rpcServer).getServer().option(
+        if (rpcServer instanceof BoltRpcServer boltServer) {
+            boltServer.getServer().option(
                     BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER,
                     new ExtendedNettyChannelHandler() {
                         @Override
@@ -439,6 +463,10 @@ public class RaftEngine {
         this.stateMachine.addTaskHandler(handler);
     }
 
+    public void removeTaskHandler(RaftTaskHandler handler) {
+        this.stateMachine.removeTaskHandler(handler);
+    }
+
     public PDConfig.Raft getConfig() {
         return this.config;
     }
@@ -545,13 +573,15 @@ public class RaftEngine {
             builder.setRole(role);
 
             try {
-                if (future.isCompletedExceptionally()) {
-                    log.error("failed to getGrpcAddress of {}", peerId.getEndpoint().toString());
+                RaftRpcProcessor.GetMemberResponse response =
+                        future.get(config.getRpcTimeout(), TimeUnit.MILLISECONDS);
+                if (response == null) {
+                    log.error("failed to getGrpcAddress of {}, null response",
+                              peerId.getEndpoint().toString());
                     builder.setState(Metapb.StoreState.Offline);
                     builder.setRaftUrl(peerId.getEndpoint().toString());
                     members.add(builder.build());
                 } else {
-                    RaftRpcProcessor.GetMemberResponse response = future.get();
                     builder.setState(Metapb.StoreState.Up);
                     builder.setRaftUrl(response.getRaftAddress());
                     builder.setDataPath(response.getDatePath());
@@ -705,8 +735,8 @@ public class RaftEngine {
                                   String.format("Raft read index timed out after %d ms",
                                                 timeoutMs));
         } catch (ExecutionException e) {
-            if (e.getCause() instanceof PDException) {
-                throw (PDException) e.getCause();
+            if (e.getCause() instanceof PDException failure) {
+                throw failure;
             }
             throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
         }

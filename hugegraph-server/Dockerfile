@@ -63,14 +63,25 @@ RUN apt-get -q update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
+# 2. Run as a fixed non-root user; USER must be numeric so Kubernetes can
+# verify runAsNonRoot.  The data and log directories exist in the image so
+# named volumes mounted there start out owned by that user.  See
+# docker/README.md before upgrading volumes written by an older image.
+ARG HG_UID=10001
+ARG HG_GID=10001
+RUN groupadd --system --gid "${HG_GID}" hugegraph \
+    && useradd --system --uid "${HG_UID}" --gid hugegraph --no-create-home \
+       --home-dir /hugegraph-server --shell /usr/sbin/nologin hugegraph \
+    && install -d -o "${HG_UID}" -g "${HG_GID}" /hugegraph-server /hugegraph-server/rocksdb-data /hugegraph-server/logs
+
+COPY --from=build --chown=${HG_UID}:${HG_GID} /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
+USER ${HG_UID}:${HG_GID}
 RUN sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/rest-server.properties
 
-# 2. Init docker script
-COPY hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
-COPY hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
-COPY hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
-RUN chmod 755 ./docker-entrypoint.sh
+# 3. Init docker script
+COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
+COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
+COPY --chown=${HG_UID}:${HG_GID} --chmod=755 hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
 
 EXPOSE 8080
 VOLUME /hugegraph-server

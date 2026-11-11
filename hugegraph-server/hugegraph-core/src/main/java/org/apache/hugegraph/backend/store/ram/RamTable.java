@@ -275,10 +275,9 @@ public final class RamTable {
         // Do not mistake an empty/conflicting set for the wildcard label zero.
         Set<Object> labels = cq.conditionValues(HugeKeys.LABEL);
         for (Object value : labels) {
-            if (!(value instanceof Id)) {
+            if (!(value instanceof Id label)) {
                 return false;
             }
-            Id label = (Id) value;
             if (!label.number() || label.asLong() <= 0L || label.asLong() > Integer.MAX_VALUE) {
                 return false;
             }

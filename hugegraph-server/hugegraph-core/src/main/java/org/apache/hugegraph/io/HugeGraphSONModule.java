@@ -322,6 +322,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
             Number cpuUsed = 0;
             Number memoryUsed = 0;
             Number storageUsed = 0;
+            long storageUsedKb = -1;
             Number graphNumberUsed = 0;
             Number roleNumberUsed = 0;
             Boolean auth = false;
@@ -340,9 +341,9 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 if ("name".equals(fieldName)) {
                     name = jsonParser.getText();
                 } else if ("nickname".equals(fieldName)) {
-                    nickname = jsonParser.getText();
+                    nickname = jsonParser.getValueAsString();
                 } else if ("description".equals(fieldName)) {
-                    description = jsonParser.getText();
+                    description = jsonParser.getValueAsString();
                 } else if ("max_graph_number".equals(fieldName)) {
                     maxGraphNumber = jsonParser.getNumberValue();
                 } else if ("max_role_number".equals(fieldName)) {
@@ -358,17 +359,28 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("storage_limit".equals(fieldName)) {
                     storageLimit = jsonParser.getNumberValue();
                 } else if ("oltp_namespace".equals(fieldName)) {
-                    oltpNamespace = jsonParser.getText();
+                    oltpNamespace = jsonParser.getValueAsString();
                 } else if ("olap_namespace".equals(fieldName)) {
-                    olapNamespace = jsonParser.getText();
+                    olapNamespace = jsonParser.getValueAsString();
                 } else if ("storage_namespace".equals(fieldName)) {
-                    storageNamespace = jsonParser.getText();
+                    storageNamespace = jsonParser.getValueAsString();
                 } else if ("cpu_used".equals(fieldName)) {
                     cpuUsed = jsonParser.getNumberValue();
                 } else if ("memory_used".equals(fieldName)) {
                     memoryUsed = jsonParser.getNumberValue();
                 } else if ("storage_used".equals(fieldName)) {
                     storageUsed = jsonParser.getNumberValue();
+                } else if ("storage_used_kb".equals(fieldName)) {
+                    // Older Servers preserve unknown config values as strings.
+                    String value = jsonParser.getValueAsString();
+                    if (value != null) {
+                        try {
+                            storageUsedKb = Long.parseLong(value.trim());
+                        } catch (NumberFormatException ignored) {
+                            // Optional precision may be absent or invalid; retain GB usage.
+                        }
+                    }
+                    jsonParser.skipChildren();
                 } else if ("graph_number_used".equals(fieldName)) {
                     graphNumberUsed = jsonParser.getNumberValue();
                 } else if ("role_number_used".equals(fieldName)) {
@@ -376,11 +388,11 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("auth".equals(fieldName)) {
                     auth = jsonParser.getBooleanValue();
                 } else if ("operator_image_path".equals(fieldName)) {
-                    operatorImagePath = jsonParser.getText();
+                    operatorImagePath = jsonParser.getValueAsString();
                 } else if ("internal_algorithm_image_url".equals(fieldName)) {
-                    internalAlgorithmImageUrl = jsonParser.getText();
+                    internalAlgorithmImageUrl = jsonParser.getValueAsString();
                 } else if ("creator".equals(fieldName)) {
-                    creator = jsonParser.getText();
+                    creator = jsonParser.getValueAsString();
                 } else if ("create_time".equals(fieldName)) {
                     String val = jsonParser.getValueAsString();
                     if (val == null) {
@@ -429,6 +441,9 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                                               creator,
                                               configs);
 
+            if (storageUsedKb >= 0) {
+                space.setStorageUsedKb(storageUsedKb);
+            }
             space.updateTime(update);
             space.createTime(create);
             space.computeCpuLimit(computeCpuLimit.intValue());
@@ -508,7 +523,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 if ("name".equals(fieldName)) {
                     name = jsonParser.getText();
                 } else if ("description".equals(fieldName)) {
-                    description = jsonParser.getText();
+                    description = jsonParser.getValueAsString();
                 } else if ("type".equals(fieldName)) {
                     type = jsonParser.getText();
                 } else if ("deployment_type".equals(fieldName)) {
@@ -526,7 +541,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 } else if ("storage_limit".equals(fieldName)) {
                     storageLimit = jsonParser.getNumberValue();
                 } else if ("route_type".equals(fieldName)) {
-                    routeType = jsonParser.getText();
+                    routeType = jsonParser.getValueAsString();
                 } else if ("port".equals(fieldName)) {
                     port = jsonParser.getNumberValue();
                 } else if ("urls".equals(fieldName)) {
@@ -545,11 +560,11 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                         serverNodePortUrls.addAll(Arrays.asList(urlString.split(",")));
                     }
                 } else if ("service_id".equals(fieldName)) {
-                    serviceId = jsonParser.getText();
+                    serviceId = jsonParser.getValueAsString();
                 } else if ("pd_service_id".equals(fieldName)) {
-                    pdServiceId = jsonParser.getText();
+                    pdServiceId = jsonParser.getValueAsString();
                 } else if ("creator".equals(fieldName)) {
-                    creator = jsonParser.getText();
+                    creator = jsonParser.getValueAsString();
                 } else if ("create_time".equals(fieldName)) {
                     String val = jsonParser.getValueAsString();
                     try {

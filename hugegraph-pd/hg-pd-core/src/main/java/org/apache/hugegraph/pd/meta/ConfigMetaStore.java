@@ -50,6 +50,17 @@ public class ConfigMetaStore extends MetadataRocksDBStore {
         return scanPrefix(Metapb.GraphSpace.parser(), graphSpaceKey);
     }
 
+    /**
+     * Read one space without prefix-matching similarly named spaces.
+     */
+    public Metapb.GraphSpace getGraphSpaceExact(String name) throws PDException {
+        return getOne(Metapb.GraphSpace.parser(), MetadataKeyHelper.getGraphSpaceKey(name));
+    }
+
+    public void deleteGraphSpace(String name) throws PDException {
+        remove(MetadataKeyHelper.getGraphSpaceKey(name));
+    }
+
     public Metapb.PDConfig setPdConfig(Metapb.PDConfig pdConfig) throws PDException {
         byte[] graphSpaceKey =
                 MetadataKeyHelper.getPdConfigKey(String.valueOf(pdConfig.getVersion()));

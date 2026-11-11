@@ -42,6 +42,7 @@
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hg-pd-service</artifactId>
             <version>${revision}</version>
+            <classifier>exec</classifier>
         </dependency>
     </dependencies>
     <build>

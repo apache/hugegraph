@@ -18,10 +18,12 @@
 package org.apache.hugegraph.pd;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.meta.ConfigMetaStore;
 import org.apache.hugegraph.pd.meta.MetadataFactory;
 import org.apache.hugegraph.pd.raft.RaftStateListener;
@@ -30,6 +32,11 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class ConfigService implements RaftStateListener {
+
+    // PD service facades share one metadata store, but have separate ConfigService instances.
+    private static final Object GRAPH_SPACE_LOCK = new Object();
+    private static final int GRAPH_SPACE_DIAGNOSTIC_NAMES = 10;
+    private static final int GRAPH_SPACE_DIAGNOSTIC_NAME_LENGTH = 128;
 
     private ConfigMetaStore meta;
     private PDConfig pdConfig;
@@ -64,9 +71,89 @@ public class ConfigService implements RaftStateListener {
     }
 
     public Metapb.GraphSpace setGraphSpace(Metapb.GraphSpace graphSpace) throws PDException {
-        return this.meta.setGraphSpace(graphSpace.toBuilder()
-                                                 .setTimestamp(System.currentTimeMillis())
-                                                 .build());
+        synchronized (GRAPH_SPACE_LOCK) {
+            return this.meta.setGraphSpace(graphSpace.toBuilder()
+                                                     .setTimestamp(System.currentTimeMillis())
+                                                     .build());
+        }
+    }
+
+    /**
+     * Update a GB limit while preserving the latest usage, including updates from other facades.
+     */
+    public Metapb.GraphSpace setGraphSpaceLimit(Metapb.GraphSpace graphSpace) throws PDException {
+        synchronized (GRAPH_SPACE_LOCK) {
+            long usedSize = this.graphSpaceBuilder(graphSpace.getName()).getUsedSize();
+            return this.setGraphSpace(graphSpace.toBuilder().setUsedSize(usedSize).build());
+        }
+    }
+
+    /**
+     * Refresh usage in KB without overwriting a concurrent limit update.
+     */
+    public Metapb.GraphSpace setGraphSpaceUsage(String name, long usedSize) throws PDException {
+        synchronized (GRAPH_SPACE_LOCK) {
+            return this.setGraphSpace(this.graphSpaceBuilder(name).setUsedSize(usedSize).build());
+        }
+    }
+
+    /**
+     * Recheck current PD graphs before recreating missing usage. A quota collection may
+     * have started before the Server removed the graphs and their space's statistics.
+     */
+    public Metapb.GraphSpace refreshGraphSpaceUsage(String name, long usedSize,
+                                                   PartitionService partitions) throws PDException {
+        synchronized (GRAPH_SPACE_LOCK) {
+            if (this.meta.getGraphSpaceExact(name) == null && !hasGraphs(name, partitions)) {
+                return null;
+            }
+            return this.setGraphSpaceUsage(name, usedSize);
+        }
+    }
+
+    public void deleteGraphSpace(String name, PartitionService partitions) throws PDException {
+        if (name == null || name.isEmpty() || name.indexOf('/') >= 0) {
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, "Invalid graph space name");
+        }
+        synchronized (GRAPH_SPACE_LOCK) {
+            List<String> names = graphNames(name, partitions).toList();
+            if (!names.isEmpty()) {
+                List<String> sample = names.stream().limit(GRAPH_SPACE_DIAGNOSTIC_NAMES)
+                                           .map(ConfigService::diagnosticGraphName).toList();
+                throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE,
+                                      String.format("PD still has %s graph record(s) in space '%s': %s " +
+                                                    "(showing up to %s names, %s characters each). " +
+                                                    "Inspect GET /v1/partitionsAndStats and compare " +
+                                                    "Server graph configuration before retrying " +
+                                                    "space deletion.",
+                                                    names.size(), name, sample, GRAPH_SPACE_DIAGNOSTIC_NAMES,
+                                                    GRAPH_SPACE_DIAGNOSTIC_NAME_LENGTH));
+            }
+            this.meta.deleteGraphSpace(name);
+        }
+    }
+
+    private static boolean hasGraphs(String name, PartitionService partitions) throws PDException {
+        return graphNames(name, partitions).findAny().isPresent();
+    }
+
+    private static Stream<String> graphNames(String name, PartitionService partitions) throws PDException {
+        String prefix = name + "/";
+        return partitions.getGraphs().stream().map(Metapb.Graph::getGraphName)
+                         .filter(graphName -> graphName.startsWith(prefix));
+    }
+
+    private static String diagnosticGraphName(String name) {
+        int end = Math.min(name.length(), GRAPH_SPACE_DIAGNOSTIC_NAME_LENGTH);
+        if (end < name.length() && Character.isHighSurrogate(name.charAt(end - 1))) {
+            end--;
+        }
+        return name.substring(0, end).replaceAll("\\p{Cntrl}", "?") + (end < name.length() ? "..." : "");
+    }
+
+    private Metapb.GraphSpace.Builder graphSpaceBuilder(String name) throws PDException {
+        Metapb.GraphSpace current = this.meta.getGraphSpaceExact(name);
+        return current == null ? Metapb.GraphSpace.newBuilder().setName(name) : current.toBuilder();
     }
 
     /**
@@ -81,6 +168,7 @@ public class ConfigService implements RaftStateListener {
                 mConfig = Metapb.PDConfig.newBuilder()
                                          .setPartitionCount(pdConfig.getInitialPartitionCount())
                                          .setShardCount(pdConfig.getPartition().getShardCount())
+                                         .setMinStoreCount(Math.max(0, pdConfig.getMinStoreCount()))
                                          .setVersion(1)
                                          .setTimestamp(System.currentTimeMillis())
                                          .setMaxShardsPerStore(
@@ -100,6 +188,7 @@ public class ConfigService implements RaftStateListener {
         pdConfig.getPartition().setShardCount(mConfig.getShardCount());
         pdConfig.getPartition().setTotalCount(mConfig.getPartitionCount());
         pdConfig.getPartition().setMaxShardsPerStore(mConfig.getMaxShardsPerStore());
+        pdConfig.setMinStoreCount(Math.max(0, mConfig.getMinStoreCount()));
         return pdConfig;
     }
 

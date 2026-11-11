@@ -39,11 +39,12 @@ PREFIXES = {
 WORKFLOWS = {
     "server": {"server-ci.yml": MAINLINE, "commons-ci.yml": {"commons"},
                "pd-store-ci.yml": {"struct", "pd", "store", "hstore"}, "cluster-test-ci.yml": {"cluster"},
-               "docker-build-ci.yml": {"docker"}, "helm-chart-ci.yml": {"helm"},
+               "docker-build-ci.yml": {"docker"},
                "codeql-analysis.yml": {"security"}, "server-memory-ci.yml": {"server"},
                "server-tests.yml": {"server", "hbase"},
                "server-compatibility-ci.yml": {"macos", "macos_full", "hbase", "riscv64"},
-               "riscv64-ci.yml": {"riscv64"}, "check-dependencies.yml": {"dependency_license"}},
+               "riscv64-ci.yml": {"riscv64"}, "check-dependencies.yml": {"dependency_license"},
+               "submit-dependencies.yml": {"dependency_license"}},
     "toolchain": {"client-ci.yml": {"client"}, "client-go-ci.yml": {"go"},
                   "loader-ci.yml": {"loader"}, "tools-ci.yml": {"tools"},
                   "spark-connector-ci.yml": {"spark"}, "hubble-ci.yml": {"hubble"},
@@ -57,15 +58,21 @@ DEPENDENTS = {
     "toolchain": {"client": {"loader", "tools", "spark", "hubble"}, "loader": {"hubble"}},
 }
 MAINTENANCE_INPUTS = {
+    ".github/actions/helm-checks/action.yml": {"helm"},
+    ".github/actions/rocksdb-compatibility/action.yml": {"pd", "store", "hstore"},
     ".asf.yaml": set(), ".editorconfig": set(), ".licenserc.yaml": set(),
     ".github/PULL_REQUEST_TEMPLATE.md": set(), ".github/dependabot.yml": set(),
     ".github/workflows/.java-version": MAINLINE | {"macos_full", "hbase", "riscv64"},
+    ".github/scripts/dependency-snapshot.py": {"dependency_license"},
+    ".github/scripts/dependency-inventory.py": {"dependency_license"},
+    ".github/scripts/test_dependency_snapshot.py": set(),  # Covered by preflight discovery.
     ".github/scripts/check-docker-images.sh": {"docker"},
     ".github/scripts/docker-deployment.py": {"docker"},
     ".github/scripts/test_docker_deployment.py": {"docker"},
 }
 PRESETS = {
     "mainline": MAINLINE,
+    "dependencies": {"dependency_license"},
     "distributed": {"struct", "pd", "store", "hstore", "cluster", "distributed_smoke"},
     "macos-arm": {"macos", "macos_full"}, "hbase": {"hbase"},
     "riscv64": {"riscv64"}, "codeql": {"security"}, "full": set(MODULES["server"]),
@@ -101,6 +108,9 @@ CONTRACT_SUITES = {
     TRAVIS + "test-check-jacoco-report.sh": {"struct"},
     TRAVIS + "test-codecov-upload-config.sh": {"struct"},
     TRAVIS + "test-riscv64-java-runtime.sh": {"server", "riscv64"},
+    TRAVIS + "test-store-docker-entrypoint.sh": {"store"},
+    TRAVIS + "test-start-hugegraph-store.sh": {"store"},
+    TRAVIS + "test-start-server.sh": {"server"},
 }
 
 

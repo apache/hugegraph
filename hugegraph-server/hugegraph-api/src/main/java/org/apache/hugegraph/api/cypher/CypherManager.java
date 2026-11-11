@@ -76,8 +76,7 @@ public final class CypherManager {
     private static YAMLConfiguration loadYaml(String configurationFile) {
         File yamlFile = getConfigFile(configurationFile);
         YAMLConfiguration yaml;
-        try {
-            Reader reader = new FileReader(yamlFile);
+        try (Reader reader = new FileReader(yamlFile)) {
             yaml = new YAMLConfiguration();
             yaml.read(reader);
         } catch (Exception e) {
@@ -92,9 +91,8 @@ public final class CypherManager {
         if (!systemFile.exists()) {
             ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
             URL resource = currentClassLoader.getResource(configurationFile);
-            assert resource != null;
-            File resourceFile = new File(resource.getFile());
-            if (!resourceFile.exists()) {
+            File resourceFile = resource == null ? null : new File(resource.getFile());
+            if (resourceFile == null || !resourceFile.exists()) {
                 throw new IllegalArgumentException(String.format("Configuration file at '%s' does" +
                                                                  " not exist", configurationFile));
             }

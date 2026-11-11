@@ -94,29 +94,16 @@ public abstract class UnaryAggregationFunction<U, T> extends AbstractAggregation
                              Supplier<AtomicInteger> integerSupplier,
                              Supplier<AtomicDouble> doubleSupplier,
                              Supplier<AtomicFloat> floatSupplier) {
-        Object result;
         var ins = this.supplier.get();
         //FIXME Using instance of statement
-        switch (ins.getClass().getName()) {
-            case "java.lang.Long":
-                result = longSupplier.get();
-                break;
-            case "java.lang.Integer":
-                result = integerSupplier.get();
-                break;
-            case "java.lang.Double":
-                result = doubleSupplier.get();
-                break;
-            case "java.lang.Float":
-                result = floatSupplier.get();
-                break;
-            case "java.lang.String":
-                result = null;
-                break;
-            default:
-                result = ins;
-                break;
-        }
+        Object result = switch (ins.getClass().getName()) {
+            case "java.lang.Long" -> longSupplier.get();
+            case "java.lang.Integer" -> integerSupplier.get();
+            case "java.lang.Double" -> doubleSupplier.get();
+            case "java.lang.Float" -> floatSupplier.get();
+            case "java.lang.String" -> null;
+            default -> ins;
+        };
 
         return (U) result;
     }

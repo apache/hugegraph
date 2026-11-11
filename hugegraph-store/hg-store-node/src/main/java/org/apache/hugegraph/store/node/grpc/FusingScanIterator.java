@@ -131,8 +131,8 @@ final class FusingScanIterator implements ScanIterator {
     }
 
     private void rethrowCleanupFailure() {
-        if (this.cleanupFailure instanceof RuntimeException) {
-            throw (RuntimeException) this.cleanupFailure;
+        if (this.cleanupFailure instanceof RuntimeException failure) {
+            throw failure;
         }
         if (this.cleanupFailure != null) {
             throw (Error) this.cleanupFailure;

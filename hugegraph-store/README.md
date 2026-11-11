@@ -85,6 +85,9 @@ For detailed architecture, Raft consensus mechanisms, and partition management, 
 
 ---
 
+For lightweight Raft dashboard counters and the detailed metrics contract, see
+[Store monitoring metrics](docs/monitoring.md).
+
 ## Quick Start
 
 ### Prerequisites
@@ -136,6 +139,7 @@ Extract the distribution package and edit `conf/application.yml`:
 | `grpc.port` | `8500` | gRPC server port for client connections |
 | `raft.address` | `127.0.0.1:8510` | Raft service address for this Store node |
 | `raft.snapshotInterval` | `1800` | Raft snapshot interval in seconds (30 minutes) |
+| `raft.maxSegmentFileSize` | `1073741824` | Maximum bytes per newly allocated segment log file when `raft.useRocksDBSegmentLogStorage=true`; nonempty files retain their size and incompatible blank allocations are isolated on restart |
 | `server.port` | `8520` | REST API port for management and metrics |
 | `app.data-path` | `./storage` | Directory for RocksDB data storage (supports multiple paths for multi-disk setups) |
 | `app.fake-pd` | `false` | Enable built-in PD mode for standalone testing (not for production) |
@@ -251,8 +255,10 @@ bin/start-hugegraph-store.sh [-c CONF_DIR] [-l LOGS_DIR] [-i PID_FILE] [-o PLUGI
 - `-l`: Logs directory (default: `logs` under the install root). Resolved to an
   absolute path if relative; created if missing.
 - `-i`: PID file (default: `bin/pid` under the install root). Resolved to an
-  absolute path if relative; must be removable/writable, but its parent is not
-  auto-created.
+  absolute path if relative; its parent directory is created if missing by
+  `start-hugegraph-store.sh` (and `restart-hugegraph-store.sh`, which
+  pre-validates the override before restarting). `stop-hugegraph-store.sh`
+  resolves the same `-i` path read-only, without creating it.
 - `-o`: Plugins directory (default: `plugins` under the install root). Resolved
   to an absolute path if relative; created if missing. Its contents are joined
   into a `:`-separated CLASSPATH, so avoid `:`/`;` in this path.
@@ -260,7 +266,9 @@ bin/start-hugegraph-store.sh [-c CONF_DIR] [-l LOGS_DIR] [-i PID_FILE] [-o PLUGI
   set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
   unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
   or `-j`; conflicting selections are rejected by the JVM.
-- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
+- `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g -XX:MaxDirectMemorySize=2g"`). A `-j` heap replaces the
+  launcher's direct-memory cap, so pass one with it; otherwise the RocksDB budget counts a second heap
+  of direct memory (see the deployment guide's Store Configuration).
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
 `-c`/`-l`/`-i`/`-o` must avoid embedded CR/LF characters; `stop-hugegraph-store.sh`
@@ -394,6 +402,10 @@ docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ### Run Container
 
 ```bash
+# The image runs as UID 10001; a host data directory must be writable by it
+# (see docker/README.md, "Container user")
+mkdir -p /path/to/storage && sudo chown 10001:10001 /path/to/storage
+
 docker run -d \
   -p 8520:8520 \
   -p 8500:8500 \
@@ -405,6 +417,10 @@ docker run -d \
   --name hugegraph-store \
   hugegraph/store:latest
 ```
+
+Add `-e HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=<bytes>` to pin the off-heap RocksDB budget.
+Without it the Store sizes the budget from the container memory limit; see
+[Store Configuration](docs/deployment-guide.md#store-configuration) in the deployment guide.
 
 **Exposed Ports**:
 - `8520`: REST API (management, metrics)

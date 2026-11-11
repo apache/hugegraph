@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.query.Condition;
 import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.LegacyClassNames;
 
 import com.google.common.collect.ImmutableMap;
@@ -73,7 +74,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
     public Condition deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context)
             throws JsonParseException {
         Condition condition = super.deserialize(json, typeOfT, context);
-        if (condition instanceof Condition.Relation) {
+        if (condition instanceof Condition.Relation relation) {
             JsonObject object = json.getAsJsonObject();
             if (object.has("el")) {
                 JsonElement elElement = object.get("el");
@@ -83,7 +84,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                     try {
                         Class actualClass = valueClass(cls);
                         Object obj = context.deserialize(valueElement, actualClass);
-                        ((Condition.Relation) condition).value(obj);
+                        relation.value(obj);
                     } catch (ClassNotFoundException e) {
                         throw new JsonParseException(e.getMessage());
                     }
@@ -95,7 +96,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                             Type type = TypeToken.getParameterized(ArrayList.class, actualClass)
                                                  .getType();
                             Object value = context.deserialize(valueElement, type);
-                            ((Condition.Relation) condition).value(value);
+                            relation.value(value);
                         } catch (ClassNotFoundException e) {
                             throw new JsonParseException(e.getMessage());
                         }
@@ -104,20 +105,22 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                         try {
                             Class actualClass = valueClass(cls);
                             Object obj = context.deserialize(valueElement, actualClass);
-                            ((Condition.Relation) condition).value(obj);
+                            relation.value(obj);
                         } catch (ClassNotFoundException e) {
                             throw new JsonParseException(e.getMessage());
                         }
                     }
 
-                } else if (valueElement.isJsonPrimitive() &&
+                } else if (relation.key() == HugeKeys.DIRECTION &&
+                           valueElement.isJsonPrimitive() &&
                            valueElement.getAsJsonPrimitive().isString()) {
-                    switch ((String) ((Condition.Relation) condition).value()) {
+                    // Gson writes Directions as its name, so only the direction key maps back
+                    switch ((String) relation.value()) {
                         case "OUT":
-                            ((Condition.Relation) condition).value(Directions.OUT);
+                            relation.value(Directions.OUT);
                             break;
                         case "IN":
-                            ((Condition.Relation) condition).value(Directions.IN);
+                            relation.value(Directions.IN);
                             break;
                         default:
                             break;
@@ -131,23 +134,23 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
     @Override
     public JsonElement serialize(Condition src, Type typeOfSrc, JsonSerializationContext context) {
         JsonElement result = super.serialize(src, typeOfSrc, context);
-        if (src instanceof Condition.Relation) {
+        if (src instanceof Condition.Relation relation) {
             JsonObject object = result.getAsJsonObject();
             JsonElement valueElement = object.get("el").getAsJsonObject().get("value");
             if (valueElement.isJsonObject()) {
                 valueElement.getAsJsonObject()
                             .add("cls",
                                  new JsonPrimitive(
-                                         ((Condition.Relation) src).value().getClass().getName()));
-            } else if (isPrimitive(((Condition.Relation) src).value().getClass())) {
+                                         relation.value().getClass().getName()));
+            } else if (isPrimitive(relation.value().getClass())) {
                 object.get("el").getAsJsonObject()
                       .add("valuecls",
                            new JsonPrimitive(
-                                   ((Condition.Relation) src).value().getClass().getName()));
+                                   relation.value().getClass().getName()));
             } else if (valueElement.isJsonArray()) {
-                if (((Condition.Relation) src).value() instanceof List) {
-                    String valueCls =
-                            ((List) ((Condition.Relation) src).value()).get(0).getClass().getName();
+                // An empty IN list has no element to take a class from
+                if (relation.value() instanceof List<?> values && !values.isEmpty()) {
+                    String valueCls = values.get(0).getClass().getName();
                     object.get("el").getAsJsonObject().add("valuecls", new JsonPrimitive(valueCls));
                 }
             }

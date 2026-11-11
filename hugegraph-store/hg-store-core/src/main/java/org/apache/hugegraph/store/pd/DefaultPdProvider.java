@@ -174,6 +174,12 @@ public class DefaultPdProvider implements PdProvider {
     }
 
     @Override
+    public Partition getPartitionByIDForRecovery(String graph, int partId) throws PDException {
+        KVPair<Metapb.Partition, Metapb.Shard> pair = pdClient.getPartitionByIdDirect(graph, partId);
+        return pair == null ? null : new Partition(pair.getKey());
+    }
+
+    @Override
     public Metapb.Shard getPartitionLeader(String graph, int partId) {
         try {
             KVPair<Metapb.Partition, Metapb.Shard> pair = pdClient.getPartitionById(

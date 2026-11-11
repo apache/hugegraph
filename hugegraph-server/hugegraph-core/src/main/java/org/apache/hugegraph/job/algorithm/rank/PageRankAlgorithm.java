@@ -308,10 +308,9 @@ public class PageRankAlgorithm extends AbstractCommAlgorithm {
 
         @Override
         public boolean equals(Object obj) {
-            if (!(obj instanceof DoublePair)) {
+            if (!(obj instanceof DoublePair other)) {
                 return false;
             }
-            DoublePair other = (DoublePair) obj;
             return this.left == other.left && this.right == other.right;
         }
 

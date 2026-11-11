@@ -709,17 +709,13 @@ public class K8sDriver {
     }
 
     private String image(Service service) {
-        switch (service.type()) {
-            case OLTP:
-                return this.oltpImage;
-            case OLAP:
-                return this.olapImage;
-            case STORAGE:
-                return this.storageImage;
-            default:
-                throw new AssertionError(String.format(
+        return switch (service.type()) {
+            case OLTP -> this.oltpImage;
+            case OLAP -> this.olapImage;
+            case STORAGE -> this.storageImage;
+            default -> throw new AssertionError(String.format(
                         "Invalid service type '%s'", service.type()));
-        }
+        };
     }
 
     public int podsRunning(GraphSpace graphSpace, Service service) {

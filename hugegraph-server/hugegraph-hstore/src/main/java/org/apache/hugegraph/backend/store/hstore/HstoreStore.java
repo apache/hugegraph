@@ -532,8 +532,8 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
                 // Merge olap results as needed
                 Query query = queries.get(i);
                 entries = getBackendEntryIterator(entries, query);
-                if (entries instanceof CIter) {
-                    results.add((CIter) entries);
+                if (entries instanceof CIter cIter) {
+                    results.add(cIter);
                 }
             }
             return results;

@@ -89,8 +89,9 @@ bin/start-hugegraph-pd.sh [-c CONF_DIR] [-l LOGS_DIR] [-i PID_FILE] [-o PLUGINS_
 - `-l`: Logs directory (default: `logs` under the install root). Resolved to an
   absolute path if relative; created if missing.
 - `-i`: PID file (default: `bin/pid` under the install root). Resolved to an
-  absolute path if relative; must be removable/writable, but its parent is not
-  auto-created.
+  absolute path if relative; its parent directory is created if missing by
+  `start-hugegraph-pd.sh`. `stop-hugegraph-pd.sh` resolves the same `-i` path
+  read-only, without creating it.
 - `-o`: Plugins directory (default: `plugins` under the install root). Resolved
   to an absolute path if relative; created if missing. Its contents are joined
   into a `:`-separated CLASSPATH, so avoid `:`/`;` in this path.
@@ -266,6 +267,10 @@ docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:latest .
 # Generate the REST secret once and keep it: every PD REST client needs this same value, and a new one silently breaks the clients already using the old one. Store it somewhere durable rather than only in this shell.
 export HG_PD_AUTH_SECRET_KEY="$(openssl rand -hex 24)"
 
+# The image runs as UID 10001; a host data directory must be writable by it
+# (see docker/README.md, "Container user")
+mkdir -p /path/to/data && sudo chown 10001:10001 /path/to/data
+
 # Run container
 docker run -d \
   -p 8620:8620 \
@@ -305,6 +310,7 @@ docker/docker-compose-3pd-3store-3server.yml
 - PD uses Raft consensus for leader election and data replication
 - Cluster can tolerate up to `(N-1)/2` node failures (e.g., 1 failure in 3-node cluster)
 - Leader handles all write operations; followers handle read operations
+- Never delete RocksDB `LOCK` files under `pd.data-path` to get a restarted PD going; see [PD Core Settings](docs/configuration.md#pd-core-settings)
 
 ### Network Requirements
 

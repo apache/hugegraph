@@ -44,6 +44,7 @@ public class UnionFilterIterator<T extends Serializable> implements ScanIterator
     private final SortShuffleSerializer<T> serializer;
     private Object current;
     private boolean isProcessed = false;
+    private boolean closed;
 
     public UnionFilterIterator(ScanIterator iterator, IntersectionWrapper<T> wrapper,
                                Comparator<T> comparator, SortShuffleSerializer<T> serializer) {
@@ -74,6 +75,12 @@ public class UnionFilterIterator<T extends Serializable> implements ScanIterator
 
     @Override
     public boolean hasNext() {
+        if (this.closed) {
+            return false;
+        }
+        if (this.current != null) {
+            return true;
+        }
         while (this.iterator.hasNext()) {
             var obj = (T) this.iterator.next();
             // batch get or index lookup may generate null
@@ -131,23 +138,29 @@ public class UnionFilterIterator<T extends Serializable> implements ScanIterator
     @Override
     public boolean isValid() {
         // todo: check logic
-        return this.iterator.isValid() || hasNext();
+        return !this.closed && (this.iterator.isValid() || hasNext());
     }
 
     @Override
     public <X> X next() {
-        if (current == null) {
+        if (!hasNext() || this.current == null) {
             throw new NoSuchElementException();
         }
-
-        return (X) current;
+        X result = (X) this.current;
+        this.current = null;
+        return result;
     }
 
     @Override
     public void close() {
-        this.iterator.close();
-        if (this.sortShuffle != null) {
-            this.sortShuffle.close();
+        this.closed = true;
+        this.current = null;
+        try (SortShuffle<T> shuffle = this.sortShuffle) {
+            this.iterator.close();
+        } finally {
+            this.sortShuffle = null;
+            this.innerIterator = null;
+            this.map.clear();
         }
     }
 
@@ -170,57 +183,46 @@ public class UnionFilterIterator<T extends Serializable> implements ScanIterator
 
         private final Iterator<E> iterator;
         private final Comparator<E> comparator;
-        private E prev = null;
-        private E data = null;
-        private int count = 0;
+        private E prev;
+        private E data;
 
         public NoRepeatValueIterator(Iterator<E> iterator, Comparator<E> comparator) {
-            this.count = 0;
             this.iterator = iterator;
             this.comparator = comparator;
         }
 
         @Override
         public boolean hasNext() {
-            while (iterator.hasNext()) {
-                var n = iterator.next();
-                if (prev == null) {
-                    // prev = iterator.next();
-                    prev = n;
-                    continue;
-                }
-
-                // E current = iterator.next();
-                E current = n;
-
-                if (comparator.compare(prev, current) == 0) {
-                    count += 1;
-                } else {
-                    if (count > 0) {
-                        // --- pre is dup
-                        prev = current;
-                    } else {
-                        data = prev;
-                        prev = current;
-                        return true;
-                    }
-                    count = 0;
-                }
-            }
-
-            // last result
-            if (count == 0) {
-                data = prev;
-                count = 1;
+            if (this.data != null) {
                 return true;
             }
+            while (this.iterator.hasNext()) {
+                E current = this.iterator.next();
+                if (this.prev == null) {
+                    this.prev = current;
+                } else if (this.comparator.compare(this.prev, current) != 0) {
+                    this.data = this.prev;
+                    this.prev = current;
+                    return true;
+                }
+            }
 
+            if (this.prev != null) {
+                this.data = this.prev;
+                this.prev = null;
+                return true;
+            }
             return false;
         }
 
         @Override
         public E next() {
-            return data;
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            E result = this.data;
+            this.data = null;
+            return result;
         }
     }
 }

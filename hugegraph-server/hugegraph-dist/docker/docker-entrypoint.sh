@@ -26,6 +26,17 @@ mkdir -p "${DOCKER_FOLDER}"
 
 log() { echo "[hugegraph-server-entrypoint] $*"; }
 
+source ./bin/util.sh
+record_jvm_startup_diagnostics
+run_startup_step() {
+    local status=0
+    "$@" || status=$?
+    if [[ "$status" -ne 0 ]]; then
+        diagnose_jvm_startup_failure
+    fi
+    return "$status"
+}
+
 # Keep typed/list mappings on their existing encoder; auth strings use native-reader escapes below.
 # TODO: relax Helm's password-space guard once its minimum Server image includes this auth encoder.
 encode_prop_value() {
@@ -296,7 +307,7 @@ if [[ ! -f "${INIT_MARKER_PATH}" ]]; then
 
     if [[ -z "${PASSWORD:-}" ]]; then
         log "init hugegraph with non-auth mode"
-        ./bin/init-store.sh
+        run_startup_step ./bin/init-store.sh
     else
         log "init hugegraph with auth mode"
         # init-store reads the password from stdin, and a disabled one returns
@@ -307,7 +318,7 @@ if [[ ! -f "${INIT_MARKER_PATH}" ]]; then
                     "the entrypoint applies it through 'auth.admin_pa' for" \
                     "the PD startup path" ;;
         esac
-        printf '%s\n' "${PASSWORD}" | ./bin/init-store.sh
+        printf '%s\n' "${PASSWORD}" | run_startup_step ./bin/init-store.sh
     fi
 else
     log "HugeGraph initialization already done. Revalidating the config..."
@@ -317,12 +328,11 @@ else
     # says nothing about whether the admin the current config relies on is
     # reachable. An enabled one returns at the marker, before it touches the
     # backend or reads stdin, so neither wait-storage nor PASSWORD is needed.
-    ./bin/init-store.sh
+    run_startup_step ./bin/init-store.sh
 fi
 
 # Own the foreground launcher so wait can recover the JVM's actual status.
 # A daemon JVM is not our child; watching its PID with tail loses that status.
-source ./bin/util.sh
 LAUNCHER_PID=""
 READINESS_PID=""
 PARTITION_PID=""
@@ -370,6 +380,7 @@ wait "$READINESS_PID" || READY_STATUS=$?
 READINESS_PID=""
 if [[ "$READY_STATUS" -ne 0 ]]; then
     log "ERROR: HugeGraphServer did not become ready; see the container logs"
+    diagnose_jvm_startup_failure
     if kill -0 "$LAUNCHER_PID" 2>/dev/null; then
         # Keep the startup deadline even if the JVM ignores TERM. Container
         # termination cleans up any remaining processes; don't wait forever.

@@ -17,9 +17,11 @@
 
 package org.apache.hugegraph.store.business.itrv2.io;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 
 import org.apache.hugegraph.backend.BackendColumn;
@@ -32,8 +34,6 @@ import org.apache.hugegraph.structure.BaseEdge;
 import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.structure.BaseVertex;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
  * support backend column, Multi kv, BaseElement
  * format : object | object | object
@@ -41,7 +41,6 @@ import lombok.extern.slf4j.Slf4j;
  *
  * @param <T> object type
  */
-@Slf4j
 public class SortShuffleSerializer<T> {
 
     private static final byte TYPE_HEADER_MULTI_KV = 1;
@@ -144,12 +143,21 @@ public class SortShuffleSerializer<T> {
             if (bytes.length == 0) {
                 return null;
             }
+            if (bytes.length != Integer.BYTES) {
+                throw new EOFException("Incomplete shuffle record length");
+            }
 
             int sz = toInt(bytes);
-            return serializer.fromBytes(input.readNBytes(sz));
+            if (sz < 0) {
+                throw new IOException("Invalid shuffle record length: " + sz);
+            }
+            byte[] payload = input.readNBytes(sz);
+            if (payload.length != sz) {
+                throw new EOFException("Incomplete shuffle record payload");
+            }
+            return serializer.fromBytes(payload);
         } catch (IOException e) {
-            log.debug("error: {}", e.getMessage());
-            return null;
+            throw new UncheckedIOException("Failed to read shuffle record", e);
         }
     }
 
@@ -245,8 +253,8 @@ public class SortShuffleSerializer<T> {
 
             BackendColumn column;
             boolean isVertex = false;
-            if (element instanceof BaseVertex) {
-                column = serializer.writeVertex((BaseVertex) element);
+            if (element instanceof BaseVertex vertex) {
+                column = serializer.writeVertex(vertex);
                 isVertex = true;
             } else {
                 column = serializer.writeEdge((BaseEdge) element);

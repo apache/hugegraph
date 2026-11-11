@@ -70,30 +70,16 @@ public class HanLPAnalyzer implements Analyzer {
 
     @Override
     public Set<String> segment(String text) {
-        List<Term> terms;
-        switch (this.tokenizer) {
-            case "standard":
-                terms = StandardTokenizer.segment(text);
-                break;
-            case "nlp":
-                terms = NLPTokenizer.segment(text);
-                break;
-            case "index":
-                terms = IndexTokenizer.segment(text);
-                break;
-            case "nShort":
-                terms = N_SHORT_SEGMENT.seg(text);
-                break;
-            case "shortest":
-                terms = DIJKSTRA_SEGMENT.seg(text);
-                break;
-            case "speed":
-                terms = SpeedTokenizer.segment(text);
-                break;
-            default:
-                throw new AssertionError(String.format(
+        List<Term> terms = switch (this.tokenizer) {
+            case "standard" -> StandardTokenizer.segment(text);
+            case "nlp" -> NLPTokenizer.segment(text);
+            case "index" -> IndexTokenizer.segment(text);
+            case "nShort" -> N_SHORT_SEGMENT.seg(text);
+            case "shortest" -> DIJKSTRA_SEGMENT.seg(text);
+            case "speed" -> SpeedTokenizer.segment(text);
+            default -> throw new AssertionError(String.format(
                         "Unsupported segment mode '%s'", this.tokenizer));
-        }
+        };
 
         assert terms != null;
         Set<String> result = InsertionOrderUtil.newSet();

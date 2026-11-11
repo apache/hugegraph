@@ -26,6 +26,7 @@ import java.io.StringWriter;
 import java.text.ParseException;
 import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -44,6 +45,7 @@ import java.util.stream.Collectors;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 import org.apache.commons.configuration2.Configuration;
@@ -108,6 +110,8 @@ import org.apache.hugegraph.rpc.RpcProviderConfig;
 import org.apache.hugegraph.rpc.RpcServer;
 import org.apache.hugegraph.serializer.JsonSerializer;
 import org.apache.hugegraph.serializer.Serializer;
+import org.apache.hugegraph.schema.SchemaManager;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.server.RestServer;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
@@ -168,6 +172,8 @@ public final class GraphManager {
     private final Boolean graphLoadFromLocalConfig;
     private final Boolean k8sApiEnabled;
     private final Map<String, GraphSpace> graphSpaces;
+    // Guarded by the graphSpaces monitor; advances even when PUT mutates the same cached object.
+    private long graphSpaceCacheVersion;
     private final Map<String, Service> services;
     //FIXME: add one class like graphKey as key,which contains graphSpace and graphName
     private final Map<String, Graph> graphs;
@@ -792,7 +798,7 @@ public final class GraphManager {
     private void loadGraphSpaces() {
         Map<String, GraphSpace> graphSpaceConfigs =
                 this.metaManager.graphSpaceConfigs();
-        this.graphSpaces.putAll(graphSpaceConfigs);
+        graphSpaceConfigs.forEach(this::publishGraphSpace);
         for (Map.Entry<String, GraphSpace> entry : graphSpaceConfigs.entrySet()) {
             if (this.serviceGraphSpace.equals(entry.getKey())) {
                 overwriteAlgorithmImageUrl(entry.getValue().internalAlgorithmImageUrl());
@@ -904,9 +910,9 @@ public final class GraphManager {
         graphSpace = this.createGraphSpace(DEFAULT_GRAPH_SPACE_SERVICE_NAME,
                                            GraphSpace.DEFAULT_NICKNAME,
                                            DEFAULT_GRAPH_SPACE_DESCRIPTION,
-                                           Integer.MAX_VALUE, Integer.MAX_VALUE,
-                                           Integer.MAX_VALUE, Integer.MAX_VALUE,
-                                           Integer.MAX_VALUE, oltpNs, olapNs,
+                                           GraphSpace.DEFAULT_CPU_LIMIT, GraphSpace.DEFAULT_MEMORY_LIMIT,
+                                           GraphSpace.DEFAULT_STORAGE_LIMIT, GraphSpace.DEFAULT_MAX_GRAPH_NUMBER,
+                                           GraphSpace.DEFAULT_MAX_ROLE_NUMBER, oltpNs, olapNs,
                                            false, User.ADMIN.getName(),
                                            ImmutableMap.of());
         boolean useK8s = config.get(ServerOptions.SERVER_USE_K8S);
@@ -1023,16 +1029,14 @@ public final class GraphManager {
         this.metaManager.appendGraphSpaceList(name);
         this.metaManager.notifyGraphSpaceAdd(name);
 
-        this.graphSpaces.put(name, space);
-        return space;
+        return this.publishGraphSpace(name, space);
     }
 
     private GraphSpace updateGraphSpace(GraphSpace space) {
         String name = space.name();
         this.metaManager.addGraphSpaceConfig(name, space);
         this.metaManager.notifyGraphSpaceUpdate(name);
-        this.graphSpaces.put(name, space);
-        return space;
+        return this.publishGraphSpace(name, space);
     }
 
     /**
@@ -1113,9 +1117,12 @@ public final class GraphManager {
         assert metaDriver instanceof PdMetaDriver;
         PDClient pdClient = ((PdMetaDriver) metaDriver).pdClient();
         try {
-            Metapb.GraphSpace spaceMeta = pdClient.getGraphSpace(graphSpace).get(0);
-            Long usedGb = (spaceMeta.getUsedSize() / (1024 * 1024));
-            gs.setStorageUsed(usedGb.intValue());
+            for (Metapb.GraphSpace spaceMeta : pdClient.getGraphSpace(graphSpace)) {
+                if (graphSpace.equals(spaceMeta.getName())) {
+                    gs.setStorageUsedKb(spaceMeta.getUsedSize());
+                    break;
+                }
+            }
         } catch (PDException e) {
             LOG.error("Get graph space '{}' storage information meet error {}",
                       graphSpace, e);
@@ -1150,10 +1157,29 @@ public final class GraphManager {
                                     this.serviceGraphSpace);
         }
         this.clearGraphSpace(name);
+        MetaDriver metaDriver = this.metaManager.metaDriver();
+        if (metaDriver instanceof PdMetaDriver) {
+            try {
+                ((PdMetaDriver) metaDriver).pdClient().deleteGraphSpace(name);
+            } catch (PDException e) {
+                throw new HugeException("Failed to remove graph space '%s' statistics from PD: %s", e,
+                                        name, StringUtils.abbreviate(e.getMessage(), 2048));
+            } catch (StatusRuntimeException e) {
+                if (e.getStatus().getCode() == Status.Code.UNIMPLEMENTED) {
+                    throw new HugeException("PD does not support graph-space statistics cleanup " +
+                                            "(UNIMPLEMENTED). Upgrade all PD nodes before retrying " +
+                                            "deletion of graph space '%s'. Graphs, graph-space " +
+                                            "authorization, schema templates and services have " +
+                                            "already been cleared; space configuration and its " +
+                                            "list entry are retained.", e, name);
+                }
+                throw new HugeException("Failed to remove graph space '%s' statistics from PD", e, name);
+            }
+        }
         this.metaManager.removeGraphSpaceConfig(name);
         this.metaManager.clearGraphSpaceList(name);
         this.metaManager.notifyGraphSpaceRemove(name);
-        this.graphSpaces.remove(name);
+        this.publishGraphSpace(name, null);
     }
 
     private void registerServiceToPd(String graphSpace, Service service) {
@@ -1341,6 +1367,54 @@ public final class GraphManager {
         newConfigs.put("update_time", timeStamp);
 
         return this.createGraph(graphspace, newName, creator, newConfigs, true);
+    }
+
+    /** Create a graph with the source schema only; graph elements are not copied. */
+    public HugeGraph cloneGraphSchema(String graphspace, String source, String target,
+                                      String nickname, String creator) {
+        HugeGraph sourceGraph = this.graph(spaceGraphName(graphspace, source));
+        E.checkArgumentNotNull(sourceGraph,
+                               "The clone source graph '%s' doesn't exist in graphspace '%s'",
+                               source, graphspace);
+        SchemaManager sourceSchema = sourceGraph.schema();
+        // Some schema stores do not persist edge-label hierarchy metadata. A
+        // normal label cannot then be distinguished from a parent or child.
+        // Refuse all edge labels until the storage contract can prove fidelity.
+        E.checkArgument(sourceSchema.getEdgeLabels().isEmpty(),
+                        "Schema cloning does not currently support graphs with edge labels");
+        Map<String, Object> overrides = new HashMap<>();
+        // A source template may have changed since it was applied. Copy the actual schema.
+        overrides.put(CoreOptions.SCHEMA_INIT_TEMPLATE.name(), "");
+        overrides.put("creator", creator);
+        if (nickname != null) {
+            overrides.put("nickname", nickname);
+        } else {
+            overrides.put("nickname", target);
+        }
+        HugeGraph graph = this.cloneGraph(graphspace, source, target, overrides);
+        try {
+            SchemaManager schema = graph.schema();
+            schema.copyFromWithoutEdges(sourceSchema);
+            E.checkState(sourceSchema.getEdgeLabels().isEmpty(),
+                         "Source edge labels changed during schema cloning");
+            // Synchronous builders wait for tasks, but a completed task can have failed.
+            checkCopiedSchema(schema.getPropertyKeys());
+            checkCopiedSchema(schema.getVertexLabels());
+            checkCopiedSchema(schema.getEdgeLabels());
+            checkCopiedSchema(schema.getIndexLabels());
+        } catch (RuntimeException failure) {
+            // The graph can already be visible to other clients. Never delete it implicitly.
+            LOG.warn("Schema copy to graph '{}' failed", target, failure);
+            throw new HugeException("Failed to copy schema to graph '%s'; " +
+                                    "the target may be partially created and needs inspection", target);
+        }
+        return graph;
+    }
+
+    private static void checkCopiedSchema(Collection<? extends SchemaElement> elements) {
+        for (SchemaElement element : elements) {
+            E.checkState(element.status().ok(), "A copied schema element is not ready");
+        }
     }
 
     private void loadGraph(Map<String, Map<String, Object>> graphConfigs) {
@@ -1648,6 +1722,7 @@ public final class GraphManager {
         }
         if (!grpcThread) {
             this.metaManager.updateGraphSpaceConfig(graphSpace, gs);
+            this.publishGraphSpace(graphSpace, gs);
         }
 
         if (init) {
@@ -1670,8 +1745,8 @@ public final class GraphManager {
         Graph graph = this.graphs.get(spaceGraphName);
         if (graph == null) {
             return null;
-        } else if (graph instanceof HugeGraph) {
-            return (HugeGraph) graph;
+        } else if (graph instanceof HugeGraph matchedHugeGraph) {
+            return matchedHugeGraph;
         }
         throw new NotSupportException("graph instance of %s", graph.getClass());
     }
@@ -2157,6 +2232,9 @@ public final class GraphManager {
     }
 
     private void listenMetaChanges() {
+        this.metaManager.listenGraphSpaceAdd(ConsumerWrapper.wrap(this::graphSpaceRefreshHandler));
+        this.metaManager.listenGraphSpaceUpdate(ConsumerWrapper.wrap(this::graphSpaceRefreshHandler));
+        this.metaManager.listenGraphSpaceRemove(ConsumerWrapper.wrap(this::graphSpaceRemoveHandler));
         this.metaManager.listenGraphAdd(ConsumerWrapper.wrap(this::graphAddHandler));
         this.metaManager.listenGraphRemove(ConsumerWrapper.wrap(this::graphRemoveHandler));
         this.metaManager.listenGraphUpdate(ConsumerWrapper.wrap(this::graphUpdateHandler));
@@ -2212,6 +2290,7 @@ public final class GraphManager {
         lock = this.metaManager.lock(this.cluster, graphSpace);
         gs.recycleResourceFor(service);
         this.metaManager.updateGraphSpaceConfig(graphSpace, gs);
+        this.publishGraphSpace(graphSpace, gs);
         this.metaManager.notifyGraphSpaceUpdate(graphSpace);
         this.metaManager.unlock(lock, this.cluster, graphSpace);
 
@@ -2391,8 +2470,8 @@ public final class GraphManager {
                 return graph1;
             }
             throw new NotFoundException(String.format("Graph '%s' does not exist", name));
-        } else if (graph instanceof HugeGraph) {
-            return (HugeGraph) graph;
+        } else if (graph instanceof HugeGraph matchedHugeGraph) {
+            return matchedHugeGraph;
         }
         throw new NotSupportException("graph instance of %s", graph.getClass());
     }
@@ -2540,6 +2619,7 @@ public final class GraphManager {
                         gs.graphNumberUsed(used);
                         throw failure;
                     }
+                    this.publishGraphSpace(graphSpace, gs);
                 }
                 // Remove the factory binding before permitting same-name creation.
                 HugeFactory.remove(g);
@@ -2635,17 +2715,41 @@ public final class GraphManager {
             return new GraphSpace("DEFAULT");
         }
         GraphSpace space = this.graphSpaces.get(name);
-        if (space == null) {
-            // Cache miss: try to load from etcd and populate the local cache
-            // so that subsequent calls (e.g. validGraphSpace checks) don't fail
-            // due to a race between the graphspace-create event and the listener
-            // updating this.graphSpaces.
-            space = this.metaManager.graphSpace(name);
-            if (space != null) {
-                this.graphSpaces.putIfAbsent(name, space);
+        return space == null ? this.readGraphSpace(name, false) : space;
+    }
+
+    private GraphSpace publishGraphSpace(String name, GraphSpace space) {
+        synchronized (this.graphSpaces) {
+            if (space == null) {
+                this.graphSpaces.remove(name);
+            } else {
+                this.graphSpaces.put(name, space);
+            }
+            this.graphSpaceCacheVersion++;
+            return space;
+        }
+    }
+
+    private GraphSpace readGraphSpace(String name, boolean refresh) {
+        while (true) {
+            long version;
+            synchronized (this.graphSpaces) {
+                GraphSpace cached = this.graphSpaces.get(name);
+                if (!refresh && cached != null) {
+                    return cached;
+                }
+                version = this.graphSpaceCacheVersion;
+            }
+            // Never hold the cache lock across metadata IO or notification callbacks.
+            GraphSpace current = this.metaManager.graphSpace(name);
+            synchronized (this.graphSpaces) {
+                if (version != this.graphSpaceCacheVersion) {
+                    // A completed local mutation may have changed the same object's fields.
+                    continue;
+                }
+                return current == null && !refresh ? null : this.publishGraphSpace(name, current);
             }
         }
-        return space;
     }
 
     public Serializer serializer() {
@@ -2937,6 +3041,21 @@ public final class GraphManager {
         }
     }
 
+    private <T> void graphSpaceRefreshHandler(T response) {
+        for (String name : this.metaManager.extractGraphSpacesFromResponse(response)) {
+            // Notifications carry only names: read current metadata so delayed events cannot restore old quotas.
+            this.readGraphSpace(name, true);
+        }
+    }
+
+    private <T> void graphSpaceRemoveHandler(T response) {
+        for (String name : this.metaManager.extractGraphSpacesFromResponse(response)) {
+            // Refresh recreated spaces, but retry snapshots superseded by a local mutation.
+            this.readGraphSpace(name, true);
+            this.services.keySet().removeIf(key -> key.startsWith(name + DELIMITER));
+        }
+    }
+
     private <T> void graphRemoveHandler(T response) {
         List<String> graphNames = this.metaManager
                 .extractGraphsFromResponse(response);
@@ -2974,8 +3093,7 @@ public final class GraphManager {
         for (String graphName : graphNames) {
             if (this.graphs.containsKey(graphName)) {
                 Graph graph = this.graphs.get(graphName);
-                if (graph instanceof HugeGraph) {
-                    HugeGraph hugeGraph = (HugeGraph) graph;
+                if (graph instanceof HugeGraph hugeGraph) {
                     String[] values =
                             graphName.split(MetaManager.META_PATH_JOIN);
                     if (values.length < 2) {
@@ -3006,8 +3124,7 @@ public final class GraphManager {
         for (String graphName : graphNames) {
             if (this.graphs.containsKey(graphName)) {
                 Graph graph = this.graphs.get(graphName);
-                if (graph instanceof HugeGraph) {
-                    HugeGraph hugeGraph = (HugeGraph) graph;
+                if (graph instanceof HugeGraph hugeGraph) {
                     ((AbstractBackendStoreProvider) hugeGraph.storeProvider())
                             .notifyAndWaitEvent(Events.STORE_CLEAR);
                 }

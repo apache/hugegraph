@@ -66,8 +66,9 @@
             <unpack>false</unpack>
             <scope>runtime</scope>
             <useProjectArtifact>false</useProjectArtifact>
+            <outputFileNameMapping>${artifact.artifactId}-${artifact.version}.${artifact.extension}</outputFileNameMapping>
             <includes>
-                <include>org.apache.hugegraph:${executable.jar.name}:jar:*</include>
+                <include>org.apache.hugegraph:${executable.jar.name}:jar:exec</include>
             </includes>
         </dependencySet>
     </dependencySets>
