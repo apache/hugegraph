@@ -165,6 +165,10 @@ enum ErrorType {
 
   // Invalid number of splits
   Invalid_Split_Partition_Count = 1011;
+
+  // A KV txn that PD did not propose (invalid request, or a PD peer without the txn
+  // opcode): nothing was applied, unlike UNKNOWN, which is an unknown outcome
+  TXN_NOT_PROPOSED = 1012;
 }
 
 message Error {

@@ -18,6 +18,8 @@
 package org.apache.hugegraph.pd;
 
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -26,10 +28,13 @@ import java.util.Map;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.grpc.kv.Kv;
+import org.apache.hugegraph.pd.grpc.kv.TxnRequest;
+import org.apache.hugegraph.pd.grpc.kv.TxnResponse;
 import org.apache.hugegraph.pd.grpc.kv.V;
 import org.apache.hugegraph.pd.meta.MetadataKeyHelper;
 import org.apache.hugegraph.pd.meta.MetadataRocksDBStore;
 import org.apache.hugegraph.pd.store.KV;
+import org.apache.hugegraph.pd.store.KvTxnApplier;
 import org.springframework.stereotype.Service;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -71,6 +76,40 @@ public class KvService {
         return key.getBytes(Charset.defaultCharset());
     }
 
+    /**
+     * The TTL marker {@link #getTTLStoreKey(String, long)} wrote next to the store key of a
+     * value that expires at expireAt (the ttl field of its {@link V}), so every raft node
+     * names the same marker, the one getTTLStoreKey wrote. The TTL cleanup is meant to delete
+     * the key a marker names once the marker's time has passed, whatever the key holds by then
+     * (it deletes another name today, apache/hugegraph#3378), so a write that replaces a TTL
+     * value deletes its marker too.
+     */
+    public static byte[] ttlMarkerKey(byte[] storeKey, long expireAt, String charsetName) {
+        /*
+         * K@T@<time>@<key>. Only the ASCII prefixes are encoded, in the charset that encoded
+         * the keys of the entry (the proposer's, carried in the TXN entry), so a non
+         * ASCII-compatible one such as UTF-16 names the marker it wrote. The key's own bytes
+         * are kept as they are: a key a prefix scan finds may have been written long ago, in
+         * another ASCII-compatible charset, and its marker holds the same bytes. Without a
+         * charset, the prefixes are ASCII.
+         */
+        Charset charset = charsetName == null || charsetName.isEmpty() ?
+                          StandardCharsets.ISO_8859_1 : Charset.forName(charsetName);
+        byte[] keyPrefix = KV_PREFIX_DELIMITER.getBytes(charset);
+        if (storeKey.length < keyPrefix.length ||
+            !Arrays.equals(keyPrefix, Arrays.copyOf(storeKey, keyPrefix.length))) {
+            throw new IllegalArgumentException("Not a KV store key in " + charset + ": " +
+                                               new String(storeKey, charset));
+        }
+        // The prefix, for a charset that writes a byte order mark, starts with it, once
+        byte[] markerPrefix = (KV_PREFIX_DELIMITER + TTL_PREFIX + KV_DELIMITER + expireAt +
+                               KV_DELIMITER).getBytes(charset);
+        int keyLength = storeKey.length - keyPrefix.length;
+        byte[] marker = Arrays.copyOf(markerPrefix, markerPrefix.length + keyLength);
+        System.arraycopy(storeKey, keyPrefix.length, marker, markerPrefix.length, keyLength);
+        return marker;
+    }
+
     public static String getKeyWithoutPrefix(Object... keys) {
         StringBuilder builder = MetadataKeyHelper.getStringBuilderHelper();
         for (Object key : keys) {
@@ -104,6 +143,16 @@ public class KvService {
         meta.put(getStoreKey(key), storeValue.toByteArray());
         meta.put(getTTLStoreKey(key, curTime), EMPTY_VALUE);
         // log.warn("add key with key-{}:value-{}:ttl-{}", key, value, ttl);
+    }
+
+    /**
+     * Atomic multi-key write, see {@link KvTxnApplier}. A failed compare or a rejected record
+     * is an unsuccessful response, not an exception. Keys a TXN writes must not be written with
+     * put or delete as well.
+     */
+    public TxnResponse txn(TxnRequest request) throws PDException {
+        KvTxnApplier.validate(request);
+        return meta.getStore().txn(request);
     }
 
     public String get(String key) throws PDException {
