@@ -24,8 +24,8 @@ github:
     discussions: true
   description: A graph database that supports more than 100+ billion data, high performance and scalability (Include OLTP Engine & REST-API & Backends)
   homepage: https://hugegraph.apache.org
-  del_branch_on_merge: true
   pull_requests:
+    del_branch_on_merge: true
     creation_cap:
       enabled: true
       max_open_pull_requests: 5
