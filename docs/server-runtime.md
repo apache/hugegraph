@@ -75,7 +75,7 @@ Relative values are resolved to absolute paths before use: `-l` and `-o` name
 directories the launcher writes into, so a relative or missing directory is
 created; `-c` is only ever read, so a relative value is resolved without
 creating anything, and a missing `-c` directory is a startup error. `-i`'s
-parent directory is created by `start-hugegraph.sh` (and `init-store.sh`),
+parent directory is created by `start-hugegraph.sh`,
 matching `-l`/`-o`; `stop-hugegraph.sh` and the monitor cron job resolve the
 same `-i` path read-only, without creating it, so a missing PID file or
 parent at stop time is a lookup error rather than being created.

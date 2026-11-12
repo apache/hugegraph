@@ -256,7 +256,7 @@ fi
 #if [ "${JMX_EXPORT_PORT}" != "" ] && [ ${JMX_EXPORT_PORT} -ne 0 ] ; then
 #  JAVA_OPTIONS="${JAVA_OPTIONS} -javaagent:${LIB}/jmx_prometheus_javaagent-0.16.1.jar=${JMX_EXPORT_PORT}:${CONF}/jmx_exporter.yml"
 #fi
-if [ "$(ps -ef | grep -v grep | grep java | grep -cF -- "${CONF}")" -ne 0 ]; then
+if [ "$(ps -ef | grep -v grep | grep java | grep -cF -- "-Dspring.config.location=${CONF}/application.yml")" -ne 0 ]; then
    echo "HugeGraphPDServer is already running..."
    exit 0
 fi
