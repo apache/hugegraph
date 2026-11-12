@@ -18,6 +18,7 @@
 package org.apache.hugegraph.pd;
 
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -297,16 +298,87 @@ public class KvService {
             byte[] ttlStartKey = getTTLStoreKey("", 0);
             byte[] ttlEndKey = getTTLStoreKey("", System.currentTimeMillis());
             List<KV> kvList = meta.scanRange(ttlStartKey, ttlEndKey);
+            // A marker is K@T@<time>@<key>: the key starts after the delimiter that ends the time
+            int timeStart = (KV_PREFIX_DELIMITER + TTL_PREFIX + KV_DELIMITER).length();
             for (KV kv : kvList) {
                 String key = new String(kv.getKey());
-                int index = key.indexOf(KV_DELIMITER, 2);
+                int index = key.indexOf(KV_DELIMITER, timeStart);
+                if (!isMarkerTime(key, timeStart, index)) {
+                    // An ordinary key that sorts among the markers, such as T@12ab@x: not one
+                    continue;
+                }
                 String delKey = key.substring(index + 1);
-                delete(delKey);
-                meta.remove(kv.getKey());
+                byte[] stored = meta.getOne(getStoreKey(delKey));
+                removeExpired(delKey, key.substring(KV_PREFIX_DELIMITER.length()), stored);
             }
         } catch (Exception e) {
             log.error("clear ttl data with error :", e);
         }
+    }
+
+    /**
+     * Whether key[start, end) is the time of a marker: a non-empty run of decimal digits
+     */
+    private static boolean isMarkerTime(String key, int start, int end) {
+        if (end <= start || end - start > 19) {
+            return false;
+        }
+        for (int i = start; i < end; i++) {
+            if (key.charAt(i) < '0' || key.charAt(i) > '9') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Deletes a key whose TTL marker expired, and the marker, while the key still holds the
+     * value the marker names. A marker whose time has not passed is left alone with its value,
+     * which a read still returns. The value the cleanup read must carry the marker's expiry, so
+     * a value written after the marker (with another TTL, or none) is kept and only the stale
+     * marker goes. Right before the delete, the key must still hold the bytes the cleanup read:
+     * a renewal writes another expiry, so its bytes differ even for the same string. The check
+     * and the delete are separate store operations, so a renewal that lands between them is
+     * still deleted; binding them in one raft entry needs the txn RPC of #3376.
+     *
+     * @param key    the key, without the K@ prefix
+     * @param marker the marker key, without the K@ prefix: T@<time>@<key>
+     * @param stored what the cleanup read under the key, null if it is absent
+     */
+    public void removeExpired(String key, String marker, byte[] stored) throws PDException {
+        int timeEnd = marker.indexOf(KV_DELIMITER, TTL_PREFIX.length() + 1);
+        long expireAt = Long.parseLong(marker.substring(TTL_PREFIX.length() + 1, timeEnd));
+        if (expireAt >= System.currentTimeMillis()) {
+            // The scan compares bytes, so a longer time can sort below now: not due yet
+            return;
+        }
+        byte[] storeKey = getStoreKey(key);
+        byte[] markerKey = getStoreKey(marker);
+        if (stored == null) {
+            meta.remove(markerKey);
+            return;
+        }
+        V read;
+        try {
+            read = V.parseFrom(stored);
+        } catch (InvalidProtocolBufferException e) {
+            // Not a value KvService wrote: the plain delete of before
+            meta.remove(storeKey);
+            meta.remove(markerKey);
+            return;
+        }
+        if (read.getTtl() != expireAt) {
+            // Written after the marker, with another TTL or none: not the value it names
+            meta.remove(markerKey);
+            return;
+        }
+        if (!Arrays.equals(meta.getOne(storeKey), stored)) {
+            // The key changed since the read: keep it, drop the marker that named the old value
+            meta.remove(markerKey);
+            return;
+        }
+        meta.remove(storeKey);
+        meta.remove(markerKey);
     }
 
     public MetadataRocksDBStore getMeta() {
