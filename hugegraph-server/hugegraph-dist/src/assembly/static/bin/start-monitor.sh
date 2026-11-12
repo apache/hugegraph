@@ -25,10 +25,10 @@ function abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
-BIN=`abs_path`
-TOP="$(cd $BIN/../ && pwd)"
+BIN="$(abs_path)"
+TOP="$(cd "$BIN"/../ && pwd)"
 
-. $BIN/util.sh
+. "$BIN"/util.sh
 
 if [ "$JAVA_HOME" == "" ]; then
     echo "Must set JAVA_HOME environment variable and install JDK >= 17"
@@ -37,6 +37,42 @@ fi
 
 # Monitor HugeGraphServer every minute, if the server crashes then restart it.
 # Modify the frequency according to actual needs carefully.
-CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME && $TOP/bin/monitor-hugegraph.sh"
 
-crontab_append "$CRONTAB_JOB"
+# Persist any path overrides (-c/-l/-i/-o) that the caller (start-hugegraph.sh) exported.
+# Every value goes through cron_quote: it validates (CR/LF, '%') and emits ONE complete
+# POSIX shell word.
+JAVA_HOME_Q="$(cron_quote "$JAVA_HOME" "JAVA_HOME")" || exit 1
+MONITOR_RAW="$TOP/bin/monitor-hugegraph.sh"
+MONITOR_Q="$(cron_quote "$MONITOR_RAW" "monitor script path")" || exit 1
+
+CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME_Q &&"
+if [ -n "$CONF_OVERRIDE" ]; then
+    CONF_Q="$(cron_quote "$CONF_OVERRIDE" "CONF_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export CONF_OVERRIDE=$CONF_Q &&"
+fi
+if [ -n "$LOGS_OVERRIDE" ]; then
+    LOGS_Q="$(cron_quote "$LOGS_OVERRIDE" "LOGS_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export LOGS_OVERRIDE=$LOGS_Q &&"
+fi
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    PID_Q="$(cron_quote "$PID_FILE_OVERRIDE" "PID_FILE_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export PID_FILE_OVERRIDE=$PID_Q &&"
+fi
+if [ -n "$PLUGINS_OVERRIDE" ]; then
+    PLUGINS_Q="$(cron_quote "$PLUGINS_OVERRIDE" "PLUGINS_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export PLUGINS_OVERRIDE=$PLUGINS_Q &&"
+fi
+CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q"
+
+# Keys cover both the current quoted form and the legacy unquoted form (older
+# start-monitor.sh versions wrote "... && $TOP/bin/monitor-hugegraph.sh"
+# without quoting), so an in-place upgrade detects an existing job as a
+# duplicate instead of installing a second one alongside it.
+# The legacy key is anchored with the literal "&& " prefix (not just the bare
+# path): grep -F does substring matching, so an unanchored bare path would
+# also match as a SUBSTRING of a different install's longer path (e.g. the
+# key for /opt/hg matches a crontab line for /data/opt/hg), causing a
+# false-positive "already installed" here and a wrong-job removal in
+# stop-monitor.sh.
+MONITOR_LEGACY_KEY="&& $MONITOR_RAW"
+crontab_append "$CRONTAB_JOB" "$MONITOR_Q" "$MONITOR_LEGACY_KEY"

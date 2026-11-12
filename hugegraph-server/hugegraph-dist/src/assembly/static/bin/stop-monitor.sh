@@ -25,11 +25,25 @@ function abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
-BIN=`abs_path`
-TOP="$(cd $BIN/../ && pwd)"
+BIN="$(abs_path)"
+TOP="$(cd "$BIN"/../ && pwd)"
 
-. $BIN/util.sh
+. "$BIN"/util.sh
 
-CRONTAB_JOB="$TOP/bin/monitor-hugegraph.sh"
+# Must match the serialized form start-monitor.sh saves (one quoted shell word).
+# shell_quote (not cron_quote) so removal is not blocked by validation.
+MONITOR_RAW="$TOP/bin/monitor-hugegraph.sh"
+MONITOR_Q="$(shell_quote "$MONITOR_RAW")"
 
-crontab_remove "$CRONTAB_JOB"
+# Match both the current quoted form and the legacy unquoted form (older
+# start-monitor.sh versions wrote "... && $TOP/bin/monitor-hugegraph.sh"
+# without quoting). Otherwise a job installed before this quoting fix survives
+# an in-place upgrade: grep -F never matches it, removal silently no-ops, and
+# the stale cron entry can restart the server within a minute.
+# The legacy key is anchored with the literal "&& " prefix (not just the bare
+# path): grep -F does substring matching, so an unanchored bare path would
+# also match as a SUBSTRING of a different install's longer path (e.g. the
+# key for /opt/hg matches a crontab line for /data/opt/hg), removing the
+# wrong install's job. Must stay in sync with start-monitor.sh's key.
+MONITOR_LEGACY_KEY="&& $MONITOR_RAW"
+crontab_remove "$MONITOR_Q" "$MONITOR_LEGACY_KEY"

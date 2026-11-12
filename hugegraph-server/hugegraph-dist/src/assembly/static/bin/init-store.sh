@@ -27,15 +27,53 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "${BIN}"/../ && pwd)"
-CONF="$TOP/conf"
-LIB="$TOP/lib"
-PLUGINS="$TOP/plugins"
-JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
+
+# Support overrides via flags (for standalone invocation) or env vars (inherited
+# when launched from start-hugegraph.sh).
+while getopts "c:o:" arg; do
+    case ${arg} in
+        c) CONF_OVERRIDE="$OPTARG" ;;
+        o) PLUGINS_OVERRIDE="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-c conf_dir] [-o plugins_dir]" && exit 1 ;;
+    esac
+done
 
 . "${BIN}"/util.sh
 
+# Validate the RAW overrides before canonicalization: command substitution
+# strips trailing newlines, which would hide an embedded CR/LF.
+reject_unsafe_path "$CONF_OVERRIDE" "-c conf dir" crlf || exit 1
+# The plugins dir is joined into the ':'-separated CLASSPATH
+reject_unsafe_path "$PLUGINS_OVERRIDE" "-o plugins dir" classpath || exit 1
+
+# Canonicalize relative path overrides to absolute paths
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE" nocreate)" || exit 1
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")" || exit 1
+
+# Re-validate the *effective*, canonicalized plugins path: cd/pwd resolves a
+# relative override against the current working directory, which can
+# introduce a ':' (or other unsafe char) that wasn't present in the raw value
+# (e.g. launching from a directory such as "/tmp/work:one").
+reject_unsafe_path "$PLUGINS_OVERRIDE" "-o plugins dir (resolved)" classpath || exit 1
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LIB="$TOP/lib"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
+
 configure_riscv64_libatomic || exit 1
 ensure_path_writable "${PLUGINS}"
+
+# Verify the config exists before reading it: read_property returns an empty
+# string for a missing file, which is indistinguishable from an unset property.
+# InitStore is handed this same file below, so fail here with a clear message.
+ensure_file_readable "${CONF}/rest-server.properties" "REST server config" || exit 1
+
+# InitStore reads 'graphs' relative to the working directory (set to $TOP
+# below), not relative to $CONF, so a relative value would silently initialize
+# the packaged graphs instead of the ones under an overridden -c directory.
+GRAPHS_DIR=$(read_property "${CONF}/rest-server.properties" "graphs")
+reject_relative_conf_path "$GRAPHS_DIR" "graphs" "${CONF}/rest-server.properties" || exit 1
 
 if [[ -n "$JAVA_HOME" ]]; then
     JAVA="$JAVA_HOME"/bin/java

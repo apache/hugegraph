@@ -28,6 +28,23 @@ mvn test -pl hugegraph-server/hugegraph-test -am -P api-test,rocksdb
 - Service setup: [Server CI](../.github/workflows/server-ci.yml);
   HStore setup: [PD/Store CI](../.github/workflows/pd-store-ci.yml).
 
+### Launcher shell fixtures
+
+No JVM, cluster or network needed; run directly with `bash`:
+
+```bash
+bash hugegraph-dist/src/test/shell/test-cron-quote.sh       # crontab locking/quoting, shared util.sh
+bash hugegraph-dist/src/test/shell/test-canonicalize.sh     # canonicalize_dir/canonicalize_file
+bash hugegraph-dist/src/test/shell/test-launcher-argv.sh    # launcher argv/classpath construction
+bash hugegraph-dist/src/test/shell/test-override-guards.sh  # -c/-l/-o/-i guard coverage
+```
+
+`test-cron-quote.sh` and `test-override-guards.sh` walk up to the repository root and
+also exercise the PD and Store copies of `util.sh` in turn, since the three modules
+ship separate, duplicated copies of these helpers. All four run in CI for the
+`rocksdb` backend job: see "Run path-override guard and quoting unit tests" in
+[server-tests.yml](../.github/workflows/server-tests.yml).
+
 ## Cross-module traps
 
 - Struct has separate ID/query/serializer implementations. For format changes, inspect

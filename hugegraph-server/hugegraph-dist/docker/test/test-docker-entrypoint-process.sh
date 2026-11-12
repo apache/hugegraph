@@ -107,6 +107,7 @@ with tempfile.TemporaryDirectory(prefix='hugegraph-entrypoint-process-') as dire
         (work / 'conf/graphs/hugegraph.properties').write_text('backend=' + backend + '\n')
         (work / 'conf/rest-server.properties').write_text(
             'restserver.url=http://127.0.0.1:1\ngremlinserver.url=http://127.0.0.1:2\n')
+        (work / 'conf/gremlin-server.yaml').write_text('host: 127.0.0.1\nport: 2\n')
         listener = None
         accepted, stop_http = threading.Event(), threading.Event()
         if mode.startswith('partitionDiagnostic'):

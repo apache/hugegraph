@@ -50,13 +50,19 @@ trap cleanup EXIT
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/conf" "$TEST_ROOT/logs" "$TEST_ROOT/scripts"
 cp "$START_SCRIPT" "$TEST_ROOT/bin/start-hugegraph.sh"
 
-cat > "$TEST_ROOT/bin/util.sh" <<'EOF'
-read_property() {
-    local file="$1"
-    local property="$2"
-    grep "^${property}=" "$file" | head -n 1 | cut -d '=' -f 2-
-}
+SOURCE_BIN="$(cd "$(dirname "$START_SCRIPT")" && pwd)"
+if [[ ! -f "$SOURCE_BIN/util.sh" ]]; then
+    echo "ERROR: util.sh not found next to $START_SCRIPT"
+    exit 2
+fi
 
+# Source the real util.sh so canonicalize_dir/canonicalize_file/
+# reject_unsafe_path/ensure_path_writable/ensure_file_readable (all invoked by
+# start-hugegraph.sh before the SIGINT-handling logic this fixture exercises)
+# behave exactly as in production. Only check_port is stubbed below, so the
+# fixture's fake server.sh does not need a real listening port.
+cp "$SOURCE_BIN/util.sh" "$TEST_ROOT/bin/util.sh"
+cat >> "$TEST_ROOT/bin/util.sh" <<'EOF'
 check_port() {
     :
 }
@@ -74,6 +80,14 @@ EOF
 cat > "$TEST_ROOT/conf/rest-server.properties" <<'EOF'
 gremlinserver.url=http://127.0.0.1:8182
 restserver.url=http://127.0.0.1:8080
+EOF
+
+# start-hugegraph.sh requires this file to be readable before it launches
+# hugegraph-server.sh; content is irrelevant since the fixture's fake
+# hugegraph-server.sh never reads it.
+cat > "$TEST_ROOT/conf/gremlin-server.yaml" <<'EOF'
+host: 127.0.0.1
+port: 8182
 EOF
 
 chmod +x "$TEST_ROOT/bin/start-hugegraph.sh" "$TEST_ROOT/bin/hugegraph-server.sh"

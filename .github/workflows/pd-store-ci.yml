@@ -492,6 +492,8 @@ jobs:
             "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml" \
             --require-test-report \
             "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.controller.ArthasSecurityTest.xml" \
+            --require-test-report \
+            "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.listener.PdConfigureListenerYamlTest.xml" \
             --require-covered-group hg-store-common \
             --require-covered-group hg-store-client \
             --require-covered-group hg-store-rocksdb \
