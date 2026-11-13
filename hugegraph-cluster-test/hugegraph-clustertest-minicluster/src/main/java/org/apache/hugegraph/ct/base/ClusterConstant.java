@@ -37,6 +37,7 @@ public class ClusterConstant {
     public static final String PD_JAR_PREFIX = "hg-pd-service";
     public static final String STORE_PACKAGE_PREFIX = "apache-hugegraph-store";
     public static final String STORE_JAR_PREFIX = "hg-store-node";
+    public static final String ROCKSDB_JAR_PREFIX = "rocksdbjni-";
     public static final String SERVER_PACKAGE_PREFIX = "apache-hugegraph-server";
     public static final String CT_PACKAGE_PREFIX = "apache-hugegraph-ct";
     public static final String APPLICATION_FILE = "application.yml";
