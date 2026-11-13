@@ -280,6 +280,16 @@ public class MetaManager {
         this.graphMetaManager.listenSchemaCacheClear(consumer);
     }
 
+    /**
+     * Listen for schema cache clear events. {@code onStarted} runs each time
+     * the watch becomes live, see
+     * {@link MetaDriver#listen(String, Consumer, Runnable)}.
+     */
+    public <T> void listenSchemaCacheClear(Consumer<T> consumer,
+                                           Runnable onStarted) {
+        this.graphMetaManager.listenSchemaCacheClear(consumer, onStarted);
+    }
+
     public <T> void listenGraphCacheClear(Consumer<T> consumer) {
         this.graphMetaManager.listenGraphCacheClear(consumer);
     }

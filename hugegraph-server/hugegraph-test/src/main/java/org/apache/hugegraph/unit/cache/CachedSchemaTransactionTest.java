@@ -77,6 +77,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
 
     @Before
     public void setup() {
+        // A V2 graph opened without a PD leaves a clear event to send again
+        CachedSchemaTransactionV2Test.resetPendingClearEvents();
         this.graph = HugeFactory.open(FakeObjects.newConfig());
         this.params = Whitebox.getInternalState(this.graph, "params");
         this.cache = new CachedSchemaTransaction(this.params,
@@ -96,6 +98,7 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                 this.graph.close();
                 this.graph = null;
             }
+            CachedSchemaTransactionV2Test.resetPendingClearEvents();
         }
     }
 
@@ -866,10 +869,15 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
 
             ArgumentCaptor<Consumer> captor =
                     ArgumentCaptor.forClass(Consumer.class);
+            ArgumentCaptor<Runnable> startedCaptor =
+                    ArgumentCaptor.forClass(Runnable.class);
             Mockito.verify(mockDriver, Mockito.times(1))
-                   .listen(Mockito.anyString(), captor.capture());
+                   .listen(Mockito.anyString(), captor.capture(),
+                           startedCaptor.capture());
             Assert.assertNotNull("registered consumer must not be null",
                                  captor.getValue());
+            Assert.assertNotNull("the watch-started callback must be registered",
+                                 startedCaptor.getValue());
             Assert.assertTrue("flag must be set after successful registration",
                               flag.get());
         } finally {
@@ -912,12 +920,24 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
 
             ArgumentCaptor<Consumer> captor =
                     ArgumentCaptor.forClass(Consumer.class);
+            ArgumentCaptor<Runnable> startedCaptor =
+                    ArgumentCaptor.forClass(Runnable.class);
             Mockito.verify(mockDriver)
-                   .listen(Mockito.anyString(), captor.capture());
+                   .listen(Mockito.anyString(), captor.capture(),
+                           startedCaptor.capture());
 
             // Simulate the meta server publishing a schema-cache-clear event:
             // invoke the consumer captured above with a synthetic response.
             captor.getValue().accept(response);
+
+            Assert.assertEquals(0L, idCache.size());
+            Assert.assertEquals(0L, nameCache.size());
+
+            // Simulate the watch starting again after a disconnect: events
+            // published meanwhile never arrived, so the caches are dropped.
+            idCache.update(IdGenerator.of(1), "v");
+            nameCache.update(IdGenerator.of("n"), "v");
+            startedCaptor.getValue().run();
 
             Assert.assertEquals(0L, idCache.size());
             Assert.assertEquals(0L, nameCache.size());
@@ -1093,6 +1113,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             graphManagerReplaced = true;
             CachedSchemaTransactionV2 first = new CachedSchemaTransactionV2(driver, "test", requestParams);
             requests.add(first);
+            // The clear event this JVM sends when it opens the graph
+            Mockito.verify(driver, Mockito.times(1)).put(Mockito.anyString(), Mockito.anyString());
             VertexLabel retainedLabel = first.getVertexLabel(original.id());
             Assert.assertEquals(1, reads.get());
             HugeVertex retained = new HugeVertex(objects.graph(), IdGenerator.of(32), retainedLabel);
@@ -1144,7 +1166,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                     storeHub.listen(EventHub.ANY_EVENT, listener);
                 }
             }
-            Mockito.verify(driver).put(Mockito.anyString(), Mockito.anyString());
+            // One more clear event, for the Store clear
+            Mockito.verify(driver, Mockito.times(2)).put(Mockito.anyString(), Mockito.anyString());
             CachedSchemaTransactionV2 afterStoreEvent = new CachedSchemaTransactionV2(driver, "test", requestParams);
             requests.add(afterStoreEvent);
             Assert.assertEquals("store-cleared", afterStoreEvent.getVertexLabel(original.id()).name());

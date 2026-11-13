@@ -117,6 +117,17 @@ public class PdMetaDriver implements MetaDriver {
     }
 
     @Override
+    public <T> void listen(String key, Consumer<T> consumer,
+                           Runnable onStarted) {
+        try {
+            this.client.listen(key, (Consumer<WatchResponse>) consumer,
+                               throwable -> { }, onStarted);
+        } catch (PDException e) {
+            throw new HugeException("Failed to listen '%s' to pd", e, key);
+        }
+    }
+
+    @Override
     public <T> void listenPrefix(String prefix, Consumer<T> consumer) {
         try {
             this.client.listenPrefix(prefix, (Consumer<WatchResponse>) consumer);

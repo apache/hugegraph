@@ -825,6 +825,67 @@ connection or delivery failures are logged. This lifecycle handling does not pro
 acknowledged delivery or a distributed cache consistency protocol. Validate actual DML
 and cache behavior against the deployment's shared backend and topology.
 
+## Schema caches across HStore Servers
+
+With HStore, each Server keeps the schema of a graph in memory and never expires it.
+The schema itself is stored in PD. After a Server writes a schema change to PD, it
+publishes a clear event for that graph; every other Server then drops what it cached
+for the graph and reads PD on the next use.
+
+What a deployment can rely on once every Server runs this version:
+
+- Every committed schema change is published after its write: creating, updating and
+  removing property keys, labels and index labels, the status changes made by index and
+  label jobs, and clearing or truncating a graph. A removal is published whatever
+  `task.sync_deletion` is set to.
+- A schema change that fails after it changed part of what PD stores is published
+  too. The Server that made it drops its own copy of that element, and the caller
+  still gets the error.
+- A Server whose PD watch was down drops all its cached schema when the watch is back,
+  for example after a PD restart or a PD leader change. Events published in between
+  are not replayed, and this is how they are made up for.
+- A value read from PD before a clear is never cached after that clear.
+- A clear event that could not be published does not fail the schema change, because
+  the change is already committed. The Server publishes it again after 1 second, then
+  with a delay that doubles up to 30 seconds, and at once when its PD watch is back.
+  Each Server also publishes once when it opens a graph, which covers a Server that
+  stopped between a schema write and its event.
+
+Each event makes the other Servers load the whole schema of that graph again on their
+next read by name. Schema changes that arrive back to back therefore slow schema reads
+on the other Servers until the burst ends; no request fails because of it.
+
+What it does not provide:
+
+- Writes during index creation. A Server learns about a new index when it handles the
+  event for the label that owns the index. A vertex or edge write that such a Server
+  prepared before that, and that reaches storage after the index build has read that
+  part of the label, is missing from the index. Normally this is a write in flight for
+  a few milliseconds. It can be longer on a Server whose PD watch is down while the
+  index is created. Create indexes while writes to the label are stopped, or rebuild
+  the index afterwards, when a complete index is required.
+- Two Servers changing the same schema element at the same time. An update writes the
+  whole element, so one of the two changes can be lost. Send schema changes for one
+  element through one client, and wait for each to return before sending the next.
+- A Server that stops for good between a schema write and its event. The other Servers
+  keep what they cached until the next schema change of that graph or their next watch
+  restart.
+- A Server that cannot reach PD keeps serving its cached schema until it reconnects.
+- A PD watch that dies without an error is noticed only when another PD call from that
+  Server fails.
+- A PD watch that ends with an error the PD client does not retry, such as
+  `UNAUTHENTICATED`, `PERMISSION_DENIED` or `UNIMPLEMENTED`, is not started again. The
+  Server logs the stopped watch at ERROR level and keeps its cached schema until it is
+  restarted. PD does not answer a watch with these codes itself; they come from the
+  gRPC layer, for example from a proxy between Server and PD.
+- With the etcd meta driver the watch does not report restarts. A Server then does
+  not drop its caches after a watch restart, and a failed publish is sent again by the
+  timed retry only.
+
+A Server on an older version publishes nothing on update, so finish upgrading every
+Server before relying on this. Index entries skipped by an older version stay missing:
+rebuild indexes that were created on a cluster with several Servers.
+
 ## Deleting a graph with local tasks
 
 Stop application writes before deletion and keep them stopped during retries. The local

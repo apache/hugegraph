@@ -24,7 +24,15 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraphParams;
@@ -79,6 +87,19 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
     private static final ConcurrentMap<String, CacheListenerHolder>
             SCHEMA_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
+    /**
+     * How a clear event is sent to the other Servers, given the graph space
+     * and the graph. It throws if the event could not be sent. It is a field,
+     * not a direct call, so tests can observe a publish and make one fail
+     * without a PD.
+     */
+    private static volatile BiConsumer<String, String> clearEventPublisher =
+            (graphSpace, graph) -> MetaManager.instance().notifySchemaCacheClear(
+                    graphSpace, graph, SCHEMA_CACHE_CLEAR_SOURCE);
+
+    private static final PendingClearEvents PENDING_CLEAR_EVENTS =
+            new PendingClearEvents();
 
     private CacheListenerHolder holder;
     private final Cache<Id, Object> idCache;
@@ -135,24 +156,70 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
     private static void clearSchemaCache(String spaceGraphName) {
         Map<String, Cache<Id, Object>> caches = CacheManager.instance().caches();
-
-        // Clear name cache first so the (name -> id -> object) lookup path
-        // fails fast instead of returning a stale object backed by an
-        // already-empty id cache during the TOCTOU window.
         Cache<Id, Object> nameCache = caches.get(cacheName(NAME_CACHE_PREFIX,
                                                            spaceGraphName));
-        if (nameCache != null) {
-            nameCache.clear();
-        }
-
         Cache<Id, Object> idCache = caches.get(cacheName(ID_CACHE_PREFIX,
                                                          spaceGraphName));
-        if (idCache != null) {
-            SchemaCaches<?> arrayCaches = idCache.attachment();
-            if (arrayCaches != null) {
-                arrayCaches.clear();
+        SchemaCaches<?> arrayCaches = idCache == null ?
+                                      null : idCache.attachment();
+        clearCaches(nameCache, arrayCaches, idCache);
+    }
+
+    /**
+     * Clear every V2 schema cache of this JVM. Used when the clear-event watch
+     * becomes live: whatever was published while it was down never arrived.
+     */
+    private static void clearAllSchemaCaches() {
+        String prefix = ID_CACHE_PREFIX + "-";
+        List<String> names = new ArrayList<>(CacheManager.instance()
+                                                         .caches().keySet());
+        for (String name : names) {
+            if (name.startsWith(prefix)) {
+                clearSchemaCache(name.substring(prefix.length()));
             }
-            idCache.clear();
+        }
+    }
+
+    /**
+     * Drop everything cached for one graph and advance its generation, so a
+     * read or a write-through that began before this point can't put its
+     * value into the cache afterwards.
+     */
+    private static void clearCaches(Cache<Id, Object> nameCache,
+                                    SchemaCaches<?> arrayCaches,
+                                    Cache<Id, Object> idCache) {
+        if (arrayCaches == null) {
+            /*
+             * No transaction has attached the guard yet, so nothing reads or
+             * refills these caches.
+             */
+            if (nameCache != null) {
+                nameCache.clear();
+            }
+            if (idCache != null) {
+                idCache.clear();
+            }
+            return;
+        }
+        Lock lock = arrayCaches.writeLock();
+        lock.lock();
+        try {
+            /*
+             * Clear name cache first so the (name -> id -> object) lookup
+             * path of a reader that takes no lock fails fast instead of
+             * returning a stale object backed by an already-empty id cache.
+             */
+            if (nameCache != null) {
+                nameCache.clear();
+            }
+            arrayCaches.clear();
+            if (idCache != null) {
+                idCache.clear();
+            }
+        } finally {
+            // Last, see SchemaCaches
+            arrayCaches.advanceGeneration();
+            lock.unlock();
         }
     }
 
@@ -183,21 +250,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 event.checkArgs(String.class, HugeType.class, Id.class);
                 HugeType type = (HugeType) args[1];
                 Id id = (Id) args[2];
-                this.arrayCaches.remove(type, id);
-
-                id = generateId(type, id);
-                Object value = this.idCache.get(id);
-                if (value != null) {
-                    // Invalidate id cache
-                    this.idCache.invalidate(id);
-
-                    // Invalidate name cache
-                    SchemaElement schema = (SchemaElement) value;
-                    Id prefixedName = generateId(schema.type(),
-                                                 schema.name());
-                    this.nameCache.invalidate(prefixedName);
-                }
-                this.resetCachedAll(type);
+                this.invalidateCache(type, id, null, true);
                 return true;
             } else if (Cache.ACTION_CLEAR.equals(args[0])) {
                 event.checkArgs(String.class, HugeType.class);
@@ -208,9 +261,11 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         };
         EventHub schemaEventHub = this.graphParams().schemaEventHub();
         listenSchemaCacheClear();
+        boolean[] opened = {false};
         CacheListenerHolder acquired = SCHEMA_CACHE_EVENT_LISTENERS.compute(
                 this.graphParams().spaceGraphName(), (key, existing) -> {
                     if (existing == null || existing.hub != schemaEventHub) {
+                        opened[0] = true;
                         if (existing != null) {
                             existing.close();
                         }
@@ -229,6 +284,15 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 });
         this.holder = acquired;
         this.cacheEventListener = acquired.listener;
+        if (opened[0]) {
+            /*
+             * This JVM just opened the graph. A previous run of this Server
+             * may have stopped between a schema write and its clear event,
+             * and the set of failed publishes it kept in memory is gone, so
+             * tell the other Servers once to drop what they hold.
+             */
+            this.publishClearEvent();
+        }
     }
 
     private static void listenSchemaCacheClear() {
@@ -238,7 +302,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             }
             try {
                 MetaManager.instance().listenSchemaCacheClear(
-                        CachedSchemaTransactionV2::handleSchemaCacheClearEvent);
+                        CachedSchemaTransactionV2::handleSchemaCacheClearEvent,
+                        CachedSchemaTransactionV2::handleSchemaCacheWatchStarted);
                 // Set AFTER the underlying watch is live so a concurrent
                 // caller that observes the flag is guaranteed an active
                 // subscription, and a failure leaves the flag false so the
@@ -278,15 +343,24 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         }
     }
 
+    /**
+     * Runs each time the clear-event watch becomes live: when it first starts
+     * and whenever it starts again after a disconnect or a PD leader change.
+     * Events published while it was down were not delivered and are not
+     * replayed, so every cache of this JVM is dropped, and clear events of
+     * this Server that failed to publish are sent again.
+     */
+    static void handleSchemaCacheWatchStarted() {
+        LOG.info("Schema cache clear watch is live, clear all V2 schema caches");
+        clearAllSchemaCaches();
+        PENDING_CLEAR_EVENTS.retryNow();
+    }
+
     public void clearCache(boolean notify) {
-        // Same TOCTOU ordering as clearSchemaCache(String): clear nameCache
-        // first, then the array attachment, then idCache last.
-        this.nameCache.clear();
-        this.arrayCaches.clear();
-        this.idCache.clear();
+        clearCaches(this.nameCache, this.arrayCaches, this.idCache);
 
         if (notify) {
-            this.maybeNotifySchemaCacheClear();
+            this.publishClearEvent();
         }
     }
 
@@ -331,7 +405,28 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         this.cachedTypes().put(type, false);
     }
 
-    private void invalidateCache(HugeType type, Id id) {
+    /**
+     * Remove one element from the caches and advance the generation, so a
+     * read that fetched the element before this point can't cache it again.
+     */
+    private void invalidateCache(HugeType type, Id id, String name,
+                                 boolean resetCachedAll) {
+        Lock lock = this.arrayCaches.writeLock();
+        lock.lock();
+        try {
+            this.removeFromCaches(type, id, name);
+            if (resetCachedAll) {
+                this.resetCachedAll(type);
+            }
+        } finally {
+            // Last, see SchemaCaches
+            this.arrayCaches.advanceGeneration();
+            lock.unlock();
+        }
+    }
+
+    // The caller holds the write lock
+    private void removeFromCaches(HugeType type, Id id, String name) {
         // remove from id cache and name cache
         Id prefixedId = generateId(type, id);
         Object value = this.idCache.get(prefixedId);
@@ -342,33 +437,16 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             Id prefixedName = generateId(schema.type(), schema.name());
             this.nameCache.invalidate(prefixedName);
         }
+        if (name != null) {
+            this.nameCache.invalidate(generateId(type, name));
+        }
 
         // remove from optimized array cache
         this.arrayCaches.remove(type, id);
     }
 
-    @Override
-    protected void updateSchema(SchemaElement schema,
-                                Consumer<SchemaElement> updateCallback) {
-        super.updateSchema(schema, updateCallback);
-
-        this.updateCache(schema);
-        // Status transitions are internal bookkeeping; notifying here causes a
-        // broadcast storm for every updateSchemaStatus() call from background jobs.
-    }
-
-    @Override
-    protected void addSchema(SchemaElement schema) {
-        super.addSchema(schema);
-
-        this.updateCache(schema);
-
-        // Schema additions must always propagate to remote nodes regardless
-        // of TASK_SYNC_DELETION (which only gates removal flows).
-        this.notifySchemaCacheClear();
-    }
-
-    private void updateCache(SchemaElement schema) {
+    // The caller holds the write lock
+    private void putIntoCaches(SchemaElement schema) {
         this.resetCachedAllIfReachedCapacity();
 
         // update id cache
@@ -383,34 +461,162 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         this.arrayCaches.updateIfNeeded(schema);
     }
 
-    @Override
-    public void removeSchema(SchemaElement schema) {
-        super.removeSchema(schema);
-
-        this.invalidateCache(schema.type(), schema.id());
-
-        this.maybeNotifySchemaCacheClear();
-    }
-
-    private void maybeNotifySchemaCacheClear() {
-        // Only suppress notifications for removal tasks when
-        // TASK_SYNC_DELETION=true: the caller propagates cache invalidation
-        // synchronously, so the meta-event broadcast would be redundant.
-        if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
-            this.notifySchemaCacheClear();
+    /**
+     * Cache an element read from the store, unless the caches were cleared or
+     * the element was written since {@code generation} was read. The value
+     * may then be older than what the store holds now, and nothing would
+     * correct it later because schema caches don't expire.
+     */
+    private void cacheIfCurrent(SchemaElement schema, long generation) {
+        Lock lock = this.arrayCaches.writeLock();
+        lock.lock();
+        try {
+            if (this.arrayCaches.generation() == generation) {
+                this.putIntoCaches(schema);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
-    private void notifySchemaCacheClear() {
-        MetaManager.instance()
-                   .notifySchemaCacheClear(this.graph().graphSpace(),
-                                           this.graph().name(),
-                                           SCHEMA_CACHE_CLEAR_SOURCE);
+    // Copy an id-cache hit into the array cache, under the same condition
+    private void promoteIfCurrent(SchemaElement schema, long generation) {
+        Lock lock = this.arrayCaches.writeLock();
+        lock.lock();
+        try {
+            if (this.arrayCaches.generation() == generation) {
+                this.arrayCaches.updateIfNeeded(schema);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Cache an element this transaction just wrote to the store.
+     *
+     * @param generation read before the write was sent
+     */
+    private void cacheWritten(SchemaElement schema, long generation) {
+        Lock lock = this.arrayCaches.writeLock();
+        lock.lock();
+        try {
+            if (this.arrayCaches.generation() == generation) {
+                this.putIntoCaches(schema);
+            } else {
+                /*
+                 * The caches were cleared while the write was on its way, so
+                 * another Server may have replaced the element after this
+                 * write. Cache nothing and let the next read ask the store.
+                 */
+                this.removeFromCaches(schema.type(), schema.id(), schema.name());
+                this.resetCachedAll(schema.type());
+            }
+        } finally {
+            /*
+             * The write replaced the stored element, so whatever a concurrent
+             * read fetched before now is old: don't let it be cached. Last,
+             * see SchemaCaches.
+             */
+            this.arrayCaches.advanceGeneration();
+            lock.unlock();
+        }
+    }
+
+    @Override
+    protected void updateSchema(SchemaElement schema,
+                                Consumer<SchemaElement> updateCallback) {
+        long generation = this.arrayCaches.generation();
+        try {
+            super.updateSchema(schema, updateCallback);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
+
+        /*
+         * An update must reach the other Servers like an add does: they keep
+         * the whole element until told otherwise, and write it back whole on
+         * their next update of it. That includes status changes made by
+         * background jobs.
+         */
+        try {
+            this.cacheWritten(schema, generation);
+        } finally {
+            this.publishClearEvent();
+        }
+    }
+
+    @Override
+    protected void addSchema(SchemaElement schema) {
+        long generation = this.arrayCaches.generation();
+        try {
+            super.addSchema(schema);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
+
+        try {
+            this.cacheWritten(schema, generation);
+        } finally {
+            this.publishClearEvent();
+        }
+    }
+
+    @Override
+    public void removeSchema(SchemaElement schema) {
+        try {
+            super.removeSchema(schema);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
+
+        /*
+         * Publish whatever task.sync_deletion says: that option only makes
+         * the caller wait for the local task, it never reached another JVM.
+         */
+        try {
+            this.invalidateCache(schema.type(), schema.id(), schema.name(),
+                                 false);
+        } finally {
+            this.publishClearEvent();
+        }
+    }
+
+    /**
+     * A schema write is several puts or deletes in the store, so one that
+     * threw may have changed the store in part or in full. Treat it like a
+     * write: drop the element here, so nothing serves a copy the store no
+     * longer matches, and tell the other Servers to do the same.
+     */
+    private void writeFailed(SchemaElement schema) {
+        try {
+            this.invalidateCache(schema.type(), schema.id(), schema.name(),
+                                 true);
+        } finally {
+            this.publishClearEvent();
+        }
+    }
+
+    /**
+     * Tell the other Servers to drop their schema caches of this graph. It is
+     * called after the schema write is committed, so it never fails the
+     * caller: a failed publish is kept and sent again, see
+     * {@link PendingClearEvents}.
+     */
+    private void publishClearEvent() {
+        PENDING_CLEAR_EVENTS.publish(this.graph().graphSpace(),
+                                     this.graph().name());
     }
 
     @Override
     @SuppressWarnings("unchecked")
     protected <T extends SchemaElement> T getSchema(HugeType type, Id id) {
+        // Read it before any cache or store access, see SchemaCaches
+        long generation = this.arrayCaches.generation();
+
         // try get from optimized array cache
         if (id.number() && id.asLong() > 0L) {
             SchemaElement value = this.arrayCaches.get(type, id);
@@ -424,18 +630,12 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         if (value == null) {
             value = super.getSchema(type, id);
             if (value != null) {
-                this.resetCachedAllIfReachedCapacity();
-
-                this.idCache.update(prefixedId, value);
-
-                SchemaElement schema = (SchemaElement) value;
-                Id prefixedName = generateId(schema.type(), schema.name());
-                this.nameCache.update(prefixedName, schema);
+                this.cacheIfCurrent((SchemaElement) value, generation);
             }
+        } else if (this.arrayCaches.accepts(id)) {
+            // update optimized array cache
+            this.promoteIfCurrent((SchemaElement) value, generation);
         }
-
-        // update optimized array cache
-        this.arrayCaches.updateIfNeeded((SchemaElement) value);
 
         return (T) value;
     }
@@ -450,30 +650,64 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             value = super.getSchema(type, name);
             if (value != null) {
                 // Note: reload all schema if the cache is inconsistent with storage layer
-                this.clearCache(false);
-                this.loadAllSchema();
+                this.reloadAllSchema(prefixedName);
             }
         }
         return (T) value;
     }
 
+    /**
+     * Clear and load the whole schema after a name was found in the store but
+     * not in the cache. One reload runs at a time per graph: a lookup that
+     * waited finds its name cached by the reload it waited for. Without that,
+     * every concurrent miss would clear the cache again, which also advances
+     * the generation and throws away what the other reloads are loading.
+     */
+    private void reloadAllSchema(Id missedName) {
+        synchronized (this.arrayCaches.reloadLock()) {
+            if (this.nameCache.get(missedName) != null) {
+                return;
+            }
+            this.clearCache(false);
+            this.loadAllSchema();
+        }
+    }
+
     @Override
     protected <T extends SchemaElement> List<T> getAllSchema(HugeType type) {
-        Boolean cachedAll = this.cachedTypes().getOrDefault(type, false);
-        List<T> results;
-        if (cachedAll) {
-            results = new ArrayList<>();
-            // Get from cache
-            this.idCache.traverse(value -> {
-                @SuppressWarnings("unchecked")
-                T schema = (T) value;
-                if (schema.type() == type) {
-                    results.add(schema);
-                }
-            });
-            return results;
-        } else {
-            results = super.getAllSchema(type);
+        long generation;
+        /*
+         * A clear can't run while the list is read from the cache, so the
+         * result is the complete list or the store is asked, never a part.
+         */
+        Lock readLock = this.arrayCaches.readLock();
+        readLock.lock();
+        try {
+            generation = this.arrayCaches.generation();
+            if (this.cachedTypes().getOrDefault(type, false)) {
+                List<T> results = new ArrayList<>();
+                // Get from cache
+                this.idCache.traverse(value -> {
+                    @SuppressWarnings("unchecked")
+                    T schema = (T) value;
+                    if (schema.type() == type) {
+                        results.add(schema);
+                    }
+                });
+                return results;
+            }
+        } finally {
+            readLock.unlock();
+        }
+
+        List<T> results = super.getAllSchema(type);
+        Lock writeLock = this.arrayCaches.writeLock();
+        writeLock.lock();
+        try {
+            if (this.arrayCaches.generation() != generation) {
+                // Cleared or written meanwhile: the list may be old already
+                return results;
+            }
             long free = this.idCache.capacity() - this.idCache.size();
             if (results.size() <= free) {
                 // Update cache
@@ -484,10 +718,16 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                     Id prefixedName = generateId(schema.type(), schema.name());
                     this.nameCache.update(prefixedName, schema);
                 }
-                this.cachedTypes().putIfAbsent(type, true);
+                /*
+                 * The generation is unchanged, so this is the whole list:
+                 * also replace a "not all cached" left by an earlier write
+                 */
+                this.cachedTypes().put(type, true);
             }
-            return results;
+        } finally {
+            writeLock.unlock();
         }
+        return results;
     }
 
     private void loadAllSchema() {
@@ -500,12 +740,159 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     @Override
     public void clear() {
         // Clear schema info firstly
-        super.clear();
-        this.clearCache(false);
-        this.notifySchemaCacheClear();
+        try {
+            super.clear();
+        } finally {
+            // A clear that threw may have removed part of the schema
+            try {
+                this.clearCache(false);
+            } finally {
+                this.publishClearEvent();
+            }
+        }
     }
 
+    /**
+     * Clear events of this Server that could not be published.
+     * <p>
+     * A clear event is sent after its schema write is committed, so a failed
+     * publish must not fail the write. The graph is kept here instead and the
+     * event is sent again: after a delay that doubles up to a limit, and at
+     * once when the clear-event watch becomes live. One event says "drop your
+     * caches of this graph", so one successful publish covers every earlier
+     * failure for that graph.
+     * <p>
+     * The set lives in memory. If the Server stops before a retry succeeds,
+     * the publish it does on the next graph open covers it. If the Server
+     * never returns, the other Servers keep what they cached until the next
+     * event for that graph or their next watch restart.
+     */
+    static final class PendingClearEvents {
+
+        private static final long RETRY_MIN_DELAY = 1000L;
+        private static final long RETRY_MAX_DELAY = 30000L;
+
+        private final ConcurrentMap<GraphRef, Long> pending =
+                new ConcurrentHashMap<>();
+        private final AtomicLong failures = new AtomicLong();
+
+        // Guarded by this
+        private ScheduledExecutorService executor;
+        private ScheduledFuture<?> retry;
+        private long retryDelay = RETRY_MIN_DELAY;
+        // The number of the newest scheduled retry
+        private long retryEpoch;
+
+        void publish(String graphSpace, String graph) {
+            try {
+                clearEventPublisher.accept(graphSpace, graph);
+            } catch (RuntimeException e) {
+                LOG.warn("Failed to publish the schema cache clear event of " +
+                         "graph '{}/{}', it will be sent again",
+                         graphSpace, graph, e);
+                /*
+                 * The number tells a retry whether the graph failed again
+                 * after the publish the retry is about to count as done.
+                 */
+                this.pending.put(new GraphRef(graphSpace, graph),
+                                 this.failures.incrementAndGet());
+                this.scheduleRetry(false);
+            }
+        }
+
+        void retryNow() {
+            this.scheduleRetry(true);
+        }
+
+        int size() {
+            return this.pending.size();
+        }
+
+        private synchronized void scheduleRetry(boolean now) {
+            if (this.pending.isEmpty()) {
+                return;
+            }
+            if (this.retry != null && !this.retry.isDone()) {
+                if (!now) {
+                    return;
+                }
+                this.retry.cancel(false);
+            }
+            if (this.executor == null) {
+                this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread thread = new Thread(r, "schema-cache-clear-retry");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+            long delay = now ? 0L : this.retryDelay;
+            long epoch = ++this.retryEpoch;
+            this.retry = this.executor.schedule(() -> this.retryPending(epoch),
+                                                delay, TimeUnit.MILLISECONDS);
+        }
+
+        private void retryPending(long epoch) {
+            List<Map.Entry<GraphRef, Long>> entries =
+                    new ArrayList<>(this.pending.entrySet());
+            for (Map.Entry<GraphRef, Long> entry : entries) {
+                GraphRef graph = entry.getKey();
+                try {
+                    clearEventPublisher.accept(graph.graphSpace(),
+                                               graph.graph());
+                    // Keep it if the graph failed again in the meantime
+                    this.pending.remove(graph, entry.getValue());
+                } catch (RuntimeException e) {
+                    LOG.warn("Failed again to publish the schema cache " +
+                             "clear event of graph '{}/{}': {}",
+                             graph.graphSpace(), graph.graph(), e.toString());
+                }
+            }
+            synchronized (this) {
+                if (epoch != this.retryEpoch) {
+                    /*
+                     * A watch start scheduled a newer retry while this one
+                     * was running: that one goes on, or there would be two.
+                     */
+                    return;
+                }
+                this.retry = null;
+                if (this.pending.isEmpty()) {
+                    this.retryDelay = RETRY_MIN_DELAY;
+                    return;
+                }
+                this.retryDelay = Math.min(this.retryDelay * 2L,
+                                           RETRY_MAX_DELAY);
+                this.scheduleRetry(false);
+            }
+        }
+    }
+
+    private record GraphRef(String graphSpace, String graph) {
+    }
+
+    /**
+     * The per-graph state shared by every transaction of this JVM: the array
+     * caches, and the guard that keeps an old value out of all the caches.
+     * <p>
+     * Schema caches never expire, so a value cached after it was replaced in
+     * the store stays wrong until the next clear. Every clear, removal and
+     * local write therefore advances {@link #generation} under the write
+     * lock. A reader notes the generation before it looks into a cache or
+     * asks the store, and caches what it got only if the generation is still
+     * the same, checked under the same lock. The store is never called with
+     * that lock held.
+     * <p>
+     * The generation is advanced as the last step of a change, after the
+     * caches were updated. Readers note it without a lock, so one that sees
+     * the new generation must also see the caches as the change left them.
+     * Advancing first would let a reader note the new generation, take the
+     * old value from the id cache and copy it to the array cache afterwards.
+     */
     private static final class SchemaCaches<V extends SchemaElement> {
+
+        private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+        private final Object reloadLock = new Object();
+        private volatile long generation;
 
         private final int size;
 
@@ -526,6 +913,36 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             this.ils = new IntObjectMap<>(size);
 
             this.cachedTypes = new CachedTypes();
+        }
+
+        long generation() {
+            return this.generation;
+        }
+
+        // The caller holds the write lock
+        void advanceGeneration() {
+            this.generation++;
+        }
+
+        Lock readLock() {
+            return this.lock.readLock();
+        }
+
+        Lock writeLock() {
+            return this.lock.writeLock();
+        }
+
+        Object reloadLock() {
+            return this.reloadLock;
+        }
+
+        // Whether the array cache has a slot for this id
+        boolean accepts(Id id) {
+            if (!id.number()) {
+                return false;
+            }
+            long longId = id.asLong();
+            return longId > 0L && longId < this.size;
         }
 
         public void updateIfNeeded(V schema) {

@@ -544,6 +544,128 @@ public class KvClientTest extends BaseClientTest {
     }
 
     @Test
+    public void testWatchStartedCallbackRunsOnceWhenTheWatchGoesLive() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger started = new AtomicInteger();
+            context.client.listen("key", response -> { }, throwable -> { },
+                                  started::incrementAndGet);
+            // Asking PD for a watch is not a live watch yet
+            assertThat(started.get()).isZero();
+
+            StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+            observer.onNext(startingResponse(7L));
+            assertThat(started.get()).isEqualTo(1);
+
+            observer.onNext(WatchResponse.newBuilder().setState(WatchState.Alive).build());
+            observer.onNext(eventResponse(7L));
+            assertThat(started.get()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testWatchStartedCallbackRunsAgainAfterLeaderChange() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger started = new AtomicInteger();
+            context.client.listen("key", response -> { }, throwable -> { },
+                                  started::incrementAndGet);
+            StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+            observer.onNext(startingResponse(7L));
+
+            observer.onNext(
+                    WatchResponse.newBuilder().setState(WatchState.Leader_Changed).build());
+            // The watch is down until the new leader answers
+            assertThat(started.get()).isEqualTo(1);
+            context.runNextReconnect();
+            assertThat(started.get()).isEqualTo(1);
+
+            context.client.call(1).observer.onNext(startingResponse(8L));
+            assertThat(started.get()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    public void testWatchStartedCallbackRunsAgainAfterStreamError() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger started = new AtomicInteger();
+            context.client.listen("key", response -> { }, throwable -> { },
+                                  started::incrementAndGet);
+            context.client.call(0).observer.onNext(startingResponse(7L));
+
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+            assertThat(started.get()).isEqualTo(1);
+
+            context.client.call(1).observer.onNext(startingResponse(8L));
+            assertThat(started.get()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    public void testWatchStartedCallbackRunsBeforeEventsOfTheNewWatch() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            List<String> order = new CopyOnWriteArrayList<>();
+            context.client.listen("key", response -> order.add("event"), throwable -> { },
+                                  () -> order.add("started"));
+
+            // The first frame of a watch may already carry events
+            context.client.call(0).observer.onNext(eventResponse(7L));
+            context.client.call(0).observer.onNext(eventResponse(7L));
+
+            assertThat(order).containsExactly("started", "event", "event");
+        }
+    }
+
+    @Test
+    public void testWatchStartedCallbackIgnoresFramesOfAReplacedWatch() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger started = new AtomicInteger();
+            context.client.listen("key", response -> { }, throwable -> { },
+                                  started::incrementAndGet);
+            StreamObserver<WatchResponse> replaced = context.client.call(0).observer;
+            replaced.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+
+            // A late frame of the old stream says nothing about the new watch
+            replaced.onNext(startingResponse(7L));
+            assertThat(started.get()).isZero();
+
+            context.client.call(1).observer.onNext(startingResponse(8L));
+            assertThat(started.get()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testFailingWatchStartedCallbackKeepsTheWatch() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger events = new AtomicInteger();
+            context.client.listen("key", response -> events.incrementAndGet(),
+                                  throwable -> { },
+                                  () -> {
+                                      throw new IllegalStateException("callback failed");
+                                  });
+
+            context.client.call(0).observer.onNext(startingResponse(7L));
+            context.client.call(0).observer.onNext(eventResponse(7L));
+
+            assertThat(events.get()).isEqualTo(1);
+            assertThat(context.reconnectTasks).isEmpty();
+        }
+    }
+
+    @Test
+    public void testListenWithoutWatchStartedCallbackStillWorks() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger events = new AtomicInteger();
+            context.client.listen("key", response -> events.incrementAndGet());
+
+            context.client.call(0).observer.onNext(startingResponse(7L));
+            context.client.call(0).observer.onNext(eventResponse(7L));
+
+            assertThat(events.get()).isEqualTo(1);
+        }
+    }
+
+    @Test
     public void testFirstFrameDuringTimeoutTransitionPreventsReconnect() throws Exception {
         String loggerName = KvClient.class.getName();
         LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
