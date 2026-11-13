@@ -209,6 +209,18 @@ public class HbaseSessions extends BackendSessionPool {
         }
     }
 
+    /**
+     * Whether the table can serve requests: it exists, is enabled and all its
+     * regions are assigned (an existing but disabled table is not available).
+     */
+    public boolean tableAvailable(String table) throws IOException {
+        TableName tableName = TableName.valueOf(this.namespace, table);
+        try (Admin admin = this.hbase.getAdmin()) {
+            return admin.tableExists(tableName) && admin.isTableEnabled(tableName) &&
+                   admin.isTableAvailable(tableName);
+        }
+    }
+
     public boolean existsTable(String table) throws IOException {
         TableName tableName = TableName.valueOf(this.namespace, table);
         try (Admin admin = this.hbase.getAdmin()) {
