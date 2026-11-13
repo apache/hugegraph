@@ -526,11 +526,14 @@ the full index cache. This does not detect missing/stale label associations,
 orphaned indexes or incorrect index data, and does not prove range-query results.
 Run it after index creation/rebuild jobs finish, with no schema changes during
 the test. Like indexed queries, the check rejects every other status, including
-`CREATING`, `REBUILDING` and `INVALID`. On HStore, reading an unfinished index can
-cache its temporary status on Pods other than the job runner. Later attempts
-reuse that cache; the retry window does not repair it. Indexed queries on those
-Pods may keep failing after the job succeeds; replace affected Server Pods only
-after the jobs finish. This check does not fix cross-Server schema cache consistency.
+`CREATING`, `REBUILDING` and `INVALID`. On HStore, the Pod that runs the job
+publishes each status change, and the other Pods drop their cached schema and read
+it again, so they see `CREATED` shortly after the job succeeds. A Pod whose PD
+watch is down sees it when the watch is back. This check does not prove that, and
+it does not cover the limits listed under
+[Schema caches across HStore Servers](../../../docs/server-runtime.md#schema-caches-across-hstore-servers).
+An index created before this behavior on a cluster with several Server Pods may
+miss entries; rebuild it after the upgrade.
 
 For a graph with existing test data, provide a read-only Gremlin script that
 asserts the expected result. For example, with 40 existing `person` vertices

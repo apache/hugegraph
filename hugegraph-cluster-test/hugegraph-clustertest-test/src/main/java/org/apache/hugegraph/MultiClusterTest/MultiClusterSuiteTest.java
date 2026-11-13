@@ -26,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 @Suite.SuiteClasses({
         MultiClusterDeployTest.class,
         MultiClusterFileTest.class,
+        MultiClusterSchemaCacheTest.class,
 })
 @Slf4j
 public class MultiClusterSuiteTest {
