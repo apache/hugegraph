@@ -95,6 +95,22 @@ public class RolePermGraphSpaceWildcardTest {
                                           vertex("gs2")));
     }
 
+    @Test
+    public void testWildcardResourceSpaceIsLookedUpOnce() {
+        RolePermission wildcard = RolePermission.role("*", "*",
+                                                      HugePermission.READ);
+        RolePermission named = RolePermission.role("gs1", "*",
+                                                   HugePermission.READ);
+
+        // A "*" resource space is the wildcard key itself, not a fallback
+        Assert.assertTrue(RolePerm.match(wildcard, HugePermission.READ,
+                                         vertex("*")));
+        Assert.assertFalse(RolePerm.match(wildcard, HugePermission.WRITE,
+                                          vertex("*")));
+        Assert.assertFalse(RolePerm.match(named, HugePermission.READ,
+                                          vertex("*")));
+    }
+
     /** The inner members of {"roles":{...}} for a single-space role. */
     private static String entries(RolePermission role) {
         String json = role.toJson();
