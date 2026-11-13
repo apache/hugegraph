@@ -492,7 +492,6 @@ public class GraphsAPI extends API {
                 // Auto-fill standalone (RocksDB) mode defaults
                 configs.putIfAbsent("backend", "rocksdb");
             }
-            configs.putIfAbsent("serializer", "binary");
             // 'store' is safe to default to graph name in both PD and non-PD modes
             configs.putIfAbsent("store", name);
             // Map frontend 'schema' field to backend config key

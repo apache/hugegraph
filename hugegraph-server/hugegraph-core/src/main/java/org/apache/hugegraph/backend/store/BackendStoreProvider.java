@@ -38,6 +38,25 @@ public interface BackendStoreProvider {
     // Current backend store driver version
     String driverVersion();
 
+    /**
+     * The name of the serializer this backend reads and writes (see
+     * SerializerFactory): "binary" for the binary-only backends. A graph
+     * takes it unless its config names a serializer explicitly.
+     */
+    default String serializerName() {
+        return "binary";
+    }
+
+    /**
+     * Whether a graph on this backend may use a serializer other than
+     * {@link #serializerName()}. False for backends whose tables parse
+     * stored keys in one fixed format (hstore, rocksdb): rows written with
+     * another serializer are stored but fail to read.
+     */
+    default boolean acceptsOtherSerializer() {
+        return false;
+    }
+
     // Graph name (that's database name)
     String graph();
 

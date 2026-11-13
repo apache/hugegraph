@@ -67,9 +67,8 @@ case "$BACKEND" in
         ;;
 esac
 
-# Set backend and serializer
+# Set the backend; the serializer is the backend's own (apache/hugegraph#3225)
 write_property "$CONF" "backend" "$BACKEND"
-write_property "$CONF" "serializer" "$SERIALIZER"
 
 # Set timeout for hbase
 if [ "$BACKEND" == "hbase" ]; then
