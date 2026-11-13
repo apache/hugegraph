@@ -147,7 +147,8 @@ public abstract class AbstractEnv implements BaseEnv {
     }
 
     /**
-     * Restart one PD node on its own data and return without waiting for it.
+     * Restart one PD node on its own data. It waits for the old process to
+     * exit and returns without waiting for the new one to be ready.
      * Restarting the PD leader makes the leader change and every PD watch
      * start again, which is what a test of that window needs to race.
      */

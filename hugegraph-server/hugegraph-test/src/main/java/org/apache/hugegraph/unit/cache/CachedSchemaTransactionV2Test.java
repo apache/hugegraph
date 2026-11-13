@@ -20,6 +20,7 @@ package org.apache.hugegraph.unit.cache;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -29,12 +30,16 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
@@ -51,6 +56,8 @@ import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.meta.PdMetaDriver;
 import org.apache.hugegraph.meta.managers.SchemaMetaManager;
+import org.apache.hugegraph.pd.client.KvClient;
+import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.testutil.Assert;
@@ -127,7 +134,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         // There is no PD: don't register the meta watch, and record publishes
         this.originalRegistered = registeredFlag().getAndSet(true);
         // Other test classes open V2 graphs without a PD and leave failed publishes
-        pendingMap().clear();
+        resetPendingClearEvents();
         this.publisher = new RecordingPublisher();
         this.originalPublisher = Whitebox.getInternalState(
                 CachedSchemaTransactionV2.class, "clearEventPublisher");
@@ -140,17 +147,21 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
 
     @After
     public void teardown() throws Exception {
-        this.store.open();
-        this.executor.shutdownNow();
-        Assert.assertTrue(this.executor.awaitTermination(WAIT_SECONDS,
-                                                         TimeUnit.SECONDS));
-        this.tx.close();
-        CachedSchemaTransactionV2.closeGraph(this.params);
-        pendingMap().clear();
-        Whitebox.setInternalState(CachedSchemaTransactionV2.class,
-                                  "clearEventPublisher", this.originalPublisher);
-        registeredFlag().set(this.originalRegistered);
-        LockUtil.destroy(this.spaceGraph);
+        try {
+            this.store.open();
+            this.executor.shutdownNow();
+            Assert.assertTrue(this.executor.awaitTermination(WAIT_SECONDS,
+                                                             TimeUnit.SECONDS));
+            this.tx.close();
+            CachedSchemaTransactionV2.closeGraph(this.params);
+        } finally {
+            // Static state of the class under test: always put it back
+            resetPendingClearEvents();
+            Whitebox.setInternalState(CachedSchemaTransactionV2.class,
+                                      "clearEventPublisher", this.originalPublisher);
+            registeredFlag().set(this.originalRegistered);
+            LockUtil.destroy(this.spaceGraph);
+        }
     }
 
     // ------------------------------------------------------------ publish
@@ -255,6 +266,105 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Assert.assertNull(this.tx.getPropertyKey(IdGenerator.of(1)));
     }
 
+    @Test
+    public void testEveryPublishComesAfterItsStoreWrite() {
+        // What another Server would read from the store when the event arrives
+        List<Integer> seen = new ArrayList<>();
+        this.publisher.intercept = () -> {
+            PropertyKey stored = this.otherServer.getPropertyKey(GRAPH_SPACE, this.graphName,
+                                                                 IdGenerator.of(1));
+            seen.add(stored == null ? -1 : this.version(stored));
+        };
+        PropertyKey pk = this.propertyKey(1, "name", 1);
+        this.tx.addPropertyKey(pk);
+        this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        this.tx.removeSchema(pk);
+        this.tx.addPropertyKey(this.propertyKey(1, "name", 3));
+        this.tx.clear();
+        this.publisher.intercept = null;
+
+        // added, updated, removed, added again, cleared
+        Assert.assertEquals(Arrays.asList(1, 2, -1, 3, -1), seen);
+    }
+
+    // ------------------------------------------------------------ failed write
+
+    @Test
+    public void testWriteThatFailsHalfwayPublishesAndDropsTheElement() {
+        Id id = IdGenerator.of(1);
+        this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        this.tx.getPropertyKeys();
+        this.publisher.reset();
+
+        // The id key is replaced, then the store fails before the name key
+        this.store.hook = (operation, key) -> {
+            if (operation.equals("put") && key.contains("/ID/1")) {
+                throw new IllegalStateException("PD is unreachable");
+            }
+        };
+        long generation = this.generation();
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        });
+        this.store.hook = null;
+
+        // The store changed, so the other Servers are told although the call failed
+        Assert.assertEquals(1, this.publisher.count(this.graphName));
+        // A read in flight can't cache what it fetched before the failed write
+        Assert.assertTrue(this.generation() > generation);
+        // And this Server asks the store instead of serving the copy it had
+        Assert.assertNull(this.arrayCached(id));
+        long reads = this.store.reads();
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
+        Assert.assertTrue(this.store.reads() > reads);
+    }
+
+    @Test
+    public void testFailedWriteKeepsItsEventWhenThePublishFailsToo() throws Exception {
+        this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        this.publisher.reset();
+        this.publisher.fail = true;
+        this.store.hook = (operation, key) -> {
+            if (operation.equals("put") && key.contains("/ID/1")) {
+                throw new IllegalStateException("PD is unreachable");
+            }
+        };
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        });
+        this.store.hook = null;
+        Assert.assertTrue(this.pending());
+
+        this.publisher.fail = false;
+        this.await(() -> this.publisher.count(this.graphName) == 1);
+        this.await(() -> !this.pending());
+    }
+
+    @Test
+    public void testRemoveThatFailsHalfwayPublishesAndDropsTheElement() {
+        PropertyKey pk = this.propertyKey(1, "name", 1);
+        this.tx.addPropertyKey(pk);
+        Assert.assertNotNull(this.tx.getPropertyKey("name"));
+        this.publisher.reset();
+
+        // The name key is deleted, then the store fails before the id key
+        this.store.hook = (operation, key) -> {
+            if (operation.equals("delete") && key.contains("/NAME/name")) {
+                throw new IllegalStateException("PD is unreachable");
+            }
+        };
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.tx.removeSchema(pk);
+        });
+        this.store.hook = null;
+
+        Assert.assertEquals(1, this.publisher.count(this.graphName));
+        // Not served by name from the cache after the store lost the name
+        long reads = this.store.reads();
+        Assert.assertNull(this.tx.getPropertyKey("name"));
+        Assert.assertTrue(this.store.reads() > reads);
+    }
+
     // ------------------------------------------------------------ failed publish
 
     @Test
@@ -333,7 +443,65 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Assert.assertEquals(2, this.publisher.count(this.graphName));
     }
 
+    @Test
+    public void testWatchStartDuringARetryLeavesOneRetry() throws Exception {
+        long epoch = pendingState("retryEpoch");
+        this.publisher.reset();
+        this.publisher.fail = true;
+        this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+
+        // The first retry is inside its publish when the watch starts again
+        CountDownLatch retryInPublish = new CountDownLatch(1);
+        CountDownLatch finishRetry = new CountDownLatch(1);
+        Thread testThread = Thread.currentThread();
+        this.publisher.intercept = () -> {
+            if (Thread.currentThread() != testThread && retryInPublish.getCount() > 0L) {
+                retryInPublish.countDown();
+                awaitLatch(finishRetry);
+            }
+        };
+        awaitLatch(retryInPublish);
+        watchStarted();
+        finishRetry.countDown();
+        // That retry fails, and so does the one the watch start asked for
+        this.await(() -> this.publisher.attempts.get() >= 3);
+        Thread.sleep(300L);
+
+        /*
+         * Three retries were scheduled: the first, the one of the watch start
+         * and one follow-up. The retry that was overtaken must not schedule a
+         * follow-up of its own, or two would run from here on and the delay
+         * would double twice per round.
+         */
+        Assert.assertEquals(epoch + 3L, pendingState("retryEpoch"));
+        Assert.assertEquals(2000L, pendingState("retryDelay"));
+        Assert.assertEquals(3, this.publisher.attempts.get());
+
+        // The delay starts over once the event got through
+        this.publisher.intercept = null;
+        this.publisher.fail = false;
+        watchStarted();
+        this.await(() -> !this.pending());
+        this.await(() -> pendingState("retryDelay") == 1000L);
+    }
+
     // ------------------------------------------------------------ watch start
+
+    @Test
+    public void testPdMetaDriverPassesTheWatchStartedCallback() throws Exception {
+        PdMetaDriver driver = Mockito.mock(PdMetaDriver.class, Mockito.CALLS_REAL_METHODS);
+        @SuppressWarnings("unchecked")
+        KvClient<WatchResponse> client = Mockito.mock(KvClient.class);
+        Whitebox.setInternalState(driver, "client", client);
+        Consumer<WatchResponse> consumer = response -> { };
+        Runnable started = () -> { };
+
+        driver.listen("key", consumer, started);
+
+        // Without it a Server would never learn that its watch started again
+        Mockito.verify(client).listen(Mockito.eq("key"), Mockito.same(consumer),
+                                      Mockito.any(), Mockito.same(started));
+    }
 
     @Test
     public void testWatchStartClearsEveryGraph() throws Exception {
@@ -468,6 +636,101 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Assert.assertEquals(0, this.tx.getPropertyKeys().size());
     }
 
+    @Test
+    public void testReadStartedBeforeALocalInvalidEventIsNotCached() throws Exception {
+        Id id = IdGenerator.of(1);
+        this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
+                                        this.propertyKey(1, "name", 1));
+
+        Gate gate = this.store.stopNext("get", "/ID/1");
+        Future<PropertyKey> read = this.executor.submit(() -> this.tx.getPropertyKey(id));
+        gate.awaitReached();
+        this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
+                                        this.propertyKey(1, "name", 2));
+        // The element is invalidated through the event hub of the graph
+        this.schemaEventHub.notify(Events.CACHE, Cache.ACTION_INVALID,
+                                   HugeType.PROPERTY_KEY, id).get();
+        gate.open();
+        Assert.assertEquals(1, this.version(read.get(WAIT_SECONDS, TimeUnit.SECONDS)));
+
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
+    }
+
+    @Test
+    public void testReadDuringALocalWriteDoesNotPutTheOldValueBack() throws Exception {
+        Id id = IdGenerator.of(1);
+        this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
+                                        this.propertyKey(1, "name", 1));
+        // Version 1 is in the id cache and not in the array cache
+        this.tx.getPropertyKeys();
+        Assert.assertNull(this.arrayCached(id));
+
+        /*
+         * Hold the write of version 2 while it updates the caches: the store
+         * has version 2 and the id cache still has version 1.
+         */
+        CountDownLatch inCaches = new CountDownLatch(1);
+        CountDownLatch finishWrite = new CountDownLatch(1);
+        AtomicBoolean armed = new AtomicBoolean(false);
+        PropertyKey update = Mockito.spy(this.propertyKey(1, "name", 2));
+        Mockito.doAnswer(invocation -> {
+            if (armed.compareAndSet(true, false)) {
+                inCaches.countDown();
+                awaitLatch(finishWrite);
+            }
+            return HugeType.PROPERTY_KEY;
+        }).when(update).type();
+        this.store.hook = (operation, key) -> {
+            if (operation.equals("put") && key.contains("/NAME/name")) {
+                armed.set(true);
+            }
+        };
+        Future<?> write = this.executor.submit(() -> this.tx.updatePropertyKey(update));
+        awaitLatch(inCaches);
+
+        // A read takes version 1 from the id cache and wants to copy it
+        AtomicReference<Thread> reader = new AtomicReference<>();
+        Future<PropertyKey> read = this.executor.submit(() -> {
+            reader.set(Thread.currentThread());
+            return this.tx.getPropertyKey(id);
+        });
+        this.await(() -> reader.get() != null &&
+                         reader.get().getState() == Thread.State.WAITING);
+        finishWrite.countDown();
+        write.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        Assert.assertEquals(1, this.version(read.get(WAIT_SECONDS, TimeUnit.SECONDS)));
+
+        // It did not: every later read gets version 2 without asking the store
+        long reads = this.store.reads();
+        Assert.assertEquals(2, this.version((PropertyKey) this.arrayCached(id)));
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey("name")));
+        Assert.assertEquals(reads, this.store.reads());
+    }
+
+    @Test
+    public void testGuardIsSharedByTheTransactionsOfAGraph() throws Exception {
+        Id id = IdGenerator.of(1);
+        this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
+                                        this.propertyKey(1, "name", 1));
+        // Each request has its own transaction; they share the caches
+        CachedSchemaTransactionV2 second = new CachedSchemaTransactionV2(
+                this.store.driver, CLUSTER, this.params);
+        try {
+            Gate gate = this.store.stopNext("get", "/ID/1");
+            Future<PropertyKey> read = this.executor.submit(() -> this.tx.getPropertyKey(id));
+            gate.awaitReached();
+            second.updatePropertyKey(this.propertyKey(1, "name", 2));
+            gate.open();
+            Assert.assertEquals(1, this.version(read.get(WAIT_SECONDS, TimeUnit.SECONDS)));
+
+            Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
+            Assert.assertEquals(2, this.version(second.getPropertyKey("name")));
+        } finally {
+            second.close();
+        }
+    }
+
     // ------------------------------------------------------------ guard: write-through
 
     @Test
@@ -510,6 +773,36 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
 
         Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
         Assert.assertEquals(2, this.version(this.tx.getPropertyKey("name")));
+    }
+
+    @Test
+    public void testRefusedWriteThroughEvictsWhatWasCachedMeanwhile() throws Exception {
+        Id id = IdGenerator.of(1);
+        this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
+                                        this.propertyKey(1, "name", 1));
+
+        // The write of version 2 noted the generation and has not reached the store
+        Gate gate = this.store.stopBeforePut("/ID/1");
+        Future<?> write = this.executor.submit(
+                () -> this.tx.updatePropertyKey(this.propertyKey(1, "name", 2)));
+        gate.awaitReached();
+        // A clear arrives, and readers cache version 1 before the write lands
+        this.clearByEvent();
+        Assert.assertEquals(1, this.version(this.tx.getPropertyKey(id)));
+        Assert.assertEquals(1, this.version(this.tx.getPropertyKeys().get(0)));
+        gate.open();
+        write.get(WAIT_SECONDS, TimeUnit.SECONDS);
+
+        // The write-through is not cached, and it removed the older copy
+        Assert.assertNull(this.arrayCached(id));
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey(id)));
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKey("name")));
+        Assert.assertEquals(2, this.version(this.tx.getPropertyKeys().get(0)));
+
+        // That listing is the whole list again: the next one needs no store
+        long scans = this.store.scans.get();
+        Assert.assertEquals(1, this.tx.getPropertyKeys().size());
+        Assert.assertEquals("served from the cache", scans, this.store.scans.get());
     }
 
     @Test
@@ -654,27 +947,42 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
                                         this.propertyKey(1, "name", 1));
         this.tx.getPropertyKeys();
 
-        // Stand in for a listing that is reading the cached list
-        Lock readLock = (Lock) this.callGuard("readLock");
-        readLock.lock();
-        Future<?> clear;
-        try {
-            clear = this.executor.submit(this::clearByEvent);
-            try {
-                clear.get(300L, TimeUnit.MILLISECONDS);
-                Assert.fail("the clear ran while a listing was reading the cache");
-            } catch (java.util.concurrent.TimeoutException expected) {
-                // The clear waits
+        // A cached element that can hold a listing in the middle of its pass
+        CountDownLatch inListing = new CountDownLatch(1);
+        CountDownLatch finishListing = new CountDownLatch(1);
+        AtomicBoolean armed = new AtomicBoolean(false);
+        PropertyKey slow = Mockito.spy(this.propertyKey(2, "slow", 1));
+        Mockito.doAnswer(invocation -> {
+            if (armed.get()) {
+                inListing.countDown();
+                awaitLatch(finishListing);
             }
+            return HugeType.PROPERTY_KEY;
+        }).when(slow).type();
+        this.invoke("cacheIfCurrent", new Class<?>[]{SchemaElement.class, long.class},
+                    slow, this.generation());
+        armed.set(true);
+
+        Future<List<PropertyKey>> listing = this.executor.submit(
+                () -> this.tx.getPropertyKeys());
+        awaitLatch(inListing);
+        Future<?> clear = this.executor.submit(this::clearByEvent);
+        try {
+            clear.get(300L, TimeUnit.MILLISECONDS);
+            Assert.fail("the clear ran while a listing was reading the cache");
+        } catch (TimeoutException expected) {
+            // The clear waits for the listing
         } finally {
-            readLock.unlock();
+            finishListing.countDown();
         }
+        Assert.assertEquals(2, listing.get(WAIT_SECONDS, TimeUnit.SECONDS).size());
         clear.get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
     @Test
     public void testListingIsNeverPartialWhileClearsRun() throws Exception {
         int count = 50;
+        int listings = 3000;
         for (int i = 1; i <= count; i++) {
             this.otherServer.addPropertyKey(GRAPH_SPACE, this.graphName,
                                             this.propertyKey(i, "pk" + i, 1));
@@ -683,42 +991,58 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Future<?> clears = this.executor.submit(() -> {
             while (!stop.get()) {
                 this.clearByEvent();
+                // Leave room for a listing to fill the cache and for others to use it
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1L));
             }
         });
+        long scans = this.store.scans.get();
         try {
-            for (int i = 0; i < 3000; i++) {
+            for (int i = 0; i < listings; i++) {
                 Assert.assertEquals("listing " + i, count, this.tx.getPropertyKeys().size());
             }
         } finally {
             stop.set(true);
         }
         clears.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        Assert.assertTrue("some listings must have come from the cache",
+                          this.store.scans.get() - scans < listings);
     }
 
     @Test
-    public void testReadsAndWritesStayConsistentUnderConcurrentClears() throws Exception {
+    public void testReadsNeverGoBackBehindAWriteUnderConcurrentClears() throws Exception {
         Id id = IdGenerator.of(1);
         this.tx.addPropertyKey(this.propertyKey(1, "name", 0));
+        // The last version whose update has returned
+        AtomicInteger written = new AtomicInteger(0);
         AtomicBoolean stop = new AtomicBoolean(false);
         List<Future<?>> noise = new ArrayList<>();
         noise.add(this.executor.submit(() -> {
             while (!stop.get()) {
                 this.clearByEvent();
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1L));
             }
         }));
         for (int i = 0; i < 3; i++) {
             noise.add(this.executor.submit(() -> {
                 while (!stop.get()) {
-                    this.tx.getPropertyKey(id);
-                    this.tx.getPropertyKey("name");
-                    this.tx.getPropertyKeys();
+                    int floor = written.get();
+                    this.assertNotOlder(floor, this.tx.getPropertyKey(id));
+                    floor = written.get();
+                    this.assertNotOlder(floor, this.tx.getPropertyKey("name"));
+                    floor = written.get();
+                    this.assertNotOlder(floor, this.tx.getPropertyKeys().get(0));
                 }
             }));
         }
-        try {
+        Future<?> writer = this.executor.submit(() -> {
             for (int version = 1; version <= 300; version++) {
                 this.tx.updatePropertyKey(this.propertyKey(1, "name", version));
+                written.set(version);
             }
+        });
+        try {
+            // A deadlock fails here instead of hanging the run
+            writer.get(3L * WAIT_SECONDS, TimeUnit.SECONDS);
         } finally {
             stop.set(true);
         }
@@ -726,7 +1050,6 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             future.get(WAIT_SECONDS, TimeUnit.SECONDS);
         }
 
-        // Whatever ended up cached, it is the last version written
         Assert.assertEquals(300, this.version(this.tx.getPropertyKey(id)));
         Assert.assertEquals(300, this.version(this.tx.getPropertyKey("name")));
         Assert.assertEquals(300, this.version(this.tx.getPropertyKeys().get(0)));
@@ -743,6 +1066,15 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     private int version(PropertyKey pk) {
         Assert.assertNotNull(pk);
         return ((Number) pk.userdata().get(VERSION)).intValue();
+    }
+
+    // A read that began after a version was written must not return an older one
+    private void assertNotOlder(int floor, PropertyKey pk) {
+        int version = this.version(pk);
+        if (version < floor) {
+            throw new AssertionError("read version " + version + " after version " +
+                                     floor + " was written");
+        }
     }
 
     /** What this Server does when another Server's clear event arrives. */
@@ -810,10 +1142,38 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         return (AtomicBoolean) field.get(null);
     }
 
+    private static Object pendingClearEvents() {
+        return Whitebox.getInternalState(CachedSchemaTransactionV2.class,
+                                         "PENDING_CLEAR_EVENTS");
+    }
+
     private static Map<?, ?> pendingMap() {
-        Object pending = Whitebox.getInternalState(CachedSchemaTransactionV2.class,
-                                                   "PENDING_CLEAR_EVENTS");
-        return Whitebox.getInternalState(pending, "pending");
+        return Whitebox.getInternalState(pendingClearEvents(), "pending");
+    }
+
+    private static long pendingState(String field) {
+        Object pending = pendingClearEvents();
+        synchronized (pending) {
+            Long value = Whitebox.getInternalState(pending, field);
+            return value;
+        }
+    }
+
+    /**
+     * Forget the failed publishes and their scheduled retry. They are static
+     * state of the class under test, so without this a test that opens a V2
+     * graph without a PD leaves a retry behind that fires in a later test.
+     */
+    static void resetPendingClearEvents() {
+        Object pending = pendingClearEvents();
+        synchronized (pending) {
+            pendingMap().clear();
+            ScheduledFuture<?> retry = Whitebox.getInternalState(pending, "retry");
+            if (retry != null) {
+                retry.cancel(false);
+            }
+            Whitebox.setInternalState(pending, "retryDelay", 1000L);
+        }
     }
 
     // Whether this graph has a clear event waiting to be published again
@@ -919,10 +1279,15 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         private final List<Gate> gates = new CopyOnWriteArrayList<>();
         private final PdMetaDriver driver = Mockito.mock(PdMetaDriver.class);
         private volatile StoreHook hook;
+        private volatile Consumer<String> beforePut;
 
         FakeStore() {
             Mockito.doAnswer(invocation -> {
                 String key = invocation.getArgument(0);
+                Consumer<String> before = this.beforePut;
+                if (before != null) {
+                    before.accept(key);
+                }
                 this.data.put(key, invocation.getArgument(1));
                 this.after("put", key);
                 return null;
@@ -979,8 +1344,22 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             return gate;
         }
 
+        /** Stop the next put whose key contains the text, before it changes the store. */
+        Gate stopBeforePut(String keyPart) {
+            Gate gate = new Gate();
+            AtomicBoolean used = new AtomicBoolean(false);
+            this.gates.add(gate);
+            this.beforePut = key -> {
+                if (key.contains(keyPart) && used.compareAndSet(false, true)) {
+                    gate.stop();
+                }
+            };
+            return gate;
+        }
+
         void open() {
             this.hook = null;
+            this.beforePut = null;
             for (Gate gate : this.gates) {
                 gate.open();
             }

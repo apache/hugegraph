@@ -838,6 +838,9 @@ What a deployment can rely on once every Server runs this version:
   removing property keys, labels and index labels, the status changes made by index and
   label jobs, and clearing or truncating a graph. A removal is published whatever
   `task.sync_deletion` is set to.
+- A schema change that fails after it changed part of what PD stores is published
+  too. The Server that made it drops its own copy of that element, and the caller
+  still gets the error.
 - A Server whose PD watch was down drops all its cached schema when the watch is back,
   for example after a PD restart or a PD leader change. Events published in between
   are not replayed, and this is how they are made up for.
@@ -847,6 +850,10 @@ What a deployment can rely on once every Server runs this version:
   with a delay that doubles up to 30 seconds, and at once when its PD watch is back.
   Each Server also publishes once when it opens a graph, which covers a Server that
   stopped between a schema write and its event.
+
+Each event makes the other Servers load the whole schema of that graph again on their
+next read by name. Schema changes that arrive back to back therefore slow schema reads
+on the other Servers until the burst ends; no request fails because of it.
 
 What it does not provide:
 

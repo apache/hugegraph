@@ -77,6 +77,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
 
     @Before
     public void setup() {
+        // A V2 graph opened without a PD leaves a clear event to send again
+        CachedSchemaTransactionV2Test.resetPendingClearEvents();
         this.graph = HugeFactory.open(FakeObjects.newConfig());
         this.params = Whitebox.getInternalState(this.graph, "params");
         this.cache = new CachedSchemaTransaction(this.params,
@@ -96,6 +98,7 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                 this.graph.close();
                 this.graph = null;
             }
+            CachedSchemaTransactionV2Test.resetPendingClearEvents();
         }
     }
 
@@ -1110,6 +1113,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             graphManagerReplaced = true;
             CachedSchemaTransactionV2 first = new CachedSchemaTransactionV2(driver, "test", requestParams);
             requests.add(first);
+            // The clear event this JVM sends when it opens the graph
+            Mockito.verify(driver, Mockito.times(1)).put(Mockito.anyString(), Mockito.anyString());
             VertexLabel retainedLabel = first.getVertexLabel(original.id());
             Assert.assertEquals(1, reads.get());
             HugeVertex retained = new HugeVertex(objects.graph(), IdGenerator.of(32), retainedLabel);
@@ -1161,7 +1166,7 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                     storeHub.listen(EventHub.ANY_EVENT, listener);
                 }
             }
-            // One clear event when this JVM opened the graph, one for the Store clear
+            // One more clear event, for the Store clear
             Mockito.verify(driver, Mockito.times(2)).put(Mockito.anyString(), Mockito.anyString());
             CachedSchemaTransactionV2 afterStoreEvent = new CachedSchemaTransactionV2(driver, "test", requestParams);
             requests.add(afterStoreEvent);

@@ -204,7 +204,6 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         Lock lock = arrayCaches.writeLock();
         lock.lock();
         try {
-            arrayCaches.advanceGeneration();
             /*
              * Clear name cache first so the (name -> id -> object) lookup
              * path of a reader that takes no lock fails fast instead of
@@ -218,6 +217,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 idCache.clear();
             }
         } finally {
+            // Last, see SchemaCaches
+            arrayCaches.advanceGeneration();
             lock.unlock();
         }
     }
@@ -249,7 +250,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 event.checkArgs(String.class, HugeType.class, Id.class);
                 HugeType type = (HugeType) args[1];
                 Id id = (Id) args[2];
-                this.invalidateCache(type, id, true);
+                this.invalidateCache(type, id, null, true);
                 return true;
             } else if (Cache.ACTION_CLEAR.equals(args[0])) {
                 event.checkArgs(String.class, HugeType.class);
@@ -408,16 +409,18 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
      * Remove one element from the caches and advance the generation, so a
      * read that fetched the element before this point can't cache it again.
      */
-    private void invalidateCache(HugeType type, Id id, boolean resetCachedAll) {
+    private void invalidateCache(HugeType type, Id id, String name,
+                                 boolean resetCachedAll) {
         Lock lock = this.arrayCaches.writeLock();
         lock.lock();
         try {
-            this.arrayCaches.advanceGeneration();
-            this.removeFromCaches(type, id, null);
+            this.removeFromCaches(type, id, name);
             if (resetCachedAll) {
                 this.resetCachedAll(type);
             }
         } finally {
+            // Last, see SchemaCaches
+            this.arrayCaches.advanceGeneration();
             lock.unlock();
         }
     }
@@ -498,13 +501,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         Lock lock = this.arrayCaches.writeLock();
         lock.lock();
         try {
-            boolean current = this.arrayCaches.generation() == generation;
-            /*
-             * The write replaced the stored element, so whatever a concurrent
-             * read fetched before now is old: don't let it be cached.
-             */
-            this.arrayCaches.advanceGeneration();
-            if (current) {
+            if (this.arrayCaches.generation() == generation) {
                 this.putIntoCaches(schema);
             } else {
                 /*
@@ -516,6 +513,12 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 this.resetCachedAll(schema.type());
             }
         } finally {
+            /*
+             * The write replaced the stored element, so whatever a concurrent
+             * read fetched before now is old: don't let it be cached. Last,
+             * see SchemaCaches.
+             */
+            this.arrayCaches.advanceGeneration();
             lock.unlock();
         }
     }
@@ -524,9 +527,12 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     protected void updateSchema(SchemaElement schema,
                                 Consumer<SchemaElement> updateCallback) {
         long generation = this.arrayCaches.generation();
-        super.updateSchema(schema, updateCallback);
-
-        this.cacheWritten(schema, generation);
+        try {
+            super.updateSchema(schema, updateCallback);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
 
         /*
          * An update must reach the other Servers like an add does: they keep
@@ -534,30 +540,64 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
          * their next update of it. That includes status changes made by
          * background jobs.
          */
-        this.publishClearEvent();
+        try {
+            this.cacheWritten(schema, generation);
+        } finally {
+            this.publishClearEvent();
+        }
     }
 
     @Override
     protected void addSchema(SchemaElement schema) {
         long generation = this.arrayCaches.generation();
-        super.addSchema(schema);
+        try {
+            super.addSchema(schema);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
 
-        this.cacheWritten(schema, generation);
-
-        this.publishClearEvent();
+        try {
+            this.cacheWritten(schema, generation);
+        } finally {
+            this.publishClearEvent();
+        }
     }
 
     @Override
     public void removeSchema(SchemaElement schema) {
-        super.removeSchema(schema);
-
-        this.invalidateCache(schema.type(), schema.id(), false);
+        try {
+            super.removeSchema(schema);
+        } catch (Throwable e) {
+            this.writeFailed(schema);
+            throw e;
+        }
 
         /*
          * Publish whatever task.sync_deletion says: that option only makes
          * the caller wait for the local task, it never reached another JVM.
          */
-        this.publishClearEvent();
+        try {
+            this.invalidateCache(schema.type(), schema.id(), schema.name(),
+                                 false);
+        } finally {
+            this.publishClearEvent();
+        }
+    }
+
+    /**
+     * A schema write is several puts or deletes in the store, so one that
+     * threw may have changed the store in part or in full. Treat it like a
+     * write: drop the element here, so nothing serves a copy the store no
+     * longer matches, and tell the other Servers to do the same.
+     */
+    private void writeFailed(SchemaElement schema) {
+        try {
+            this.invalidateCache(schema.type(), schema.id(), schema.name(),
+                                 true);
+        } finally {
+            this.publishClearEvent();
+        }
     }
 
     /**
@@ -678,7 +718,11 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                     Id prefixedName = generateId(schema.type(), schema.name());
                     this.nameCache.update(prefixedName, schema);
                 }
-                this.cachedTypes().putIfAbsent(type, true);
+                /*
+                 * The generation is unchanged, so this is the whole list:
+                 * also replace a "not all cached" left by an earlier write
+                 */
+                this.cachedTypes().put(type, true);
             }
         } finally {
             writeLock.unlock();
@@ -696,9 +740,16 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     @Override
     public void clear() {
         // Clear schema info firstly
-        super.clear();
-        this.clearCache(false);
-        this.publishClearEvent();
+        try {
+            super.clear();
+        } finally {
+            // A clear that threw may have removed part of the schema
+            try {
+                this.clearCache(false);
+            } finally {
+                this.publishClearEvent();
+            }
+        }
     }
 
     /**
@@ -729,6 +780,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         private ScheduledExecutorService executor;
         private ScheduledFuture<?> retry;
         private long retryDelay = RETRY_MIN_DELAY;
+        // The number of the newest scheduled retry
+        private long retryEpoch;
 
         void publish(String graphSpace, String graph) {
             try {
@@ -773,11 +826,12 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 });
             }
             long delay = now ? 0L : this.retryDelay;
-            this.retry = this.executor.schedule(this::retryPending, delay,
-                                                TimeUnit.MILLISECONDS);
+            long epoch = ++this.retryEpoch;
+            this.retry = this.executor.schedule(() -> this.retryPending(epoch),
+                                                delay, TimeUnit.MILLISECONDS);
         }
 
-        private void retryPending() {
+        private void retryPending(long epoch) {
             List<Map.Entry<GraphRef, Long>> entries =
                     new ArrayList<>(this.pending.entrySet());
             for (Map.Entry<GraphRef, Long> entry : entries) {
@@ -794,6 +848,13 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 }
             }
             synchronized (this) {
+                if (epoch != this.retryEpoch) {
+                    /*
+                     * A watch start scheduled a newer retry while this one
+                     * was running: that one goes on, or there would be two.
+                     */
+                    return;
+                }
                 this.retry = null;
                 if (this.pending.isEmpty()) {
                     this.retryDelay = RETRY_MIN_DELAY;
@@ -816,9 +877,16 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
      * Schema caches never expire, so a value cached after it was replaced in
      * the store stays wrong until the next clear. Every clear, removal and
      * local write therefore advances {@link #generation} under the write
-     * lock. A reader notes the generation before it asks the store and caches
-     * what it got only if the generation is still the same, checked under the
-     * same lock. The store is never called with a lock held.
+     * lock. A reader notes the generation before it looks into a cache or
+     * asks the store, and caches what it got only if the generation is still
+     * the same, checked under the same lock. The store is never called with
+     * that lock held.
+     * <p>
+     * The generation is advanced as the last step of a change, after the
+     * caches were updated. Readers note it without a lock, so one that sees
+     * the new generation must also see the caches as the change left them.
+     * Advancing first would let a reader note the new generation, take the
+     * old value from the id cache and copy it to the array cache afterwards.
      */
     private static final class SchemaCaches<V extends SchemaElement> {
 
