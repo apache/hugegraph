@@ -868,6 +868,75 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         }
     }
 
+    @Test
+    public void testTransientEmptyEdgeBatchIsNotReusedOnHstore() {
+        List<Id> ids = this.persistEdges(1);
+        ConditionQuery root = this.edgeCacheRequest();
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        this.markAsHstore(store);
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params,
+                                                                         store);
+        try {
+            transaction.clearCache(null, false);
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(store).query(Mockito.any(Query.class));
+            Assert.assertTrue(this.fetchEdgeIds(transaction, root).isEmpty());
+
+            Mockito.clearInvocations(store);
+            Mockito.doCallRealMethod().when(store).query(Mockito.any(Query.class));
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, root));
+            Mockito.verify(store).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
+        }
+    }
+
+    @Test
+    public void testRepeatedEmptyEdgeCostDiffersByBackendType() {
+        this.persistEdges(1);
+        ConditionQuery root = this.edgeCacheRequest();
+        BackendStore local = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction localTransaction = new CachedGraphTransaction(
+                this.params, local);
+        BackendStore distributed = Mockito.spy(this.params.loadGraphStore());
+        this.markAsHstore(distributed);
+        CachedGraphTransaction distributedTransaction = new CachedGraphTransaction(
+                this.params, distributed);
+        try {
+            localTransaction.clearCache(null, false);
+            distributedTransaction.clearCache(null, false);
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(local).query(Mockito.any(Query.class));
+            Mockito.doReturn(Collections.emptyIterator())
+                   .when(distributed).query(Mockito.any(Query.class));
+            Mockito.clearInvocations(local, distributed);
+
+            for (int i = 0; i < 100; i++) {
+                Assert.assertTrue(this.fetchEdgeIds(localTransaction, root).isEmpty());
+            }
+            Mockito.verify(local, Mockito.times(1)).query(Mockito.any(Query.class));
+
+            // Both transactions use the graph-level cache. Clear the local
+            // negative entry before measuring distributed reads.
+            distributedTransaction.clearCache(null, false);
+            Mockito.clearInvocations(distributed);
+            for (int i = 0; i < 100; i++) {
+                Assert.assertTrue(this.fetchEdgeIds(distributedTransaction, root).isEmpty());
+            }
+            Mockito.verify(distributed, Mockito.times(100))
+                   .query(Mockito.any(Query.class));
+        } finally {
+            localTransaction.close();
+            distributedTransaction.close();
+        }
+    }
+
+    private void markAsHstore(BackendStore store) {
+        BackendStoreProvider provider = Mockito.spy(store.provider());
+        Mockito.doReturn(true).when(provider).isHstore();
+        Whitebox.setInternalState(store, "provider", provider);
+    }
+
     private List<Id> persistEdges(int count) {
         HugeVertex first = this.newVertex(IdGenerator.of(1L));
         this.cache.addVertex(first);
