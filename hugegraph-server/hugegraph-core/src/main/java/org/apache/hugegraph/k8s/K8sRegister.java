@@ -66,14 +66,11 @@ public class K8sRegister {
     private String getKubeToken() throws Exception {
         File file = new File(KUBE_TOKEN_FILE);
         if (file.canRead()) {
-            FileReader reader = new FileReader(file);
-            BufferedReader bufferedReader = new BufferedReader(reader);
-            try {
+            try (BufferedReader bufferedReader =
+                         new BufferedReader(new FileReader(file))) {
                 String token = bufferedReader.readLine();
                 token = token.trim();
                 return token;
-            } finally {
-                bufferedReader.close();
             }
         }
         throw new HugeException("Kubernetes token file doesn't exist");
@@ -83,14 +80,11 @@ public class K8sRegister {
     private String getKubeNamespace() throws Exception {
         File file = new File(NAMESPACE_FILE);
         if (file.canRead()) {
-            FileReader reader = new FileReader(file);
-            BufferedReader bufferedReader = new BufferedReader(reader);
-            try {
+            try (BufferedReader bufferedReader =
+                         new BufferedReader(new FileReader(file))) {
                 String namespace = bufferedReader.readLine();
                 namespace = namespace.trim();
                 return namespace;
-            } finally {
-                bufferedReader.close();
             }
         }
         throw new HugeException("Kubernetes namespace file doesn't exist");
@@ -102,7 +96,10 @@ public class K8sRegister {
         }
 
         CertificateFactory factory = CertificateFactory.getInstance(CERT_TYPE);
-        Certificate cert = factory.generateCertificate(new FileInputStream(CA_FILE));
+        Certificate cert;
+        try (FileInputStream input = new FileInputStream(CA_FILE)) {
+            cert = factory.generateCertificate(input);
+        }
 
         KeyStore keyStore = KeyStore.getInstance(KEY_STORE_TYPE);
         keyStore.load(null, null);

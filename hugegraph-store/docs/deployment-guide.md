@@ -452,7 +452,9 @@ local file only when it has no local file or the file is no newer than PD's `S:T
 upload sets no timestamp and a missing one counts as 0, so changing `S:FS` alone changes nothing.
 The simplest upgrade is to set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=auto` (or
 `-Drocksdb.total_memory_size=auto`) on every Store and restart it; the Store keeps this value
-above both its local file and PD's copy. To change the shared copy instead, set
+above both its local file and PD's copy, as it does a `--rocksdb.total_memory_size` argument to
+the Store jar. An environment variable such as `ROCKSDB_TOTAL_MEMORY_SIZE` doesn't set the
+budget, because Spring binds it to a different key. To change the shared copy instead, set
 `rocksdb.total_memory_size` to `0` or remove it in `S:FS`, then put the current time in
 milliseconds into `S:Timestamp` through PD's KV service (gRPC `KvService.put`). Use `auto` there
 only once every Store runs this release: an earlier release can't parse `auto` and fails to start,

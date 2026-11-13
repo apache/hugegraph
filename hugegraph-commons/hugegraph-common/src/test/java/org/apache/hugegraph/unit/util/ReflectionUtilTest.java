@@ -158,4 +158,29 @@ public class ReflectionUtilTest extends BaseUnitTest {
         clazz = ".Test";
         Assert.assertEquals("", ReflectionUtil.packageName(clazz));
     }
+
+    @Test
+    public void testGetMethodsAnnotatedWithOnInterface() {
+        List<Method> methods = ReflectionUtil.getMethodsAnnotatedWith(
+                               AnnotatedInterface.class, Deprecated.class, true);
+        Assert.assertEquals(1, methods.size());
+        Assert.assertEquals("old", methods.get(0).getName());
+    }
+
+    @Test
+    public void testGetMethodsAnnotatedWithOnObject() {
+        List<Method> withSuper = ReflectionUtil.getMethodsAnnotatedWith(
+                                 Object.class, Deprecated.class, true);
+        List<Method> withoutSuper = ReflectionUtil.getMethodsAnnotatedWith(
+                                    Object.class, Deprecated.class, false);
+        Assert.assertEquals(withoutSuper, withSuper);
+    }
+
+    private interface AnnotatedInterface {
+
+        @Deprecated
+        void old();
+
+        void current();
+    }
 }

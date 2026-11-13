@@ -197,6 +197,28 @@ public class CgroupMemoryLimitTest {
     }
 
     @Test
+    public void testUnrepresentableMountPointIsFlaggedNotFatal() throws IOException {
+        Path root = Files.createTempDirectory("cgroup-bad-path");
+        try {
+            Path v1 = root.resolve("memory");
+            write(v1, "memory.limit_in_bytes", String.valueOf(4 * GIB));
+            Path proc = write(root, "proc-self-cgroup", "0::/kubepods/pod1\n4:memory:/\n");
+            // The kernel never writes \000, but a NUL in the v2 mount point must only hide
+            // that line's limits, not stop the Store or the v1 line's lookup
+            Path mountinfo = write(root, "mountinfo",
+                                   "30 25 0:26 / " + root.resolve("v2") +
+                                   "\\000x rw - cgroup2 cgroup2 rw\n" +
+                                   "40 25 0:30 / " + v1 + " rw - cgroup cgroup rw,memory\n");
+            CgroupMemoryLimit limit = CgroupMemoryLimit.read(proc, mountinfo, root);
+            assertTrue(limit.incomplete);
+            assertEquals(4 * GIB, limit.bytes);
+            assertEquals(1, limit.version);
+        } finally {
+            FileUtils.deleteQuietly(root.toFile());
+        }
+    }
+
+    @Test
     public void testCgroupV2MountOrderDoesNotHideAncestorLimit() throws IOException {
         Path root = Files.createTempDirectory("cgroup-v2-mounts");
         try {

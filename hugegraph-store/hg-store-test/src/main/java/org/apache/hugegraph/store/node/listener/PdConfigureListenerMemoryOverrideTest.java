@@ -30,13 +30,15 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
+import org.springframework.core.env.SimpleCommandLinePropertySource;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /**
  * PdConfigureListener puts the PD-managed application-pd.yml in front of every other
- * property source. An explicit per-Store rocksdb.total_memory_size, from the Docker
- * entrypoint's SPRING_APPLICATION_JSON or -D, must still win when RocksdbConfig binds,
- * while the rest of the PD configuration keeps its precedence.
+ * property source. An explicit per-Store rocksdb.total_memory_size, from a command-line
+ * argument, the Docker entrypoint's SPRING_APPLICATION_JSON or -D, must still win when
+ * RocksdbConfig binds, while the rest of the PD configuration keeps its precedence.
  */
 public class PdConfigureListenerMemoryOverrideTest {
 
@@ -63,6 +65,37 @@ public class PdConfigureListenerMemoryOverrideTest {
         // SPRING_APPLICATION_JSON outranks -D, as without PD configuration
         assertEquals("268435456", bind(environment(json("268435456"), "536870912"))
                 .get("total_memory_size"));
+    }
+
+    @Test
+    public void testCommandLineOverrideWinsOverPdConfig() {
+        assertEquals("1073741824",
+                     bind(withCommandLine(environment(null, null))).get("total_memory_size"));
+        // Spring puts command-line arguments ahead of SPRING_APPLICATION_JSON
+        assertEquals("1073741824", bind(withCommandLine(environment(json("268435456"), null)))
+                .get("total_memory_size"));
+    }
+
+    private static StandardEnvironment withCommandLine(StandardEnvironment env) {
+        env.getPropertySources().addFirst(new SimpleCommandLinePropertySource(
+                "--" + PdConfigureListener.MEMORY_KEY + "=1073741824"));
+        return env;
+    }
+
+    @Test
+    public void testEnvironmentVariableKeepsPdConfig() {
+        StandardEnvironment env = environment(null, null);
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("ROCKSDB_TOTAL_MEMORY_SIZE", "268435456");
+        env.getPropertySources().addBefore("applicationConfig: [application-pd.yml]",
+                                           new SystemEnvironmentPropertySource(
+                                                   StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                                                   variables));
+        // The variable binds to the total.memory.size key, not the budget, so it must not
+        // drop PD's value and leave the Store on its local file
+        Map<String, String> rocksdb = bind(env);
+        assertEquals(PD_BUDGET, rocksdb.get("total_memory_size"));
+        assertEquals("268435456", rocksdb.get("total.memory.size"));
     }
 
     @Test

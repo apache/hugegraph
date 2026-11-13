@@ -51,7 +51,6 @@ public final class ConfigUtil {
 
     private static final String NODE_GRAPHS = "graphs";
     private static final String CONF_SUFFIX = ".properties";
-    private static final String CHARSET = "UTF-8";
 
     public static void checkGremlinConfig(String conf) {
         Parameters params = new Parameters();

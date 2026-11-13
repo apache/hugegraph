@@ -121,10 +121,10 @@ public interface Stopwatch extends Cloneable {
 
         @Override
         public boolean equals(Object obj) {
-            if (this.hashCode() != obj.hashCode()) {
+            if (!(obj instanceof Path)) {
                 return false;
             }
-            if (!(obj instanceof Path)) {
+            if (this.hashCode() != obj.hashCode()) {
                 return false;
             }
             Path other = (Path) obj;

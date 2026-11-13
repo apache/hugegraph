@@ -86,8 +86,13 @@ public class HugeGremlinServer {
         server.start().exceptionally(t -> {
             LOG.error("Gremlin Server was unable to start and will " +
                       "shutdown now: {}", t.getMessage());
-            server.stop().join();
-            throw new HugeException("Failed to start Gremlin Server");
+            HugeException failure = new HugeException("Failed to start Gremlin Server", t);
+            try {
+                server.stop().join();
+            } catch (Throwable stopFailure) {
+                failure.addSuppressed(stopFailure);
+            }
+            throw failure;
         }).join();
         return server;
     }

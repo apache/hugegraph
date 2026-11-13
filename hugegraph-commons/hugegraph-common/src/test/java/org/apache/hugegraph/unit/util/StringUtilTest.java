@@ -157,4 +157,17 @@ public class StringUtilTest {
         Collections.addAll(results, stringArray);
         return results;
     }
+
+    @Test
+    public void testCharsEmptySliceAtEnd() {
+        Chars chars = Chars.of("123");
+        CharSequence tail = chars.subSequence(3, 3);
+        Assert.assertEquals(0, tail.length());
+        Assert.assertEquals("", tail.toString());
+
+        Assert.assertEquals("", Chars.of("12").subSequence(1, 2).subSequence(1, 1).toString());
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            chars.subSequence(4, 4);
+        });
+    }
 }

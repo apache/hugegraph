@@ -51,7 +51,7 @@ public final class StringUtil {
         private final int end;
 
         public Chars(char[] chars, int start, int end) {
-            E.checkArgument(0 < start && start < chars.length || start == 0,
+            E.checkArgument(0 <= start && start <= chars.length,
                             "Invalid start parameter %s", start);
             E.checkArgument(start <= end && end <= chars.length,
                             "Invalid end parameter %s", end);
