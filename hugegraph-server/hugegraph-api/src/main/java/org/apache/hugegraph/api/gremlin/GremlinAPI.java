@@ -21,12 +21,15 @@ import org.apache.hugegraph.api.filter.CompressInterceptor.Compress;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.metrics.MetricsUtil;
 import org.apache.hugegraph.util.E;
+import org.glassfish.grizzly.http.server.Request;
 
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.annotation.Timed;
 
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -43,6 +46,18 @@ import jakarta.ws.rs.core.UriInfo;
 @Singleton
 @Tag(name = "GremlinAPI")
 public class GremlinAPI extends GremlinQueryAPI {
+
+    @Inject
+    private GremlinRestExecutor executor;
+
+    @Context
+    private Provider<Request> peer;
+
+    private String remoteAddress() {
+        Request request = this.peer.get();
+        return request == null ? "unknown" :
+               request.getRemoteAddr() + ":" + request.getRemotePort();
+    }
 
     private static final Histogram GREMLIN_INPUT_HISTOGRAM =
             MetricsUtil.registerHistogram(GremlinAPI.class, "gremlin-input");
@@ -65,7 +80,7 @@ public class GremlinAPI extends GremlinQueryAPI {
         // Response.temporaryRedirect(UriBuilder.fromUri(location).build())
         // .build();
         String auth = headers.getHeaderString(HttpHeaders.AUTHORIZATION);
-        Response response = this.client().doPostRequest(auth, request);
+        Response response = this.executor.post(auth, request, this.remoteAddress());
         GREMLIN_INPUT_HISTOGRAM.update(request.length());
         GREMLIN_OUTPUT_HISTOGRAM.update(response.getLength());
         return transformResponseIfNeeded(response);
@@ -82,7 +97,7 @@ public class GremlinAPI extends GremlinQueryAPI {
         String query = uriInfo.getRequestUri().getRawQuery();
         E.checkArgumentNotNull(query, "The request query can't be empty");
         MultivaluedMap<String, String> params = uriInfo.getQueryParameters();
-        Response response = this.client().doGetRequest(auth, params);
+        Response response = this.executor.get(auth, params, this.remoteAddress());
         GREMLIN_INPUT_HISTOGRAM.update(query.length());
         GREMLIN_OUTPUT_HISTOGRAM.update(response.getLength());
         return transformResponseIfNeeded(response);
