@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.unit.cmd;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,10 +27,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
+import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.auth.HugeUser;
+import org.apache.hugegraph.auth.StandardAuthManager;
 import org.apache.hugegraph.auth.StandardAuthenticator;
+import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.cmd.InitStore;
 import org.apache.hugegraph.config.ConfigException;
 import org.apache.hugegraph.config.CoreOptions;
@@ -39,11 +47,16 @@ import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.ConfigUtil;
+import org.apache.hugegraph.util.StringEncoding;
+import org.apache.tinkerpop.gremlin.structure.util.GraphFactory;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 /**
  * {@code init_store.enabled} controls whether init-store performs local
@@ -432,6 +445,152 @@ public class InitStoreConfigTest {
             InitStore.main(new String[]{subclassConf});
         }, e -> Assert.assertContains("Refusing to skip init-store",
                                       e.getMessage()));
+    }
+
+    /**
+     * The one-shot init path must create the admin from {@code auth.admin_pa}
+     * and then release the graph it opened, otherwise init-store keeps the
+     * backend (and its lock files) open until the JVM exits.
+     */
+    @Test
+    public void testInitAdminUserIfNeededCreatesAdminAndClosesGraph()
+                                                        throws Exception {
+        String restConf = this.writeAuthenticatorRestServerConf("secret");
+        StandardAuthManager authManager = Mockito.mock(StandardAuthManager.class);
+        HugeGraph graph = this.mockAuthGraph(authManager, true);
+
+        this.initAdminUserIfNeeded(restConf, graph);
+
+        ArgumentCaptor<HugeUser> admin = ArgumentCaptor.forClass(HugeUser.class);
+        Mockito.verify(authManager).createUser(admin.capture());
+        Assert.assertEquals("admin", admin.getValue().name());
+        Assert.assertTrue(StringEncoding.checkPassword(
+                          "secret", admin.getValue().password()));
+        Mockito.verify(graph).close();
+    }
+
+    @Test
+    public void testInitAdminUserIfNeededSkipsAdminOnNonPersistentBackend()
+                                                        throws Exception {
+        String restConf = this.writeAuthenticatorRestServerConf("secret");
+        StandardAuthManager authManager = Mockito.mock(StandardAuthManager.class);
+        HugeGraph graph = this.mockAuthGraph(authManager, false);
+
+        this.initAdminUserIfNeeded(restConf, graph);
+
+        Mockito.verify(authManager, Mockito.never())
+               .createUser(Mockito.any(HugeUser.class));
+        Mockito.verify(graph).close();
+    }
+
+    /**
+     * The 'pa' default is public, so without an explicit non-empty
+     * auth.admin_pa the operator is prompted instead and the default is never
+     * used. System.console() is null under the test runner, so the prompt
+     * reads System.in.
+     */
+    @Test
+    public void testInitAdminUserIfNeededPromptsWithoutExplicitAdminPa()
+                                                        throws Exception {
+        for (String adminPa : new String[]{null, ""}) {
+            String restConf = this.writeAuthenticatorRestServerConf(adminPa);
+            StandardAuthManager authManager =
+                    Mockito.mock(StandardAuthManager.class);
+            HugeGraph graph = this.mockAuthGraph(authManager, true);
+
+            InputStream stdin = System.in;
+            System.setIn(new ByteArrayInputStream(
+                         "typed-secret\n".getBytes(StandardCharsets.UTF_8)));
+            try {
+                this.initAdminUserIfNeeded(restConf, graph);
+            } finally {
+                System.setIn(stdin);
+            }
+
+            ArgumentCaptor<HugeUser> admin =
+                    ArgumentCaptor.forClass(HugeUser.class);
+            Mockito.verify(authManager).createUser(admin.capture());
+            Assert.assertTrue(StringEncoding.checkPassword(
+                              "typed-secret", admin.getValue().password()));
+            Assert.assertFalse(StringEncoding.checkPassword(
+                               "pa", admin.getValue().password()));
+            Mockito.verify(graph).close();
+        }
+    }
+
+    @Test
+    public void testInitAdminUserIfNeededDoesNotPromptWhenAdminExists()
+                                                        throws Exception {
+        String restConf = this.writeAuthenticatorRestServerConf(null);
+        StandardAuthManager authManager =
+                Mockito.mock(StandardAuthManager.class);
+        Mockito.when(authManager.findUser("admin"))
+               .thenReturn(new HugeUser("admin"));
+        HugeGraph graph = this.mockAuthGraph(authManager, true);
+
+        InputStream stdin = System.in;
+        // Nothing to read: a prompt would fail with NoSuchElementException
+        System.setIn(new ByteArrayInputStream(new byte[0]));
+        try {
+            this.initAdminUserIfNeeded(restConf, graph);
+        } finally {
+            System.setIn(stdin);
+        }
+
+        Mockito.verify(authManager, Mockito.never())
+               .createUser(Mockito.any(HugeUser.class));
+        Mockito.verify(graph).close();
+    }
+
+    private HugeGraph mockAuthGraph(StandardAuthManager authManager,
+                                    boolean persistent) {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        BackendFeatures features = Mockito.mock(BackendFeatures.class);
+        Mockito.when(features.supportsPersistence()).thenReturn(persistent);
+        Mockito.when(graph.backendStoreFeatures()).thenReturn(features);
+        Mockito.when(graph.hugegraph()).thenReturn(graph);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        return graph;
+    }
+
+    /**
+     * Runs on a thread named "main", the only caller initAdminUser accepts,
+     * so the result does not depend on which thread the test runner uses.
+     * Static mocks are thread-local, hence GraphFactory is mocked in there.
+     */
+    private void initAdminUserIfNeeded(String restConf, HugeGraph graph)
+                                       throws Exception {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread main = new Thread(() -> {
+            try (MockedStatic<GraphFactory> factory =
+                         Mockito.mockStatic(GraphFactory.class)) {
+                factory.when(() -> GraphFactory.open(
+                                   Mockito.any(Configuration.class)))
+                       .thenReturn(graph);
+                StandardAuthenticator.initAdminUserIfNeeded(restConf);
+            } catch (Throwable e) {
+                failure.set(e);
+            }
+        }, "main");
+        main.start();
+        main.join();
+        if (failure.get() != null) {
+            throw new AssertionError(failure.get());
+        }
+    }
+
+    private String writeAuthenticatorRestServerConf(String adminPa)
+                                                    throws IOException {
+        Path graphsDir = this.writeAuthGraphConfig("rocksdb");
+        List<String> extra = new ArrayList<>(Arrays.asList(
+                ServerOptions.AUTHENTICATOR.name() +
+                "=" + StandardAuthenticator.class.getName(),
+                ServerOptions.AUTH_GRAPH_STORE.name() + "=hugegraph"));
+        if (adminPa != null) {
+            extra.add(ServerOptions.ADMIN_PA.name() + "=" + adminPa);
+        }
+        return this.writeDisabledRestServerConfForGraphs(
+                graphsDir, extra.toArray(new String[0]));
     }
 
     private String writeDisabledRestServerConf(String... extraLines)

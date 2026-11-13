@@ -23,14 +23,14 @@ from pathlib import Path
 import subprocess
 
 MAINLINE = {"server", "commons", "struct", "pd", "store", "hstore", "cluster", "docker", "helm",
-            "dependency_license", "macos", "security", "distributed_smoke"}
+            "dependency_license", "macos", "security", "distributed_smoke", "ranger"}
 MODULES = {
     "server": sorted(MAINLINE | {"macos_full", "hbase", "riscv64"}),
     "toolchain": ["client", "loader", "tools", "spark", "hubble", "go"],
 }
 PREFIXES = {
-    "server": {"hugegraph-server/": "server", "hugegraph-commons/": "commons",
-               "hugegraph-struct/": "struct", "hugegraph-pd/": "pd", "hugegraph-store/": "store",
+    "server": {"hugegraph-server/hugegraph-ranger-plugin/": "ranger", "hugegraph-server/": "server",
+               "hugegraph-commons/": "commons", "hugegraph-struct/": "struct", "hugegraph-pd/": "pd", "hugegraph-store/": "store",
                "hugegraph-cluster-test/": "cluster", "docker/": "docker", "helm/": "helm"},
     "toolchain": {"hugegraph-client/": "client", "hugegraph-client-go/": "go",
                   "hugegraph-loader/": "loader", "hugegraph-tools/": "tools",
@@ -39,6 +39,7 @@ PREFIXES = {
 WORKFLOWS = {
     "server": {"server-ci.yml": MAINLINE, "commons-ci.yml": {"commons"},
                "pd-store-ci.yml": {"struct", "pd", "store", "hstore"}, "cluster-test-ci.yml": {"cluster"},
+               "ranger-plugin-ci.yml": {"ranger"},
                "docker-build-ci.yml": {"docker"},
                "codeql-analysis.yml": {"security"}, "server-memory-ci.yml": {"server"},
                "server-tests.yml": {"server", "hbase"},
@@ -52,8 +53,9 @@ WORKFLOWS = {
 }
 # Shared runtime consumers; ordinary Server edits do not fan out to PD/Store.
 DEPENDENTS = {
-    "server": {"commons": {"server", "pd", "store", "hstore", "cluster"},
-               "struct": {"server", "pd", "store", "hstore", "cluster"},
+    "server": {"commons": {"server", "pd", "store", "hstore", "cluster", "ranger"},
+               "struct": {"server", "pd", "store", "hstore", "cluster", "ranger"},
+               "server": {"ranger"},
                "pd": {"store", "hstore", "cluster"}, "store": {"hstore", "cluster"}, "hstore": {"cluster"}},
     "toolchain": {"client": {"loader", "tools", "spark", "hubble"}, "loader": {"hubble"}},
 }
@@ -103,7 +105,7 @@ TRAVIS = "hugegraph-server/hugegraph-dist/src/assembly/travis/"
 CONTRACT_SUITES = {
     TRAVIS + "test-check-java-runtime-logs.sh": {"struct"},
     TRAVIS + "check-java-runtime-logs.sh": {"server", "commons", "struct", "pd", "store", "hstore", "cluster",
-                                          "macos", "macos_full", "hbase", "riscv64"},
+                                          "ranger", "macos", "macos_full", "hbase", "riscv64"},
     TRAVIS + "test-stop-hugegraph-store.sh": {"struct"},
     TRAVIS + "test-check-jacoco-report.sh": {"struct"},
     TRAVIS + "test-codecov-upload-config.sh": {"struct"},
@@ -270,7 +272,7 @@ def suites(project, selected):
     if project == "toolchain":
         return sorted(selected)
     result = selected.intersection({"commons", "cluster", "docker", "helm", "dependency_license", "macos",
-                                    "hbase", "riscv64", "security", "distributed_smoke"})
+                                    "hbase", "riscv64", "security", "distributed_smoke", "ranger"})
     if "server" in selected:
         result.update({"server_memory", "server_rocksdb"})
     if selected.intersection({"pd", "store", "hstore", "struct"}):

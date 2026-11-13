@@ -432,8 +432,27 @@ public interface HugeAuthenticator extends Authenticator {
                 return true;
             }
 
-            Map<String, Map<HugePermission, Object>> innerRoles =
-                    this.roles.get(requiredResource.graphSpace());
+            /*
+             * Grants under the "*" graph-space key apply to every space, so
+             * a role that cannot name the spaces it covers in advance (e.g.
+             * one derived from an external policy engine) still matches.
+             * This is a graph-space wildcard only: isAdmin() and
+             * matchSpace() keep their exact-key semantics.
+             */
+            String space = requiredResource.graphSpace();
+            if (this.matchInnerRoles(this.roles.get(space),
+                                     requiredAction, requiredResource)) {
+                return true;
+            }
+            return !GENERAL_PATTERN.equals(space) &&
+                   this.matchInnerRoles(this.roles.get(GENERAL_PATTERN),
+                                        requiredAction, requiredResource);
+        }
+
+        private boolean matchInnerRoles(
+                Map<String, Map<HugePermission, Object>> innerRoles,
+                HugePermission requiredAction,
+                ResourceObject<?> requiredResource) {
             if (innerRoles == null) {
                 return false;
             }
