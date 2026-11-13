@@ -75,6 +75,11 @@
             <outputDirectory>conf</outputDirectory>
             <fileMode>644</fileMode>
         </file>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/conf/toplingdb-legacy-cspp.yaml</source>
+            <outputDirectory>conf</outputDirectory>
+            <fileMode>644</fileMode>
+        </file>
     </files>
 
     <dependencySets>

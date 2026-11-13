@@ -59,6 +59,7 @@ RUN apt-get -q update \
        procps \
        curl \
        iproute2 \
+       unzip \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

@@ -89,6 +89,19 @@ class PolicyTest(unittest.TestCase):
                 self.assertFalse(plan["macos_full"])
                 self.assertFalse(plan["pd_store"])
 
+    def test_topling_assets_run_server_native_contracts(self):
+        scripts = ("test-topling-prepare.sh", "test-topling-selection.sh")
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/server-tests.yml").read_text()
+        for script in scripts:
+            step = next(step for step in workflow.split("\n      - ") if script in step)
+            self.assertIn("if: inputs.backend == 'rocksdb'", step)
+        paths = [policy.TRAVIS + script for script in scripts]
+        paths += ["hugegraph-server/hugegraph-dist/src/assembly/static/" + path for path in
+                  ("bin/prepare-topling.sh", "bin/preload-topling.sh", "conf/toplingdb.yaml")]
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertIn("server-rocksdb", self.coordinator_jobs(self.plan_for([path])))
+
     def test_distributed_server_contracts_keep_hstore_cluster_without_pd_store_units(self):
         for path in [policy.SERVER_CORE + "backend/store/BackendStore.java",
                      policy.SERVER_CORE + "meta/MetaManager.java", policy.SERVER_CORE + "StandardHugeGraph.java",

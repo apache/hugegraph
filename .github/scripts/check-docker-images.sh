@@ -35,8 +35,7 @@ for pair in \
         case "$dockerfile" in
             hugegraph-pd/*) OWNED_DIRS=". logs pd_data" ;;
             hugegraph-store/*) OWNED_DIRS=". logs storage" ;;
-            hugegraph-server/Dockerfile) OWNED_DIRS=". logs rocksdb-data" ;;
-            *) OWNED_DIRS=". logs" ;;
+            hugegraph-server/*) OWNED_DIRS=". logs rocksdb-data" ;;
         esac
         IMAGE_USER=$(docker image inspect --format '{{.Config.User}}' "$IMAGE_ID")
         RUNTIME_IDS=$(docker run --rm --pull never --entrypoint sh "$IMAGE_ID" -c \
@@ -46,6 +45,20 @@ for pair in \
             echo "ERROR: $dockerfile runs as '$IMAGE_USER' ($RUNTIME_IDS); expected 10001:10001 owning $OWNED_DIRS"
             exit 1
         }
+
+        if [[ "$dockerfile" == hugegraph-server/* ]]; then
+            (
+                volume=$(docker volume create)
+                trap 'docker volume rm "$volume" >/dev/null' EXIT
+                # A new named volume must inherit writable ownership, including
+                # when the HStore image is explicitly used with local RocksDB.
+                docker run --rm --pull never --entrypoint sh \
+                    -v "$volume:/hugegraph-server/rocksdb-data" "$IMAGE_ID" -ec '
+                        test "$(stat -c %u:%g rocksdb-data)" = 10001:10001
+                        touch rocksdb-data/ownership-probe
+                    '
+            )
+        fi
 
         # Helm reuses these images for tool containers instead of pulling curlimages/curl.
         # Check the same non-root/read-only tool environment as the Server test hook.
