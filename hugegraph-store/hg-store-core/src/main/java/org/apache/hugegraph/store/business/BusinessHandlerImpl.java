@@ -26,6 +26,7 @@ import static org.apache.hugegraph.store.util.HgStoreConst.SCAN_ALL_PARTITIONS_I
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -115,6 +116,7 @@ import org.apache.hugegraph.store.schema.SchemaDriver;
 import org.apache.hugegraph.store.schema.SchemaGraph;
 import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.store.term.HgPair;
+import org.apache.hugegraph.store.upgrade.LegacyGraphIdChecker;
 import org.apache.hugegraph.store.util.DefaultThreadFactory;
 import org.apache.hugegraph.store.util.ExecutorUtil;
 import org.apache.hugegraph.store.util.HgStoreException;
@@ -122,6 +124,7 @@ import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.util.Bytes;
 import org.rocksdb.Cache;
 import org.rocksdb.MemoryUsageType;
+import org.rocksdb.RocksDBException;
 
 import com.alipay.sofa.jraft.util.Utils;
 import com.google.protobuf.ByteString;
@@ -1194,6 +1197,17 @@ public class BusinessHandlerImpl implements BusinessHandler {
     @Override
     public void loadSnapshot(String snapshotPath, String graph, int partId, long v1) throws
                                                                                      HgStoreException {
+        // Validate incoming data before getSession() can create or prune local DB versions.
+        try {
+            LegacyGraphIdChecker.checkDatabase(Path.of(snapshotPath), factory.getHugeConfig());
+        } catch (IOException | RocksDBException | IllegalStateException e) {
+            HgStoreException failure = new HgStoreException(
+                    HgStoreException.EC_RKDB_IMPORT_SNAPSHOT_FAIL,
+                    "GraphID upgrade preflight rejected snapshot %s for partition %d: %s",
+                    snapshotPath, partId, e.getMessage());
+            failure.initCause(e);
+            throw failure;
+        }
         try (RocksDBSession dbSession = getSession(graph, partId)) {
             dbSession.loadSnapshot(snapshotPath, v1);
             keyCreator.clearCache(partId);

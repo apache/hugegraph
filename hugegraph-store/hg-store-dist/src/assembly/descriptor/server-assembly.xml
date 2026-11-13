@@ -51,6 +51,11 @@
 
     <files>
         <file>
+            <source>${project.basedir}/../../docs/graphid-upgrade.md</source>
+            <outputDirectory>docs</outputDirectory>
+            <fileMode>644</fileMode>
+        </file>
+        <file>
             <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/ArthasAttach.java</source>
             <outputDirectory>bin</outputDirectory>
             <fileMode>644</fileMode>

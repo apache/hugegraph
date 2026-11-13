@@ -71,6 +71,7 @@ import lombok.extern.slf4j.Slf4j;
         HgSnapshotHandlerTest.class,
         StoreIdChangeTest.class,
         PartitionMetaCodecTest.class,
+        LegacyGraphIdStartupLockTest.class,
         RocksdbMemoryBudgetTest.class,
         CgroupMemoryLimitTest.class,
         AppConfigTuningTest.class,

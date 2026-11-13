@@ -39,6 +39,7 @@ import org.apache.hugegraph.util.RocksDBRuntime;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
+import org.apache.hugegraph.store.upgrade.LegacyGraphIdChecker;
 import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.HgStoreException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -122,6 +123,8 @@ public class HgStoreNodeService implements RaftTaskHandler {
         }};
 
         RocksDBRuntime.verify(String.valueOf(options.getRocksdbConfig().getOrDefault("rocksdb.provider", "rocksdb")));
+        LegacyGraphIdChecker.checkStore(options.getDataPath(),
+                                    LegacyGraphIdChecker.configuration(options.getRocksdbConfig()));
         RaftRocksdbOptions.initRocksdbGlobalConfig(options.getRocksdbConfig());
 
         options.getLabels().put("rest.port", Integer.toString(appConfig.getRestPort()));
@@ -233,7 +236,9 @@ public class HgStoreNodeService implements RaftTaskHandler {
 
     @PreDestroy
     public void destroy() {
-        storeEngine.shutdown();
+        if (storeEngine != null) {
+            storeEngine.shutdown();
+        }
     }
 
     private String getSerializingExceptionMessage(String target) {

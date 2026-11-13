@@ -222,11 +222,11 @@ public class PartitionStateMachine extends StateMachineAdapter {
 
     @Override
     public boolean onSnapshotLoad(final SnapshotReader reader) {
+        final long snapshotIndex;
         try {
             RaftOutter.SnapshotMeta meta = reader.load();
             if (meta != null) {
-                this.committedIndex = meta.getLastIncludedIndex();
-                log.info("onSnapshotLoad committedIndex = {}", this.committedIndex);
+                snapshotIndex = meta.getLastIncludedIndex();
             } else {
                 log.error("onSnapshotLoad failed to get SnapshotMeta");
                 return false;
@@ -241,8 +241,9 @@ public class PartitionStateMachine extends StateMachineAdapter {
             return false;
         }
         try {
-            snapshotHandler.onSnapshotLoad(reader, this.committedIndex);
-            log.info("Raft {} onSnapshotLoad success", groupId);
+            snapshotHandler.onSnapshotLoad(reader, snapshotIndex);
+            this.committedIndex = snapshotIndex;
+            log.info("Raft {} onSnapshotLoad success, committedIndex = {}", groupId, snapshotIndex);
             return true;
         } catch (HgStoreException e) {
             log.error(String.format("Raft %s  onSnapshotLoad failed. ", groupId), e);
