@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -146,16 +147,17 @@ public class MultiClusterSchemaCacheTest extends BaseMultiClusterTest {
             // The other Servers serve reads of this label while the index is created
             AtomicBoolean stop = new AtomicBoolean(false);
             ExecutorService readers = Executors.newFixedThreadPool(4);
+            List<Future<?>> reads = new ArrayList<>();
             for (int reader = 0; reader < 4; reader++) {
                 RestClient client = clients.get(1 + reader % 2);
-                readers.submit(() -> {
+                reads.add(readers.submit(() -> {
                     while (!stop.get()) {
                         Response r = client.target().path(VERTICES)
                                            .queryParam("label", vl)
                                            .queryParam("limit", 3).request().get();
                         r.readEntity(String.class);
                     }
-                });
+                }));
             }
             try {
                 JsonNode created = json(clients.get(0).post(ILS,
@@ -170,6 +172,10 @@ public class MultiClusterSchemaCacheTest extends BaseMultiClusterTest {
                 stop.set(true);
                 readers.shutdown();
                 Assert.assertTrue(readers.awaitTermination(60L, TimeUnit.SECONDS));
+            }
+            // A reader that stopped on an error left the index created with fewer reads
+            for (Future<?> read : reads) {
+                read.get();
             }
 
             waitFor(il + " created and listed in its label on every Server",
@@ -386,6 +392,8 @@ public class MultiClusterSchemaCacheTest extends BaseMultiClusterTest {
         Throwable last = null;
         while (System.nanoTime() < deadline) {
             try {
+                // TODO: RestClient sets no timeouts, so a request that gets no
+                //  answer outlasts this deadline until the suite timeout ends it
                 if (condition.call()) {
                     return;
                 }

@@ -873,6 +873,11 @@ What it does not provide:
 - A Server that cannot reach PD keeps serving its cached schema until it reconnects.
 - A PD watch that dies without an error is noticed only when another PD call from that
   Server fails.
+- A PD watch that ends with an error the PD client does not retry, such as
+  `UNAUTHENTICATED`, `PERMISSION_DENIED` or `UNIMPLEMENTED`, is not started again. The
+  Server logs the stopped watch at ERROR level and keeps its cached schema until it is
+  restarted. PD does not answer a watch with these codes itself; they come from the
+  gRPC layer, for example from a proxy between Server and PD.
 - With the etcd meta driver the watch does not report restarts. A Server then does
   not drop its caches after a watch restart, and a failed publish is sent again by the
   timed retry only.
