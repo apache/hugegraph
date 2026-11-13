@@ -407,6 +407,11 @@ public class RangerAuthManager implements AuthManager {
     // ------------------------------------------------------------------
 
     @Override
+    public boolean supportsGraphSpaceAuth() {
+        return delegate.supportsGraphSpaceAuth();
+    }
+
+    @Override
     public void init() {
         // The delegate (StandardAuthManager) was already initialised by
         // GraphFactory.open() before RangerAuthManager was wired in via
@@ -484,6 +489,11 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public HugeGroup deleteGroup(String graphSpace, Id id) {
+        return delegate.deleteGroup(graphSpace, id);
+    }
+
+    @Override
     public HugeGroup getGroup(Id id) {
         return delegate.getGroup(id);
     }
@@ -509,8 +519,18 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public Id createTarget(String graphSpace, HugeTarget target) {
+        return delegate.createTarget(graphSpace, target);
+    }
+
+    @Override
     public Id updateTarget(HugeTarget target) {
         return delegate.updateTarget(target);
+    }
+
+    @Override
+    public Id updateTarget(String graphSpace, HugeTarget target) {
+        return delegate.updateTarget(graphSpace, target);
     }
 
     @Override
@@ -519,8 +539,18 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public HugeTarget deleteTarget(String graphSpace, Id id) {
+        return delegate.deleteTarget(graphSpace, id);
+    }
+
+    @Override
     public HugeTarget getTarget(Id id) {
         return delegate.getTarget(id);
+    }
+
+    @Override
+    public HugeTarget getTarget(String graphSpace, Id id) {
+        return delegate.getTarget(graphSpace, id);
     }
 
     @Override
@@ -534,8 +564,18 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public List<HugeTarget> listAllTargets(String graphSpace, long limit) {
+        return delegate.listAllTargets(graphSpace, limit);
+    }
+
+    @Override
     public Id createBelong(HugeBelong belong) {
         return delegate.createBelong(belong);
+    }
+
+    @Override
+    public Id createBelong(String graphSpace, HugeBelong belong) {
+        return delegate.createBelong(graphSpace, belong);
     }
 
     @Override
@@ -544,13 +584,28 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public Id updateBelong(String graphSpace, HugeBelong belong) {
+        return delegate.updateBelong(graphSpace, belong);
+    }
+
+    @Override
     public HugeBelong deleteBelong(Id id) {
         return delegate.deleteBelong(id);
     }
 
     @Override
+    public HugeBelong deleteBelong(String graphSpace, Id id) {
+        return delegate.deleteBelong(graphSpace, id);
+    }
+
+    @Override
     public HugeBelong getBelong(Id id) {
         return delegate.getBelong(id);
+    }
+
+    @Override
+    public HugeBelong getBelong(String graphSpace, Id id) {
+        return delegate.getBelong(graphSpace, id);
     }
 
     @Override
@@ -564,8 +619,19 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public List<HugeBelong> listAllBelong(String graphSpace, long limit) {
+        return delegate.listAllBelong(graphSpace, limit);
+    }
+
+    @Override
     public List<HugeBelong> listBelongByUser(Id user, long limit) {
         return delegate.listBelongByUser(user, limit);
+    }
+
+    @Override
+    public List<HugeBelong> listBelongByUser(String graphSpace, Id user,
+                                             long limit) {
+        return delegate.listBelongByUser(graphSpace, user, limit);
     }
 
     @Override
@@ -574,8 +640,19 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public List<HugeBelong> listBelongByGroup(String graphSpace, Id group,
+                                              long limit) {
+        return delegate.listBelongByGroup(graphSpace, group, limit);
+    }
+
+    @Override
     public Id createAccess(HugeAccess access) {
         return delegate.createAccess(access);
+    }
+
+    @Override
+    public Id createAccess(String graphSpace, HugeAccess access) {
+        return delegate.createAccess(graphSpace, access);
     }
 
     @Override
@@ -584,13 +661,28 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public Id updateAccess(String graphSpace, HugeAccess access) {
+        return delegate.updateAccess(graphSpace, access);
+    }
+
+    @Override
     public HugeAccess deleteAccess(Id id) {
         return delegate.deleteAccess(id);
     }
 
     @Override
+    public HugeAccess deleteAccess(String graphSpace, Id id) {
+        return delegate.deleteAccess(graphSpace, id);
+    }
+
+    @Override
     public HugeAccess getAccess(Id id) {
         return delegate.getAccess(id);
+    }
+
+    @Override
+    public HugeAccess getAccess(String graphSpace, Id id) {
+        return delegate.getAccess(graphSpace, id);
     }
 
     @Override
@@ -604,13 +696,30 @@ public class RangerAuthManager implements AuthManager {
     }
 
     @Override
+    public List<HugeAccess> listAllAccess(String graphSpace, long limit) {
+        return delegate.listAllAccess(graphSpace, limit);
+    }
+
+    @Override
     public List<HugeAccess> listAccessByGroup(Id group, long limit) {
         return delegate.listAccessByGroup(group, limit);
     }
 
     @Override
+    public List<HugeAccess> listAccessByGroup(String graphSpace, Id group,
+                                              long limit) {
+        return delegate.listAccessByGroup(graphSpace, group, limit);
+    }
+
+    @Override
     public List<HugeAccess> listAccessByTarget(Id target, long limit) {
         return delegate.listAccessByTarget(target, limit);
+    }
+
+    @Override
+    public List<HugeAccess> listAccessByTarget(String graphSpace, Id target,
+                                               long limit) {
+        return delegate.listAccessByTarget(graphSpace, target, limit);
     }
 
     @Override

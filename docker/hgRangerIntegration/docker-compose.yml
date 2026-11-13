@@ -19,8 +19,10 @@ services:
   ranger-solr:
     image: solr:8.11
     container_name: ranger-solr
+    # Loopback only: Solr has no auth, so audit records would be editable by
+    # anyone reaching the host. Ranger uses ranger-solr:8983 on the compose network.
     ports:
-      - "8983:8983"
+      - "127.0.0.1:8983:8983"
     environment:
       SOLR_JAVA_MEM: "-Xms512m -Xmx512m"
     volumes:
@@ -41,8 +43,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: rangeradmin
       POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5432:5432"
+    # No published port: trust auth would let anyone reaching the host rewrite
+    # Ranger policies. Ranger connects over the compose network (ranger-db:5432).
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ranger"]
       interval: 10s

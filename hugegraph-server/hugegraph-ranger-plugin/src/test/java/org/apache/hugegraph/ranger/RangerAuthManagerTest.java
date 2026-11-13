@@ -19,6 +19,8 @@
 package org.apache.hugegraph.ranger;
 
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Date;
@@ -30,10 +32,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hugegraph.auth.AuthManager;
+import org.apache.hugegraph.auth.HugeAccess;
+import org.apache.hugegraph.auth.HugeBelong;
 import org.apache.hugegraph.auth.HugeAuthenticator;
 import org.apache.hugegraph.auth.HugeAuthenticator.RolePerm;
 import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugePermission;
+import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.ResourceObject;
 import org.apache.hugegraph.auth.ResourceType;
 import org.apache.hugegraph.auth.RolePermission;
@@ -274,5 +279,102 @@ public class RangerAuthManagerTest {
                 "isDefaultRole[gs, g, o, " + role + "]",
                 "deleteDefaultRole[gs, o, " + role + "]",
                 "deleteDefaultRole[gs, o, " + role + ", g]"), calls);
+    }
+
+    @Test
+    public void testEveryInterfaceDefaultIsOverridden() {
+        // A default left in place silently bypasses the delegate, e.g.
+        // supportsGraphSpaceAuth() reports false over StandardAuthManagerV2
+        List<String> missing = new ArrayList<>();
+        for (Method method : AuthManager.class.getMethods()) {
+            if (!method.isDefault() || Modifier.isStatic(method.getModifiers())) {
+                continue;
+            }
+            try {
+                RangerAuthManager.class.getDeclaredMethod(
+                        method.getName(), method.getParameterTypes());
+            } catch (NoSuchMethodException e) {
+                missing.add(method.toString());
+            }
+        }
+        Assert.assertEquals(List.of(), missing);
+    }
+
+    @Test
+    public void testGraphSpaceMethodsForwardToDelegate() {
+        List<String> calls = new ArrayList<>();
+        Id id = IdGenerator.of("id");
+        HugeTarget target = new HugeTarget(id);
+        HugeBelong belong = new HugeBelong(id, id);
+        HugeAccess access = new HugeAccess(id, id);
+
+        InvocationHandler handler = (proxy, method, args) -> {
+            List<Object> named = new ArrayList<>();
+            for (Object arg : args == null ? new Object[0] : args) {
+                // Auth elements without a name can't be printed
+                named.add(arg == target ? "target" : arg == belong ?
+                          "belong" : arg == access ? "access" : arg);
+            }
+            calls.add(method.getName() + named);
+            Class<?> type = method.getReturnType();
+            if (type == boolean.class) {
+                return true;
+            } else if (type == Id.class) {
+                return id;
+            } else if (type == List.class) {
+                return List.of();
+            }
+            return null;
+        };
+        AuthManager delegate = (AuthManager) Proxy.newProxyInstance(
+                AuthManager.class.getClassLoader(),
+                new Class<?>[]{AuthManager.class}, handler);
+        RangerAuthManager manager = new RangerAuthManager(
+                delegate, this.plugin, 0, this.nanos::get);
+
+        Assert.assertTrue(manager.supportsGraphSpaceAuth());
+        manager.deleteGroup("gs", id);
+        Assert.assertSame(id, manager.createTarget("gs", target));
+        Assert.assertSame(id, manager.updateTarget("gs", target));
+        manager.deleteTarget("gs", id);
+        manager.getTarget("gs", id);
+        manager.listAllTargets("gs", 1L);
+        Assert.assertSame(id, manager.createBelong("gs", belong));
+        Assert.assertSame(id, manager.updateBelong("gs", belong));
+        manager.deleteBelong("gs", id);
+        manager.getBelong("gs", id);
+        manager.listAllBelong("gs", 1L);
+        manager.listBelongByUser("gs", id, 1L);
+        manager.listBelongByGroup("gs", id, 1L);
+        Assert.assertSame(id, manager.createAccess("gs", access));
+        Assert.assertSame(id, manager.updateAccess("gs", access));
+        manager.deleteAccess("gs", id);
+        manager.getAccess("gs", id);
+        manager.listAllAccess("gs", 1L);
+        manager.listAccessByGroup("gs", id, 1L);
+        manager.listAccessByTarget("gs", id, 1L);
+
+        Assert.assertEquals(List.of(
+                "supportsGraphSpaceAuth[]",
+                "deleteGroup[gs, id]",
+                "createTarget[gs, target]",
+                "updateTarget[gs, target]",
+                "deleteTarget[gs, id]",
+                "getTarget[gs, id]",
+                "listAllTargets[gs, 1]",
+                "createBelong[gs, belong]",
+                "updateBelong[gs, belong]",
+                "deleteBelong[gs, id]",
+                "getBelong[gs, id]",
+                "listAllBelong[gs, 1]",
+                "listBelongByUser[gs, id, 1]",
+                "listBelongByGroup[gs, id, 1]",
+                "createAccess[gs, access]",
+                "updateAccess[gs, access]",
+                "deleteAccess[gs, id]",
+                "getAccess[gs, id]",
+                "listAllAccess[gs, 1]",
+                "listAccessByGroup[gs, id, 1]",
+                "listAccessByTarget[gs, id, 1]"), calls);
     }
 }

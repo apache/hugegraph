@@ -51,7 +51,8 @@ in `lib/`.
 The `docker-compose.yml` defines the stack with 4 services:
 
 **Services:**
-- `ranger-db` — PostgreSQL 14 (Ranger Admin metadata store)
+- `ranger-db` — PostgreSQL 14 (Ranger Admin metadata store; not published to the host —
+  use `docker compose -f docker/hgRangerIntegration/docker-compose.yml exec ranger-db psql -U postgres ranger`)
 - `ranger-solr` — Solr 8.11 (audit backend for Ranger Admin)
 - `ranger` — Apache Ranger 2.9.0 on Java 17 (policy server), built from `Dockerfile.ranger`
 - `hugegraph` — HugeGraph built from this checkout (graph database with Ranger plugin)
@@ -592,7 +593,7 @@ Test that HugeGraph continues to serve Ranger policies even if Ranger Admin goes
 
 ```bash
 # Stop Ranger Admin
-docker compose -f docker/ranger-integration/docker-compose.yml stop ranger
+docker compose -f docker/hgRangerIntegration/docker-compose.yml stop ranger
 
 # Bob can still read vertices (served from local cache)
 curl -s --compressed -u bob:bobpass \
@@ -607,7 +608,7 @@ with real `resource`/`access` values even with Ranger Admin stopped.
 
 ```bash
 # Bring Ranger Admin back
-docker compose -f docker/ranger-integration/docker-compose.yml start ranger
+docker compose -f docker/hgRangerIntegration/docker-compose.yml start ranger
 ```
 
 ---
@@ -784,7 +785,7 @@ fine-grained per-label denies keep filtering results during iteration.
 ## Teardown
 
 ```bash
-docker compose -f docker/ranger-integration/docker-compose.yml down -v   # -v removes volumes (PostgreSQL data)
+docker compose -f docker/hgRangerIntegration/docker-compose.yml down -v   # -v removes volumes (PostgreSQL data)
 ```
 
 ---
@@ -837,5 +838,5 @@ The HugeGraph Ranger plugin is configured to log audit events to a local file:
 | Ranger Admin returns 401 | Wrong password | Ranger Admin password is `rangerR0cks!` — hardcoded in the image, not overridable via env var |
 | HugeGraph container exits immediately | Bad `rest-server.properties` mount | Run `docker logs hugegraph` and check for config parse errors |
 | Ranger Admin slow to start | DB initialisation takes time | The `start_period` is 180 s — wait up to 3 min before assuming a failure |
-| Audit log file not appearing | Permissions issue or config not applied | Run `docker exec hugegraph ls -la /var/log/ranger/audit/` to check directory exists and is writable. Rebuild container if config is not applied: `docker compose -f docker/ranger-integration/docker-compose.yml up -d --build` |
+| Audit log file not appearing | Permissions issue or config not applied | Run `docker exec hugegraph ls -la /var/log/ranger/audit/` to check directory exists and is writable. Rebuild container if config is not applied: `docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build` |
 | Schema creation returns `400` unexpectedly (e.g. Test 4) | Label name already exists (`ExistedException`, HTTP 400) — not a Ranger denial | Use a name not already created earlier in the guide (e.g. `person2` instead of `person`), or check `/schema/vertexlabels` for existing labels first |
