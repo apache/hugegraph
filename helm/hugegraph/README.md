@@ -9,8 +9,12 @@ are not supported.
 Provide a default StorageClass or prepare matching PVs. The default installation
 needs **7 volumes**: 3 × 10 GiB for PD, 3 × 50 GiB for Store, and 1 × 1 GiB
 for Hubble. The chart creates PVCs; it does not create a storage provisioner.
-SeaTunnel and Vermeer are **disabled by default**, including in the single-node
+SeaTunnel, Vermeer and RAG are **disabled by default**, including in the single-node
 and cluster presets. Optional components add resources only when enabled.
+
+For a map of the chart guides, see the [documentation index](docs/README.md).
+For complete configuration options, see [values.yaml](values.yaml) and the
+[deployment examples](examples/README.md).
 
 ## Install a published Chart
 
@@ -56,10 +60,12 @@ kubectl -n hugegraph get secret hugegraph-admin \
   -o jsonpath='{.data.password}' | base64 --decode
 ```
 
-Open **`http://<node-ip>:<hubble-node-port>`** and log in as `admin` with that
-password. Server API uses `http://<node-ip>:<server-node-port>`.
-HTTP works directly; a hostname, certificate or extra acknowledgement is not
-required. PD remains internal.
+On a trusted network, open **`http://<node-ip>:<hubble-node-port>`** and log in
+as `admin` with that password. Server API uses
+`http://<node-ip>:<server-node-port>`. These HTTP connections are unencrypted;
+use local port-forwarding or a trusted network for evaluation. Before allowing
+access from an untrusted network, use an HTTPS reverse proxy or Ingress and
+restrict access appropriately. PD remains internal.
 
 If node access is unavailable, use port-forward:
 
@@ -84,11 +90,14 @@ Hubble is optional. Current Hubble login requires Server authentication.
 helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
   --set hubble.enabled=false
 
-# Also disable API authentication, if wanted
+# For local or trusted-network testing only, also disable API authentication
 # Add: --set server.auth.enabled=false
 ```
 
-Inactive credential values may remain in the values file when auth is disabled.
+The default easy mode exposes HTTP services through NodePort. Disable Server
+authentication only for local or trusted-network testing; retain it in other
+environments. Inactive credential values may remain in the values file when
+authentication is disabled.
 
 ### Optional components
 
@@ -97,6 +106,7 @@ Inactive credential values may remain in the values file when auth is disabled.
 | Hubble | Enabled | `hubble.enabled=false` selects API-only deployment |
 | SeaTunnel | Disabled | `seatunnel.enabled=true` adds data import/export and its native UI |
 | Vermeer | Disabled | `vermeer.enabled=true` adds graph computation, Hubble integration and its native UI |
+| RAG | Disabled | `rag.enabled=true` adds the RAG service and its resource storage |
 
 <details>
 <summary>SeaTunnel: optional import, export and migration</summary>
@@ -144,6 +154,17 @@ See the [Vermeer deployment guide](docs/vermeer.md) for administration and recov
 
 </details>
 
+<details>
+<summary>RAG: optional GraphRAG service</summary>
+
+Enable RAG with `rag.enabled=true` or the [RAG values preset](values-rag.yaml).
+RAG is a single process with a separate resource volume; model endpoints must be
+reachable from its Pod. Use a compatible HugeGraph AI image, and protect external
+access with an authenticated reverse proxy. The [RAG guide](docs/rag.md) covers
+model credentials, persisted configuration, network exposure and compatibility.
+
+</details>
+
 ### Internal image registry
 
 Mirror the four component images (`hugegraph/pd`, `hugegraph/store`,
@@ -154,8 +175,12 @@ helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
   --set global.imageRegistry=registry.internal.example.com
 ```
 
-A component repository with an explicit registry takes priority over the global
-prefix. Set `imagePullSecrets` if the registry needs credentials.
+The global prefix applies to unqualified image references such as
+`hugegraph/server`. A component repository with an explicit registry, such as
+`ghcr.io/team/server` or `localhost:5000/team/server`, takes priority and is
+not rewritten. Set the component `image.repository` explicitly to move such an
+image; update qualified `server.waitImage` or `store.waitImage` overrides too.
+Set `imagePullSecrets` if the registry needs credentials.
 Store's wait init container and Helm test reuse the Store and Server images,
 which already contain `curl`; no separate curl image is needed by default.
 See the [complete registry example](examples/values-internal-registry.yaml).
@@ -191,6 +216,20 @@ inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and
 
 Hubble persists its Text2GQL master key alongside H2. Existing releases may
 need a one-time API-key re-entry; see [Text2GQL credentials](docs/operations.md#hubble-text2gql-credentials).
+
+### Partition sharding
+
+For a new installation, `pd.partition.defaultShardCount` sets the initial
+replica count for each partition. When unset, the chart seeds RF=1 with fewer
+than three Stores and RF=3 with three or more Stores. An explicit value must be
+odd and no greater than `store.replicas`. `pd.partition.storeMaxShardCount`
+controls the initial shard capacity per Store; see [values.yaml](values.yaml)
+for the derivation and defaults.
+
+PD persists these values during first bootstrap. Scaling Store or changing Helm
+values later does not change the persisted replica policy or move existing data.
+Use the [bootstrap topology guide](docs/operations.md#stable-bootstrap-topology)
+for adoption and coordinated changes.
 
 ### PD metadata namespace
 
@@ -247,14 +286,20 @@ still need verification with a running Linux cluster. See the
 The independent `vermeer.mode` and `seatunnel.mode` select optional engine
 topologies; none of these presets enables an optional engine automatically.
 
-`mode: easy` defaults HTTP entries to NodePort. `mode: strict` defaults them to ClusterIP
-and enables full NetworkPolicy isolation; authentication, Hubble and persistence stay enabled.
-Use `--set mode=strict` or `-f helm/hugegraph/values-strict.yaml`.
+`mode: easy` defaults HTTP entries to NodePort. `mode: strict` defaults them to
+ClusterIP and enables NetworkPolicy resources; authentication, Hubble and
+persistence stay enabled. Network isolation requires a CNI plugin that supports
+and actually enforces Kubernetes NetworkPolicy. Use `--set mode=strict` or
+`-f helm/hugegraph/values-strict.yaml`.
 
-**Explicit component value > global value > mode default.** An explicit `false`
-is preserved; null component values inherit. The global settings are
-`persistence.enabled` and `global.imageRegistry`. SeaTunnel/Vermeer HTTP stays
-authenticated and peer channels remain internal. No mode requires HTTPS.
+An explicit component value takes precedence. An unset component Service type
+inherits the mode default; an unset component storage flag inherits
+`persistence.enabled`. Explicit `false` is preserved. The separate
+`global.imageRegistry` rule is described in [Internal image registry](#internal-image-registry).
+SeaTunnel/Vermeer HTTP stays authenticated and peer channels remain internal.
+The chart does not automatically configure TLS. For access over untrusted
+networks, provide TLS through an HTTPS proxy or Ingress and restrict access
+appropriately.
 
 Server/Hubble entry choices:
 
@@ -263,7 +308,7 @@ Server/Hubble entry choices:
 | NodePort | Reachable node IP + assigned port | Direct access without another controller; easy default |
 | ClusterIP | Internal Service IP/DNS | In-cluster clients, an existing gateway or port-forward |
 | LoadBalancer | Infrastructure-assigned address | A load balancer controller is available |
-| Ingress | HTTP routes through a controller | Shared HTTP routing; hostname and TLS are optional |
+| Ingress | Routes through a controller | Shared routing; configure HTTPS for untrusted networks |
 
 ClusterIP is an internal virtual service address, not a node IP. An ordinary
 laptop usually cannot reach it directly. With default `externalTrafficPolicy:
@@ -299,6 +344,7 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 | `pd.replicas` / `store.replicas` / `server.replicas` | Component replicas | `3` / `3` / `3` |
 | `hubble.enabled` | Install the UI | `true` |
 | `seatunnel.enabled` / `vermeer.enabled` | Install optional data/computation engines | `false` / `false` |
+| `rag.enabled` | Install the optional RAG service | `false` |
 | `vermeer.mode` | One Pod with two containers, or separate Master/Worker Pods | `standalone` |
 | `vermeer.worker.replicas` | Worker Pods in Vermeer cluster mode | `3` |
 | `server.auth.enabled` | Server authentication | `true` |
@@ -338,10 +384,28 @@ with `-f`; see [values.yaml](values.yaml) for all fields and their comments.
 
 ## Upgrade and verify
 
+Inspect the saved values, then use the same chart source as the installation.
+For the published OCI chart, specify the published chart version:
+
+```bash
+helm get values hugegraph -n hugegraph --all
+CHART_VERSION="REPLACE_WITH_PUBLISHED_VERSION"
+helm upgrade hugegraph oci://ghcr.io/hugegraph/hugegraph-helm \
+  --version "${CHART_VERSION}" -n hugegraph --reuse-values \
+  --wait --timeout 15m
+```
+
+For a source checkout, run from the repository root:
+
 ```bash
 helm get values hugegraph -n hugegraph --all
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
   --wait --timeout 15m
+```
+
+After either upgrade, verify the release:
+
+```bash
 helm test hugegraph -n hugegraph --logs --timeout 5m
 ```
 
@@ -350,6 +414,15 @@ An easy-mode upgrade that inherits Server/Hubble entry types prints a short
 NodePort-default notice in NOTES; explicitly configured entry types are preserved.
 To adopt new defaults, use `--reset-values` with a reviewed values file retaining
 all settings your release needs.
+
+A release installed with an older chart may have a NodePort stored in its release values even when the operator never set the Service type explicitly. `--reuse-values` can retain that value, so changing only `mode=strict` does not guarantee that existing Server or Hubble Services become `ClusterIP`. Inspect the effective values and Services after the upgrade:
+
+```bash
+helm get values hugegraph -n hugegraph --all
+kubectl -n hugegraph get svc hugegraph-server hugegraph-hubble
+```
+
+To make existing entries private, explicitly set `server.service.type=ClusterIP` and `hubble.service.type=ClusterIP`—plus the Service type of each enabled optional component—or use `--reset-values` with a complete reviewed values file. Verify the resulting Service types rather than assuming a mode change replaced values retained from an older release.
 
 PD, Store and Server images built from this version run as UID/GID `10001`. The
 PD and Store pods get `fsGroup: 10001` (with `fsGroupChangePolicy: OnRootMismatch`)
@@ -372,12 +445,18 @@ If a release already ran root images with `fsGroup` set, roll out the first
 in the same command, so the recursive change runs for the `10001` image rather
 than for a pinned root image. The example clears any reused digest so the tag
 applies; a release pinned by digest sets `pd.image.digest` and
-`store.image.digest` to the digests of this version's images instead:
+`store.image.digest` to the digests of this version's images instead.
+The migration commands below use a source checkout and run from the repository
+root. For an OCI installation, replace `./helm/hugegraph` with
+`oci://ghcr.io/hugegraph/hugegraph-helm` and add the same explicit
+`--version "${CHART_VERSION}"` used in the published-chart upgrade above.
 
 ```bash
+# Replace with the tag of the matching UID/GID 10001 images.
+IMAGE_TAG="REPLACE_WITH_IMAGE_TAG"
 helm upgrade hugegraph ./helm/hugegraph -n hugegraph --reuse-values \
-  --set pd.image.tag=<this-version> \
-  --set store.image.tag=<this-version> \
+  --set-string pd.image.tag="${IMAGE_TAG}" \
+  --set-string store.image.tag="${IMAGE_TAG}" \
   --set-string pd.image.digest= \
   --set-string store.image.digest= \
   --set pd.podSecurityContext.fsGroupChangePolicy=Always \
