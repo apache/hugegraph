@@ -18,6 +18,7 @@
 package org.apache.hugegraph.backend.cache;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -291,7 +292,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
              * and the set of failed publishes it kept in memory is gone, so
              * tell the other Servers once to drop what they hold.
              */
-            this.publishClearEvent();
+            PENDING_CLEAR_EVENTS.publish(this.graph().graphSpace(),
+                                         this.graph().name());
         }
     }
 
@@ -601,13 +603,13 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     /**
-     * Tell the other Servers to drop their schema caches of this graph. It is
-     * called after the schema write is committed, so it never fails the
-     * caller: a failed publish is kept and sent again, see
+     * Queue a clear event after the schema write. Changes of this graph share
+     * a fixed window; local cache changes have already happened. A failed
+     * publish is kept and sent again, see
      * {@link PendingClearEvents}.
      */
     private void publishClearEvent() {
-        PENDING_CLEAR_EVENTS.publish(this.graph().graphSpace(),
+        PENDING_CLEAR_EVENTS.request(this.graph().graphSpace(),
                                      this.graph().name());
     }
 
@@ -753,7 +755,11 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     /**
-     * Clear events of this Server that could not be published.
+     * Coalesced clear events and failed publishes of this Server.
+     * <p>
+     * Normal changes share one fixed window per graph. Remove the window
+     * before publishing so a concurrent change can start the next one. Graph
+     * open and watch recovery bypass this delay. No task runs while idle.
      * <p>
      * A clear event is sent after its schema write is committed, so a failed
      * publish must not fail the write. The graph is kept here instead and the
@@ -769,6 +775,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
      */
     static final class PendingClearEvents {
 
+        // TODO: Revisit finer-grained invalidation if workload measurements justify it.
+        private static final long CLEAR_DELAY = 1000L;
         private static final long RETRY_MIN_DELAY = 1000L;
         private static final long RETRY_MAX_DELAY = 30000L;
 
@@ -777,11 +785,33 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         private final AtomicLong failures = new AtomicLong();
 
         // Guarded by this
+        private final Map<GraphRef, ScheduledFuture<?>> scheduledClears =
+                new HashMap<>();
         private ScheduledExecutorService executor;
         private ScheduledFuture<?> retry;
         private long retryDelay = RETRY_MIN_DELAY;
         // The number of the newest scheduled retry
         private long retryEpoch;
+
+        synchronized void request(String graphSpace, String graph) {
+            GraphRef ref = new GraphRef(graphSpace, graph);
+            if (!this.scheduledClears.containsKey(ref)) {
+                // Later changes share this deadline instead of postponing it.
+                this.scheduledClears.put(ref, this.executor().schedule(
+                        () -> this.flush(ref), CLEAR_DELAY, TimeUnit.MILLISECONDS));
+            }
+        }
+
+        private void flush(GraphRef graph) {
+            synchronized (this) {
+                if (this.scheduledClears.remove(graph) == null) {
+                    return;
+                }
+            }
+            // Detach before the RPC: a concurrent change needs another window,
+            // even if the event now in flight has already reached a peer.
+            this.publish(graph.graphSpace(), graph.graph());
+        }
 
         void publish(String graphSpace, String graph) {
             try {
@@ -818,6 +848,14 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                 }
                 this.retry.cancel(false);
             }
+            long delay = now ? 0L : this.retryDelay;
+            long epoch = ++this.retryEpoch;
+            this.retry = this.executor().schedule(() -> this.retryPending(epoch),
+                                                delay, TimeUnit.MILLISECONDS);
+        }
+
+        // Called with this monitor held; one lazy scheduler serves all graphs.
+        private ScheduledExecutorService executor() {
             if (this.executor == null) {
                 this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
                     Thread thread = new Thread(r, "schema-cache-clear-retry");
@@ -825,10 +863,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
                     return thread;
                 });
             }
-            long delay = now ? 0L : this.retryDelay;
-            long epoch = ++this.retryEpoch;
-            this.retry = this.executor.schedule(() -> this.retryPending(epoch),
-                                                delay, TimeUnit.MILLISECONDS);
+            return this.executor;
         }
 
         private void retryPending(long epoch) {

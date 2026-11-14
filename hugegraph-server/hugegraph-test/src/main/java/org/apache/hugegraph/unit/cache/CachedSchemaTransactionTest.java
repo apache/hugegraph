@@ -1166,12 +1166,13 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                     storeHub.listen(EventHub.ANY_EVENT, listener);
                 }
             }
-            // One more clear event, for the Store clear
-            Mockito.verify(driver, Mockito.times(2)).put(Mockito.anyString(), Mockito.anyString());
             CachedSchemaTransactionV2 afterStoreEvent = new CachedSchemaTransactionV2(driver, "test", requestParams);
             requests.add(afterStoreEvent);
             Assert.assertEquals("store-cleared", afterStoreEvent.getVertexLabel(original.id()).name());
             Assert.assertEquals("Store events must refresh metadata with no active request", 3, reads.get());
+            CachedSchemaTransactionV2Test.flushScheduledClearEvents();
+            // The Store clear broadcasts at the end of its notification window.
+            Mockito.verify(driver, Mockito.times(2)).put(Mockito.anyString(), Mockito.anyString());
             afterStoreEvent.close();
             VertexLabel allLabel = null;
             for (int request = 0; request < 4; request++) {

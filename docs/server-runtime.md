@@ -829,15 +829,22 @@ and cache behavior against the deployment's shared backend and topology.
 
 With HStore, each Server keeps the schema of a graph in memory and never expires it.
 The schema itself is stored in PD. After a Server writes a schema change to PD, it
-publishes a clear event for that graph; every other Server then drops what it cached
-for the graph and reads PD on the next use.
+queues a clear event for that graph; every other Server drops what it cached when it
+receives the event and reads PD on the next use.
 
 What a deployment can rely on once every Server runs this version:
 
-- Every committed schema change is published after its write: creating, updating and
+- Every committed schema change queues a notification after its write: creating, updating and
   removing property keys, labels and index labels, the status changes made by index and
   label jobs, and clearing or truncating a graph. A removal is published whatever
   `task.sync_deletion` is set to.
+- Normal change notifications on the same Server share a fixed 1-second window per
+  `(graphSpace, graph)`. The first change starts the window without an immediate
+  broadcast; later changes do not reset its deadline. Changes during a publish queue
+  another window. Local cache updates and invalidation still happen immediately.
+  The window is a batching delay, not a propagation deadline: a shared scheduler,
+  slow PD calls, retries and watch delivery can add time. Different Servers batch
+  independently, and one long-running script can span several windows.
 - A schema change that fails after it changed part of what PD stores is published
   too. The Server that made it drops its own copy of that element, and the caller
   still gets the error.
@@ -848,14 +855,14 @@ What a deployment can rely on once every Server runs this version:
 - A clear event that could not be published does not fail the schema change, because
   the change is already committed. The Server publishes it again after 1 second, then
   with a delay that doubles up to 30 seconds, and at once when its PD watch is back.
-  Each Server also publishes once when it opens a graph, which covers a Server that
-  stopped between a schema write and its event.
+  Each Server also publishes once, without batching, when it opens a graph, which
+  covers a Server that stopped between a schema write and its event.
 
 Each event makes the other Servers load the whole schema of that graph again on their
-next read by name. Schema changes that arrive back to back therefore slow schema reads
-on the other Servers until the burst ends. Monitor read latency and PD load during large
-schema changes; a successful schema change does not guarantee that other requests stay
-within their configured timeouts.
+next read by name. Batching reduces repeated reloads during bursts, at the cost of
+delaying visibility on other Servers, including for an isolated edit. Monitor read
+latency and PD load during large schema changes; a successful schema change does not
+guarantee that other requests stay within their configured timeouts.
 
 What it does not provide:
 
@@ -863,9 +870,11 @@ What it does not provide:
   event for the label that owns the index. A vertex or edge write that such a Server
   prepared before that, and that reaches storage after the index build has read that
   part of the label, is missing from the index. Normally this is a write in flight for
-  a few milliseconds. It can be longer on a Server whose PD watch is down while the
-  index is created. Create indexes while writes to the label are stopped, or rebuild
-  the index afterwards, when a complete index is required.
+  a few milliseconds without batching; the notification window also extends it.
+  It can be longer on a Server whose PD watch is down while the index is created.
+  Batching provides no index-completeness guarantee. Create indexes while writes to
+  the label are stopped, or rebuild the index afterwards, when a complete index
+  is required.
 - Two Servers changing the same schema element at the same time. An update writes the
   whole element, so one of the two changes can be lost. Send schema changes for one
   element to the same Server, and wait for each to return before sending the next.

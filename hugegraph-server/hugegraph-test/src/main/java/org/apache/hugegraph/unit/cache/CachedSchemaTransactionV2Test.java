@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
@@ -182,9 +183,117 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     }
 
     @Test
+    public void testBurstSharesOneFixedWindowWithoutAnImmediateEvent() {
+        this.publisher.reset();
+        this.withWindowScheduler(tasks -> {
+            for (int version = 1; version <= 15; version++) {
+                this.tx.updatePropertyKey(this.propertyKey(1, "name", version));
+            }
+
+            // Later edits neither send immediately nor replace the first deadline.
+            Assert.assertEquals(0, this.publisher.attempts.get());
+            Assert.assertEquals(1, tasks.size());
+            Assert.assertEquals(1, scheduledClears().size());
+            long reads = this.store.reads();
+            this.tx.clearCache(true);
+            Assert.assertNull(this.arrayCached(IdGenerator.of(1)));
+            Assert.assertEquals(15, this.version(this.tx.getPropertyKey(IdGenerator.of(1))));
+            Assert.assertTrue(this.store.reads() > reads);
+            Assert.assertEquals(0, this.publisher.attempts.get());
+            Assert.assertEquals(1, tasks.size());
+
+            tasks.get(0).run();
+            Assert.assertEquals(1, this.publisher.count(this.graphName));
+            Assert.assertTrue(scheduledClears().isEmpty());
+            Assert.assertTrue(pendingMap().isEmpty());
+
+            // A later isolated edit gets a new bounded window.
+            this.tx.updatePropertyKey(this.propertyKey(1, "name", 16));
+            Assert.assertEquals(2, tasks.size());
+            Assert.assertEquals(1, this.publisher.count(this.graphName));
+            tasks.get(1).run();
+            Assert.assertEquals(2, this.publisher.count(this.graphName));
+        });
+    }
+
+    @Test
+    public void testWindowsAreScopedByGraphAndGraphSpace() {
+        this.publisher.reset();
+        this.withWindowScheduler(tasks -> {
+            requestClear("space-a", "graph-a");
+            requestClear("space-a", "graph-a");
+            requestClear("space-a", "graph-b");
+            requestClear("space-b", "graph-a");
+            Assert.assertEquals(3, tasks.size());
+            Assert.assertEquals(0, this.publisher.attempts.get());
+
+            tasks.forEach(Runnable::run);
+            Assert.assertEquals(3, this.publisher.events.size());
+            Assert.assertArrayEquals(new String[]{"space-a", "graph-a"}, this.publisher.events.get(0));
+            Assert.assertArrayEquals(new String[]{"space-a", "graph-b"}, this.publisher.events.get(1));
+            Assert.assertArrayEquals(new String[]{"space-b", "graph-a"}, this.publisher.events.get(2));
+            Assert.assertTrue(scheduledClears().isEmpty());
+        });
+    }
+
+    @Test
+    public void testChangeDuringAFlushGetsTheNextWindow() {
+        this.publisher.reset();
+        CountDownLatch inPublish = new CountDownLatch(1);
+        CountDownLatch finishPublish = new CountDownLatch(1);
+        this.withWindowScheduler(tasks -> {
+            this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+            this.publisher.intercept = () -> {
+                inPublish.countDown();
+                awaitLatch(finishPublish);
+            };
+            Future<?> flush = this.executor.submit(tasks.get(0));
+            try {
+                awaitLatch(inPublish);
+                this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+                Assert.assertEquals(2, tasks.size());
+                Assert.assertEquals(1, scheduledClears().size());
+            } finally {
+                this.publisher.intercept = null;
+                finishPublish.countDown();
+                try {
+                    flush.get(WAIT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new AssertionError(e);
+                }
+            }
+            Assert.assertEquals(1, this.publisher.count(this.graphName));
+            tasks.get(1).run();
+            Assert.assertEquals(2, this.publisher.count(this.graphName));
+            Assert.assertTrue(scheduledClears().isEmpty());
+        });
+    }
+
+    @Test
+    public void testFailedFlushUsesTheExistingRetry() {
+        this.publisher.reset();
+        this.withWindowScheduler(tasks -> {
+            this.publisher.fail = true;
+            this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+            tasks.get(0).run();
+            Assert.assertEquals(0, this.publisher.count(this.graphName));
+            Assert.assertTrue(scheduledClears().isEmpty());
+            Assert.assertTrue(this.pending());
+            Assert.assertEquals(2, tasks.size());
+
+            this.publisher.fail = false;
+            tasks.get(1).run();
+            Assert.assertEquals(1, this.publisher.count(this.graphName));
+            Assert.assertTrue(pendingMap().isEmpty());
+            Assert.assertEquals(2, tasks.size());
+        });
+    }
+
+    @Test
     public void testAddPublishes() {
         this.publisher.reset();
         this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         Assert.assertEquals(1, this.publisher.count(this.graphName));
     }
 
@@ -194,6 +303,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
 
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        flushScheduledClearEvents();
 
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         Assert.assertEquals(GRAPH_SPACE, this.publisher.events.get(0)[0]);
@@ -206,6 +316,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
 
         this.tx.updateSchemaStatus(pk, SchemaStatus.INVALID);
+        flushScheduledClearEvents();
 
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         Assert.assertEquals(SchemaStatus.INVALID,
@@ -223,6 +334,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             this.publisher.reset();
 
             this.tx.removeSchema(pk);
+            flushScheduledClearEvents();
 
             Assert.assertEquals("task.sync_deletion=" + syncDeletion,
                                 1, this.publisher.count(this.graphName));
@@ -245,10 +357,11 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
 
             storeListener.event(new Event(this.provider, event));
 
-            Assert.assertEquals(event, 1, this.publisher.count(this.graphName));
-            // The local cache is dropped too
+            // The local cache is dropped without waiting for the notification.
             Assert.assertNotNull(this.tx.getPropertyKey(IdGenerator.of(1)));
             Assert.assertEquals(event, reads + 1, this.store.reads());
+            flushScheduledClearEvents();
+            Assert.assertEquals(event, 1, this.publisher.count(this.graphName));
         }
 
         this.publisher.reset();
@@ -262,6 +375,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
 
         this.tx.clear();
+        flushScheduledClearEvents();
 
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         Assert.assertNull(this.tx.getPropertyKey(IdGenerator.of(1)));
@@ -278,10 +392,15 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         };
         PropertyKey pk = this.propertyKey(1, "name", 1);
         this.tx.addPropertyKey(pk);
+        flushScheduledClearEvents();
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        flushScheduledClearEvents();
         this.tx.removeSchema(pk);
+        flushScheduledClearEvents();
         this.tx.addPropertyKey(this.propertyKey(1, "name", 3));
+        flushScheduledClearEvents();
         this.tx.clear();
+        flushScheduledClearEvents();
         this.publisher.intercept = null;
 
         // added, updated, removed, added again, cleared
@@ -310,6 +429,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.store.hook = null;
 
         // The store changed, so the other Servers are told although the call failed
+        flushScheduledClearEvents();
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         // A read in flight can't cache what it fetched before the failed write
         Assert.assertTrue(this.generation() > generation);
@@ -334,6 +454,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
         });
         this.store.hook = null;
+        flushScheduledClearEvents();
         Assert.assertTrue(this.pending());
 
         this.publisher.fail = false;
@@ -358,6 +479,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             this.tx.removeSchema(pk);
         });
         this.store.hook = null;
+        flushScheduledClearEvents();
 
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         // Not served by name from the cache after the store lost the name
@@ -378,6 +500,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Assert.assertNotNull(this.otherServer.getPropertyKey(GRAPH_SPACE, this.graphName,
                                                              IdGenerator.of(1)));
         Assert.assertEquals(0, this.publisher.count(this.graphName));
+        flushScheduledClearEvents();
         Assert.assertTrue(this.pending());
 
         this.publisher.fail = false;
@@ -391,6 +514,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
         this.publisher.fail = true;
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         // Let the first retry fail too, so the next one is two seconds away
         this.await(() -> this.publisher.attempts.get() >= 2);
 
@@ -409,6 +533,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
         this.publisher.fail = true;
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         Assert.assertTrue(this.pending());
 
         /*
@@ -431,6 +556,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         awaitLatch(retryInPublish);
 
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        flushScheduledClearEvents();
         this.publisher.intercept = null;
         this.publisher.fail = true;
         finishRetry.countDown();
@@ -450,6 +576,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         this.publisher.reset();
         this.publisher.fail = true;
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
 
         // The first retry is inside its publish when the watch starts again
         CountDownLatch retryInPublish = new CountDownLatch(1);
@@ -490,6 +617,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     public void testResetWaitsForAnInFlightRetry() throws Exception {
         this.publisher.fail = true;
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
 
         CountDownLatch retryInPublish = new CountDownLatch(1);
         CountDownLatch finishRetry = new CountDownLatch(1);
@@ -520,9 +648,50 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Whitebox.setInternalState(CachedSchemaTransactionV2.class,
                                   "clearEventPublisher", this.publisher);
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        flushScheduledClearEvents();
         Assert.assertEquals(1, this.publisher.attempts.get());
         Assert.assertEquals(1, this.publisher.count(this.graphName));
         Assert.assertTrue(pendingMap().isEmpty());
+    }
+
+    @Test
+    public void testResetDiscardsARetryCreatedByAnInFlightFlush() throws Exception {
+        this.publisher.fail = true;
+        CountDownLatch inPublish = new CountDownLatch(1);
+        CountDownLatch finishPublish = new CountDownLatch(1);
+        this.publisher.intercept = () -> {
+            inPublish.countDown();
+            awaitLatch(finishPublish);
+        };
+        this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        // Use the real scheduler so reset must drain the running flush.
+        awaitLatch(inPublish);
+        long epoch = pendingState("retryEpoch");
+        Future<?> reset = this.executor.submit(
+                CachedSchemaTransactionV2Test::resetPendingClearEvents);
+        try {
+            this.await(() -> pendingState("retryEpoch") > epoch);
+            try {
+                reset.get(100L, TimeUnit.MILLISECONDS);
+                Assert.fail("reset must wait until the old flush returns");
+            } catch (TimeoutException expected) {
+                // The flush can create a failed-publish retry after the first clear.
+            }
+        } finally {
+            finishPublish.countDown();
+        }
+        reset.get(WAIT_SECONDS, TimeUnit.SECONDS);
+
+        Assert.assertTrue(scheduledClears().isEmpty());
+        Assert.assertTrue(pendingMap().isEmpty());
+        Assert.assertNull(Whitebox.getInternalState(pendingClearEvents(), "retry"));
+        this.publisher = new RecordingPublisher();
+        Whitebox.setInternalState(CachedSchemaTransactionV2.class,
+                                  "clearEventPublisher", this.publisher);
+        this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
+        flushScheduledClearEvents();
+        Assert.assertEquals(1, this.publisher.attempts.get());
+        Assert.assertEquals(1, this.publisher.count(this.graphName));
     }
 
     // ------------------------------------------------------------ watch start
@@ -1191,6 +1360,67 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         return Whitebox.getInternalState(pendingClearEvents(), "pending");
     }
 
+    private static Map<?, ScheduledFuture<?>> scheduledClears() {
+        return Whitebox.getInternalState(pendingClearEvents(), "scheduledClears");
+    }
+
+    private static void requestClear(String graphSpace, String graph) {
+        callPending("request", new Class<?>[]{String.class, String.class}, graphSpace, graph);
+    }
+
+    private static void callPending(String name, Class<?>[] types, Object... args) {
+        Object pending = pendingClearEvents();
+        try {
+            Method method = pending.getClass().getDeclaredMethod(name, types);
+            method.setAccessible(true);
+            method.invoke(pending, args);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /** Advance only the queued windows, leaving the failure-retry clock real. */
+    static void flushScheduledClearEvents() {
+        Object pending = pendingClearEvents();
+        List<?> graphs;
+        synchronized (pending) {
+            graphs = new ArrayList<>(scheduledClears().keySet());
+            for (ScheduledFuture<?> future : scheduledClears().values()) {
+                future.cancel(false);
+            }
+        }
+        for (Object graph : graphs) {
+            callPending("flush", new Class<?>[]{graph.getClass()}, graph);
+        }
+    }
+
+    /** Run window boundaries explicitly instead of waiting for wall-clock sleeps. */
+    private void withWindowScheduler(Consumer<List<Runnable>> test) {
+        Object pending = pendingClearEvents();
+        ScheduledExecutorService original = Whitebox.getInternalState(pending, "executor");
+        ScheduledExecutorService scheduler = Mockito.mock(ScheduledExecutorService.class);
+        List<Runnable> tasks = new CopyOnWriteArrayList<>();
+        Mockito.doAnswer(invocation -> {
+            Assert.assertEquals(1000L, ((Long) invocation.getArgument(1)).longValue());
+            Assert.assertEquals(TimeUnit.MILLISECONDS, invocation.getArgument(2));
+            tasks.add(invocation.getArgument(0));
+            return Mockito.mock(ScheduledFuture.class);
+        }).when(scheduler).schedule(Mockito.any(Runnable.class), Mockito.anyLong(),
+                                   Mockito.any(TimeUnit.class));
+        Whitebox.setInternalState(pending, "executor", scheduler);
+        try {
+            test.accept(tasks);
+        } finally {
+            synchronized (pending) {
+                for (ScheduledFuture<?> future : scheduledClears().values()) {
+                    future.cancel(false);
+                }
+                scheduledClears().clear();
+                Whitebox.setInternalState(pending, "executor", original);
+            }
+        }
+    }
+
     private static long pendingState(String field) {
         Object pending = pendingClearEvents();
         synchronized (pending) {
@@ -1200,34 +1430,40 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     }
 
     /**
-     * Forget the failed publishes and drain their retry before a test replaces
-     * the static publisher. Cancelling a future alone cannot stop a running
-     * retry from publishing the rest of its snapshot into the next fixture.
+     * Forget queued windows and failed publishes before replacing the static
+     * publisher. Drain twice: a running flush can fail after the first clear
+     * and enqueue a retry, which the second pass must cancel too.
      */
     static void resetPendingClearEvents() {
         Object pending = pendingClearEvents();
-        ExecutorService retryExecutor;
-        synchronized (pending) {
-            pendingMap().clear();
-            ScheduledFuture<?> retry = Whitebox.getInternalState(pending, "retry");
-            if (retry != null) {
-                retry.cancel(false);
+        for (int pass = 0; pass < 2; pass++) {
+            ExecutorService retryExecutor;
+            synchronized (pending) {
+                pendingMap().clear();
+                for (ScheduledFuture<?> future : scheduledClears().values()) {
+                    future.cancel(false);
+                }
+                scheduledClears().clear();
+                ScheduledFuture<?> retry = Whitebox.getInternalState(pending, "retry");
+                if (retry != null) {
+                    retry.cancel(false);
+                }
+                long epoch = Whitebox.getInternalState(pending, "retryEpoch");
+                Whitebox.setInternalState(pending, "retryEpoch", epoch + 1L);
+                Whitebox.setInternalState(pending, "retry", null);
+                Whitebox.setInternalState(pending, "retryDelay", 1000L);
+                retryExecutor = Whitebox.getInternalState(pending, "executor");
             }
-            long epoch = Whitebox.getInternalState(pending, "retryEpoch");
-            Whitebox.setInternalState(pending, "retryEpoch", epoch + 1L);
-            Whitebox.setInternalState(pending, "retry", null);
-            Whitebox.setInternalState(pending, "retryDelay", 1000L);
-            retryExecutor = Whitebox.getInternalState(pending, "executor");
-        }
-        if (retryExecutor != null) {
-            try {
-                // The retry needs the pending monitor to finish, so wait outside it
-                retryExecutor.submit(() -> { }).get(WAIT_SECONDS, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new AssertionError("Interrupted while draining schema clear retries", e);
-            } catch (ExecutionException | TimeoutException e) {
-                throw new AssertionError("Failed to drain schema clear retries", e);
+            if (retryExecutor != null) {
+                try {
+                    // The publisher needs the pending monitor to finish, so wait outside it.
+                    retryExecutor.submit(() -> { }).get(WAIT_SECONDS, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("Interrupted while draining schema clear retries", e);
+                } catch (ExecutionException | TimeoutException e) {
+                    throw new AssertionError("Failed to drain schema clear retries", e);
+                }
             }
         }
     }
