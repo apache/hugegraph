@@ -270,6 +270,39 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     }
 
     @Test
+    public void testManualFlushWaitsForAnAlreadyRunningWindow() throws Exception {
+        this.publisher.reset();
+        CountDownLatch inPublish = new CountDownLatch(1);
+        CountDownLatch finishPublish = new CountDownLatch(1);
+        this.publisher.intercept = () -> {
+            inPublish.countDown();
+            awaitLatch(finishPublish);
+        };
+        this.tx.updatePropertyKey(this.propertyKey(1, "name", 1));
+        awaitLatch(inPublish);
+
+        // The timer has already detached its window but hasn't sent the event.
+        CountDownLatch advancing = new CountDownLatch(1);
+        Future<?> advance = this.executor.submit(() -> {
+            advancing.countDown();
+            flushScheduledClearEvents();
+        });
+        try {
+            awaitLatch(advancing);
+            try {
+                advance.get(100L, TimeUnit.MILLISECONDS);
+                Assert.fail("advancing the window must wait for its running publish");
+            } catch (TimeoutException expected) {
+                // Only a completed publish makes count assertions safe.
+            }
+        } finally {
+            finishPublish.countDown();
+        }
+        advance.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        Assert.assertEquals(1, this.publisher.count(this.graphName));
+    }
+
+    @Test
     public void testFailedFlushUsesTheExistingRetry() {
         this.publisher.reset();
         this.withWindowScheduler(tasks -> {
@@ -538,8 +571,8 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
 
         /*
          * The retry sends its event, and before it marks the graph as done a
-         * newer schema change fails to publish. That newer change is not
-         * covered by the event the retry sent, so the graph must stay pending.
+         * newer immediate publish (as on graph open) fails. That failure is
+         * not covered by the retry's snapshot, so the graph must stay pending.
          */
         CountDownLatch retryInPublish = new CountDownLatch(1);
         CountDownLatch finishRetry = new CountDownLatch(1);
@@ -555,8 +588,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         watchStarted();
         awaitLatch(retryInPublish);
 
-        this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
-        flushScheduledClearEvents();
+        callPending("publish", new Class<?>[]{String.class, String.class}, GRAPH_SPACE, this.graphName);
         this.publisher.intercept = null;
         this.publisher.fail = true;
         finishRetry.countDown();
@@ -1379,18 +1411,34 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         }
     }
 
-    /** Advance only the queued windows, leaving the failure-retry clock real. */
+    /** Advance queued windows and await an already-running flush, keeping retry delays real. */
     static void flushScheduledClearEvents() {
         Object pending = pendingClearEvents();
         List<?> graphs;
+        ExecutorService scheduler;
         synchronized (pending) {
             graphs = new ArrayList<>(scheduledClears().keySet());
             for (ScheduledFuture<?> future : scheduledClears().values()) {
                 future.cancel(false);
             }
+            scheduler = Whitebox.getInternalState(pending, "executor");
         }
-        for (Object graph : graphs) {
-            callPending("flush", new Class<?>[]{graph.getClass()}, graph);
+        if (scheduler == null) {
+            return;
+        }
+        try {
+            // cancel(false) cannot stop a flush that has already detached its
+            // window. Serialize with it before returning to the assertions.
+            scheduler.submit(() -> {
+                for (Object graph : graphs) {
+                    callPending("flush", new Class<?>[]{graph.getClass()}, graph);
+                }
+            }).get(WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while flushing schema clear windows", e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new AssertionError("Failed to flush schema clear windows", e);
         }
     }
 
