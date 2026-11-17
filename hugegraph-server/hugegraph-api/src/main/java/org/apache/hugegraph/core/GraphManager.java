@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.text.ParseException;
 import java.util.AbstractMap;
+import java.util.AbstractSet;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,6 +33,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -175,16 +177,15 @@ public final class GraphManager {
     // Guarded by the graphSpaces monitor; advances even when PUT mutates the same cached object.
     private long graphSpaceCacheVersion;
     private final Map<String, Service> services;
-    //FIXME: add one class like graphKey as key,which contains graphSpace and graphName
-    private final Map<String, Graph> graphs;
+    private final Map<GraphKey, Graph> graphs;
     private final Set<String> localGraphs;
-    private final Set<String> removingGraphs;
+    private final Set<GraphKey> removingGraphs;
     // Guarded by this manager monitor; placement-event tokens are consumed independently.
     private final Set<HugeGraph> rpcRemovingOwners;
-    private final Set<String> pendingGraphAdds;
+    private final Set<GraphKey> pendingGraphAdds;
     private final Set<HugeGraph> failedPeerRemovals;
-    private final Map<String, HugeGraph> clearedGraphs;
-    private final Set<String> creatingGraphs;
+    private final Map<GraphKey, HugeGraph> clearedGraphs;
+    private final Set<GraphKey> creatingGraphs;
     private final HugeAuthenticator authenticator;
     private final AuthManager authManager;
     private final MetaManager metaManager = MetaManager.instance();
@@ -229,7 +230,6 @@ public final class GraphManager {
         this.cluster = conf.get(ServerOptions.CLUSTER);
         this.graphSpaces = new ConcurrentHashMap<>();
         this.services = new ConcurrentHashMap<>();
-        // key is graphSpaceName + "-" + graphName
         this.graphs = new ConcurrentHashMap<>();
         this.removingGraphs = ConcurrentHashMap.newKeySet();
         this.rpcRemovingOwners = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -720,9 +720,8 @@ public final class GraphManager {
 
     public void reload() {
         // Remove graphs from GraphManager
-        for (String graph : this.graphs.keySet()) {
-            String[] parts = graph.split(DELIMITER);
-            this.dropGraph(parts[0], parts[1], false, false);
+        for (GraphKey graph : this.graphs.keySet()) {
+            this.dropGraph(graph.graphSpace(), graph.graphName(), false, false);
         }
         int count = 0;
         while (!this.graphs.isEmpty() && count++ < 10) {
@@ -1131,10 +1130,9 @@ public final class GraphManager {
 
     public void clearGraphSpace(String name) {
         // Clear all graphs
-        for (String key : this.graphs.keySet()) {
-            if (key.startsWith(name + DELIMITER)) {
-                String[] parts = key.split(DELIMITER);
-                this.dropGraph(parts[0], parts[1], true);
+        for (GraphKey key : this.graphs.keySet()) {
+            if (key.graphSpace().equals(name)) {
+                this.dropGraph(key.graphSpace(), key.graphName(), true);
             }
         }
 
@@ -1332,7 +1330,7 @@ public final class GraphManager {
                         "The new graph name can't be null or empty");
 
         String newGraphKey = spaceGraphName(graphspace, newName);
-        E.checkArgument(!this.graphs.containsKey(newGraphKey),
+        E.checkArgument(!this.graphs.containsKey(new GraphKey(graphspace, newName)),
                         "The graph '%s' has existed in graphspace '%s'", newName, graphspace);
 
         // Get source graph configuration
@@ -1420,7 +1418,7 @@ public final class GraphManager {
     private void loadGraph(Map<String, Map<String, Object>> graphConfigs) {
         // Load graph
         for (Map.Entry<String, Map<String, Object>> conf : graphConfigs.entrySet()) {
-            String[] parts = conf.getKey().split(DELIMITER);
+            GraphKey key = GraphKey.fromString(conf.getKey());
             // When server registered graph space is not DEFAULT, only load graphs under its
             // registered graph space
             if (this.filterLoadGraphByServiceGraphSpace(conf.getKey())) {
@@ -1432,9 +1430,9 @@ public final class GraphManager {
             Date createTime = parseDate(config.get("create_time"));
             Date updateTime = parseDate(config.get("update_time"));
 
-            HugeFactory.checkGraphName(parts[1], "meta server");
+            HugeFactory.checkGraphName(key.graphName(), "meta server");
             try {
-                HugeGraph graph = this.createGraph(parts[0], parts[1],
+                HugeGraph graph = this.createGraph(key.graphSpace(), key.graphName(),
                                                    creator, config, false);
                 graph.createTime(createTime);
                 graph.updateTime(updateTime);
@@ -1443,7 +1441,7 @@ public final class GraphManager {
                     throw e;
                 }
                 LOG.error(String.format("Failed to load graph '%s' from " +
-                                        "meta server", parts[1]), e);
+                                        "meta server", key.graphName()), e);
             }
         }
     }
@@ -1478,14 +1476,14 @@ public final class GraphManager {
     }
 
     private boolean filterLoadGraphByServiceGraphSpace(String key) {
-        String[] parts = key.split(DELIMITER);
+        GraphKey graphKey = GraphKey.fromString(key);
         // server 注册的图空间不为 DEFAULT 时，只加载其注册的图空间下的图
         if (!"DEFAULT".equals(this.serviceGraphSpace) &&
-            !this.serviceGraphSpace.equals(parts[0])) {
+            !this.serviceGraphSpace.equals(graphKey.graphSpace())) {
             LOG.warn(String.format("Load graph [%s] was discarded, due to the graph " +
                                    "space [%s] registered by the current server does " +
                                    "not match [%s].", key,
-                                   this.serviceGraphSpace, parts[0]));
+                                   this.serviceGraphSpace, graphKey.graphSpace()));
             return true;
         }
         return false;
@@ -1503,8 +1501,8 @@ public final class GraphManager {
     private void checkOptionUnique(HugeConfig config,
                                    TypedOption<?, ?> option) {
         Object incomingValue = config.get(option);
-        for (String graphName : this.graphs.keySet()) {
-            HugeGraph graph = this.graph(graphName);
+        for (GraphKey graphKey : this.graphs.keySet()) {
+            HugeGraph graph = this.graph(graphKey);
             assert graph != null;
             Object existedValue = graph.option(option);
             E.checkArgument(!incomingValue.equals(existedValue),
@@ -1547,7 +1545,7 @@ public final class GraphManager {
                       name, e.getMessage(), e);
             if (graph != null) {
                 synchronized (this) {
-                    if (this.graphs.get(graph.spaceGraphName()) == graph) {
+                    if (this.graphs.get(GraphKey.fromString(graph.spaceGraphName())) == graph) {
                         this.rpcRemovingOwners.add(graph);
                     }
                 }
@@ -1556,15 +1554,15 @@ public final class GraphManager {
                     HugeGraph candidate = graph;
                     HugeGraphAuthProxy.runAsAdmin(() -> this.dropGraphLocal(candidate));
                     synchronized (this) {
-                        this.graphs.remove(graph.spaceGraphName(), graph);
+                        this.graphs.remove(GraphKey.fromString(graph.spaceGraphName()), graph);
                         this.rpcRemovingOwners.remove(graph);
                     }
                     this.notifyEventLenient(Events.GRAPH_DROP, graph);
                 } catch (Throwable cleanup) {
                     e.addSuppressed(cleanup);
                     synchronized (this) {
-                        this.graphs.putIfAbsent(graph.spaceGraphName(), graph);
-                        if (this.graphs.get(graph.spaceGraphName()) == graph) {
+                        this.graphs.putIfAbsent(GraphKey.fromString(graph.spaceGraphName()), graph);
+                        if (this.graphs.get(GraphKey.fromString(graph.spaceGraphName())) == graph) {
                             this.rpcRemovingOwners.add(graph);
                         }
                     }
@@ -1628,9 +1626,9 @@ public final class GraphManager {
                     "accepted", this.serviceGraphSpace, graphSpace));
         }
 
-        String key = String.join(DELIMITER, graphSpace, name);
+        GraphKey key = new GraphKey(graphSpace, name);
         if (this.graphs.containsKey(key)) {
-            throw new ExistedException("graph", key);
+            throw new ExistedException("graph", key.spaceGraphName());
         }
         boolean grpcThread = Thread.currentThread().getName().contains("grpc");
         E.checkArgumentNotNull(name, "The graph name can't be null");
@@ -1716,7 +1714,7 @@ public final class GraphManager {
         }
 
         if (init) {
-            this.creatingGraphs.add(graphName);
+            this.creatingGraphs.add(key);
             this.metaManager.addGraphConfig(graphSpace, name, configs);
             this.metaManager.notifyGraphAdd(graphSpace, name);
         }
@@ -1738,11 +1736,33 @@ public final class GraphManager {
     }
 
     public Set<String> graphs() {
-        return Collections.unmodifiableSet(this.graphs.keySet());
+        // Preserve the unmodifiable live view exposed to existing callers.
+        return Collections.unmodifiableSet(new AbstractSet<String>() {
+            @Override
+            public Iterator<String> iterator() {
+                return GraphManager.this.graphs.keySet().stream()
+                                   .map(GraphKey::spaceGraphName).iterator();
+            }
+
+            @Override
+            public int size() {
+                return GraphManager.this.graphs.size();
+            }
+
+            @Override
+            public boolean contains(Object value) {
+                return value instanceof String name &&
+                       GraphManager.this.graphs.containsKey(GraphKey.fromString(name));
+            }
+        });
     }
 
     public HugeGraph graph(String spaceGraphName) {
-        Graph graph = this.graphs.get(spaceGraphName);
+        return this.graph(GraphKey.fromString(spaceGraphName));
+    }
+
+    private HugeGraph graph(GraphKey key) {
+        Graph graph = this.graphs.get(key);
         if (graph == null) {
             return null;
         } else if (graph instanceof HugeGraph matchedHugeGraph) {
@@ -1810,7 +1830,7 @@ public final class GraphManager {
     }
 
     public void close() {
-        for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
+        for (Map.Entry<GraphKey, Graph> entry : this.graphs.entrySet()) {
             Graph graph = entry.getValue();
             try {
                 graph.close();
@@ -1930,8 +1950,9 @@ public final class GraphManager {
         final Set<Graph> graphsToCloseTxOn = new HashSet<>();
 
         graphSourceNamesToCloseTxOn.forEach(name -> {
-            if (this.graphs.containsKey(name)) {
-                graphsToCloseTxOn.add(this.graphs.get(name));
+            GraphKey key = GraphKey.fromString(name);
+            if (this.graphs.containsKey(key)) {
+                graphsToCloseTxOn.add(this.graphs.get(key));
             }
         });
 
@@ -1987,8 +2008,9 @@ public final class GraphManager {
     }
 
     private void rollbackGraph(String graphName, HugeGraph graph, Throwable failure) {
+        GraphKey key = GraphKey.fromString(graphName);
         synchronized (this) {
-            if (this.graphs.get(graphName) == graph) {
+            if (this.graphs.get(key) == graph) {
                 this.rpcRemovingOwners.add(graph);
             }
         }
@@ -2003,7 +2025,7 @@ public final class GraphManager {
             this.notifyEventLenient(Events.GRAPH_DROP, graph);
             synchronized (this) {
                 HugeFactory.remove(graph);
-                this.graphs.remove(graphName, graph);
+                this.graphs.remove(key, graph);
                 this.rpcRemovingOwners.remove(graph);
             }
         } catch (Throwable cleanup) {
@@ -2012,8 +2034,8 @@ public final class GraphManager {
             }
             // Pending owners must keep their graph/factory identity for cleanup retry.
             synchronized (this) {
-                this.graphs.putIfAbsent(graphName, graph);
-                if (this.graphs.get(graphName) == graph) {
+                this.graphs.putIfAbsent(key, graph);
+                if (this.graphs.get(key) == graph) {
                     this.rpcRemovingOwners.add(graph);
                 }
             }
@@ -2064,7 +2086,7 @@ public final class GraphManager {
             return;
         }
         com.alipay.remoting.rpc.RpcServer remotingRpcServer = this.remotingRpcServer();
-        for (String graphName : this.graphs.keySet()) {
+        for (GraphKey graphName : this.graphs.keySet()) {
             HugeGraph graph = this.graph(graphName);
             graph.waitReady(remotingRpcServer);
         }
@@ -2184,11 +2206,12 @@ public final class GraphManager {
     }
 
     private synchronized void publishGraph(String name, HugeGraph graph) {
-        if (this.graphs.get(name) == graph) {
+        GraphKey key = GraphKey.fromString(name);
+        if (this.graphs.get(key) == graph) {
             return;
         }
         this.registerRpcServices(graph);
-        this.graphs.put(name, graph);
+        this.graphs.put(key, graph);
     }
 
     private void registerRpcServices(HugeGraph graph) {
@@ -2213,13 +2236,13 @@ public final class GraphManager {
     }
 
     private synchronized boolean unpublishGraph(HugeGraph graph) {
-        String name = graph.spaceGraphName();
-        if (this.graphs.get(name) != graph) {
+        GraphKey key = GraphKey.fromString(graph.spaceGraphName());
+        if (this.graphs.get(key) != graph) {
             return false;
         }
         // A failed cleanup keeps the owner published so that drop can retry.
         this.unregisterRpcServices(graph);
-        boolean removed = this.graphs.remove(name, graph);
+        boolean removed = this.graphs.remove(key, graph);
         if (removed) {
             this.rpcRemovingOwners.remove(graph);
         }
@@ -2333,7 +2356,7 @@ public final class GraphManager {
                     HugeFactory.remove(graph);
                 } catch (Exception e1) {
                     e.addSuppressed(e1);
-                    this.graphs.putIfAbsent(graph.spaceGraphName(), graph);
+                    this.graphs.putIfAbsent(GraphKey.fromString(graph.spaceGraphName()), graph);
                 }
                 throw e;
             }
@@ -2446,7 +2469,7 @@ public final class GraphManager {
     }
 
     public HugeGraph graph(String graphSpace, String name) {
-        String key = String.join(DELIMITER, graphSpace, name);
+        GraphKey key = new GraphKey(graphSpace, name);
         Graph graph = this.graphs.get(key);
         if (graph == null) {
             if (isPDEnabled()) {
@@ -2454,12 +2477,12 @@ public final class GraphManager {
                         this.metaManager.graphConfigs(graphSpace);
                 // If current server registered graph space is not DEFAULT, only load graph creation
                 // under registered graph space
-                if (!configs.containsKey(key) ||
+                if (!configs.containsKey(key.spaceGraphName()) ||
                     (!"DEFAULT".equals(this.serviceGraphSpace) &&
                      !graphSpace.equals(this.serviceGraphSpace))) {
                     return null;
                 }
-                Map<String, Object> config = configs.get(key);
+                Map<String, Object> config = configs.get(key.spaceGraphName());
                 String creator = String.valueOf(config.get("creator"));
                 Date createTime = parseDate(config.get("create_time"));
                 Date updateTime = parseDate(config.get("update_time"));
@@ -2519,8 +2542,9 @@ public final class GraphManager {
     }
 
     private void dropGraph(String graphSpace, String name, boolean clear, HugeGraph g, boolean replayPendingAdd) {
+        GraphKey key = new GraphKey(graphSpace, name);
         synchronized (this) {
-            if (g == null || this.graphs.get(spaceGraphName(graphSpace, name)) != g) {
+            if (g == null || this.graphs.get(key) != g) {
                 return;
             }
         }
@@ -2532,14 +2556,14 @@ public final class GraphManager {
                                     "want to delete it.", name);
         }
 
-        String graphName = spaceGraphName(graphSpace, name);
-        if (clear && g.closed() && this.clearedGraphs.get(graphName) != g) {
+        String graphName = key.spaceGraphName();
+        if (clear && g.closed() && this.clearedGraphs.get(key) != g) {
             // A non-clearing close cannot certify that destructive deletion completed.
             throw new HugeException("Graph '%s' is closed without a successful backend clear; " +
                                     "retain its owner and complete backend cleanup before deletion", graphName);
         }
         // The same owner may await close after clear succeeded, even while a foreign tx remains open.
-        if (clear && !g.closed() && this.clearedGraphs.get(graphName) != g) {
+        if (clear && !g.closed() && this.clearedGraphs.get(key) != g) {
             // The auth proxy checks ADMIN before the local deletion fence.
             TaskScheduler scheduler = g.taskScheduler();
             if (!scheduler.close()) {
@@ -2559,7 +2583,7 @@ public final class GraphManager {
             synchronized (this) {
                 this.rpcRemovingOwners.add(g);
                 this.unregisterRpcServices(g);
-                this.removingGraphs.add(graphName);
+                this.removingGraphs.add(key);
             }
             boolean metadataRemoved = false;
             try {
@@ -2571,9 +2595,9 @@ public final class GraphManager {
                 synchronized (this) {
                     if (!metadataRemoved) {
                         // No local REMOVE was sent; a later peer REMOVE must still be handled.
-                        this.removingGraphs.remove(graphName);
+                        this.removingGraphs.remove(key);
                     }
-                    if (this.graphs.get(graphName) == g && !g.closed()) {
+                    if (this.graphs.get(key) == g && !g.closed()) {
                         try {
                             this.registerRpcServices(g);
                             this.rpcRemovingOwners.remove(g);
@@ -2590,8 +2614,8 @@ public final class GraphManager {
 
             g.clearBackend();
             synchronized (this) {
-                if (this.graphs.get(graphName) == g) {
-                    this.clearedGraphs.put(graphName, g);
+                if (this.graphs.get(key) == g) {
+                    this.clearedGraphs.put(key, g);
                 }
             }
         }
@@ -2604,7 +2628,7 @@ public final class GraphManager {
         // Serialize with publication, but leave graph close outside the manager gate.
         boolean replayAdd = false;
         synchronized (this) {
-            if (this.graphs.get(graphName) == g) {
+            if (this.graphs.get(key) == g) {
                 this.unregisterRpcServices(g);
                 GraphSpace gs = this.graphSpace(graphSpace);
                 if (!grpcThread) {
@@ -2623,17 +2647,17 @@ public final class GraphManager {
                 }
                 // Remove the factory binding before permitting same-name creation.
                 HugeFactory.remove(g);
-                this.graphs.remove(graphName, g);
+                this.graphs.remove(key, g);
                 this.rpcRemovingOwners.remove(g);
                 this.failedPeerRemovals.remove(g);
                 if (replayPendingAdd) {
-                    replayAdd = this.pendingGraphAdds.contains(graphName);
+                    replayAdd = this.pendingGraphAdds.contains(key);
                 } else {
                     // Reload loads all current metadata after every old owner has been removed.
-                    this.pendingGraphAdds.remove(graphName);
+                    this.pendingGraphAdds.remove(key);
                 }
-                if (this.clearedGraphs.get(graphName) == g) {
-                    this.clearedGraphs.remove(graphName);
+                if (this.clearedGraphs.get(key) == g) {
+                    this.clearedGraphs.remove(key);
                 }
             }
         }
@@ -2665,10 +2689,10 @@ public final class GraphManager {
                                     HugeConfig config,
                                     TypedOption<?, ?> option) {
         Object incomingValue = config.get(option);
-        for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
-            String[] parts = entry.getKey().split(DELIMITER);
-            if (!Objects.equals(graphSpace, parts[0]) ||
-                !Objects.equals(incomingValue, parts[1])) {
+        for (Map.Entry<GraphKey, Graph> entry : this.graphs.entrySet()) {
+            GraphKey key = entry.getKey();
+            if (!Objects.equals(graphSpace, key.graphSpace()) ||
+                !Objects.equals(incomingValue, key.graphName())) {
                 continue;
             }
             Object existedValue = ((HugeGraph) entry.getValue()).option(option);
@@ -2682,25 +2706,23 @@ public final class GraphManager {
         Set<String> graphs = new HashSet<>();
 
         if (!isPDEnabled()) {
-            for (String key : this.graphs.keySet()) {
-                String[] parts = key.split(DELIMITER);
-                if (parts[0].equals(graphSpace)) {
-                    graphs.add(parts[1]);
+            for (GraphKey key : this.graphs.keySet()) {
+                if (key.graphSpace().equals(graphSpace)) {
+                    graphs.add(key.graphName());
                 }
             }
             return graphs;
         }
 
         for (String key : this.metaManager.graphConfigs(graphSpace).keySet()) {
-            graphs.add(key.split(DELIMITER)[1]);
+            graphs.add(GraphKey.fromString(key).graphName());
         }
         if (DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(graphSpace)) {
-            String prefix = spaceGraphName(graphSpace, "");
-            for (String key : this.graphs.keySet()) {
-                if (!key.startsWith(prefix)) {
+            for (GraphKey key : this.graphs.keySet()) {
+                if (!key.graphSpace().equals(graphSpace)) {
                     continue;
                 }
-                String graph = key.substring(prefix.length());
+                String graph = key.graphName();
                 if (SYS_GRAPH.equals(graph)) {
                     continue;
                 }
@@ -2778,10 +2800,9 @@ public final class GraphManager {
         if (!isPDEnabled()) {
             // In non-PD mode, metaManager is not initialized.
             // Check nickname against in-memory graphs (same pattern as graphs()).
-            for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
-                String key = entry.getKey();
-                String[] parts = key.split(DELIMITER, 2);
-                if (parts.length == 2 && parts[0].equals(graphSpace) &&
+            for (Map.Entry<GraphKey, Graph> entry : this.graphs.entrySet()) {
+                GraphKey key = entry.getKey();
+                if (key.graphSpace().equals(graphSpace) &&
                     entry.getValue() instanceof HugeGraph) {
                     HugeGraph hg = (HugeGraph) entry.getValue();
                     if (nickname.equals(hg.nickname())) {
@@ -2959,15 +2980,15 @@ public final class GraphManager {
         List<String> names = this.metaManager
                 .extractGraphsFromResponse(response);
         for (String graphName : names) {
-            String[] parts = graphName.split(DELIMITER);
-            if (parts.length < 2) {
+            GraphKey key = GraphKey.fromString(graphName);
+            if (key.graphSpace().isEmpty() || key.graphName().isEmpty()) {
                 LOG.error("The graph name format is incorrect: {}", graphName);
                 continue;
             }
             // If the current server is not registered to the DEFAULT schema,
             // it will only receive graph creation events under the registered schemas.
             if (!"DEFAULT".equals(this.serviceGraphSpace) &&
-                !parts[0].equals(this.serviceGraphSpace)) {
+                !key.graphSpace().equals(this.serviceGraphSpace)) {
                 LOG.warn(String.format("Listen event: graph [%s] add was discarded because " +
                                        "it did not belong to the graph space [%s] " +
                                        "registered by the current server",
@@ -2979,15 +3000,15 @@ public final class GraphManager {
             LOG.info("Accept graph add signal from etcd for {}", graphName);
             HugeGraph retryOwner = null;
             synchronized (this) {
-                HugeGraph owner = (HugeGraph) this.graphs.get(graphName);
+                HugeGraph owner = (HugeGraph) this.graphs.get(key);
                 boolean retryPeerCleanup = owner != null && this.failedPeerRemovals.contains(owner);
-                if (this.creatingGraphs.remove(graphName) && !retryPeerCleanup) {
+                if (this.creatingGraphs.remove(key) && !retryPeerCleanup) {
                     // The acknowledgement of local creation is not a replacement ADD.
                     continue;
                 }
                 if (owner != null) {
                     // Independent key watches can deliver a replacement ADD before the old REMOVE.
-                    this.pendingGraphAdds.add(graphName);
+                    this.pendingGraphAdds.add(key);
                     if (!retryPeerCleanup) {
                         continue;
                     }
@@ -2997,7 +3018,7 @@ public final class GraphManager {
             if (retryOwner != null) {
                 try {
                     // Retry the exact peer owner; a concurrent replacement must never be closed here.
-                    this.dropGraph(parts[0], parts[1], false, retryOwner, true);
+                    this.dropGraph(key.graphSpace(), key.graphName(), false, retryOwner, true);
                 } catch (HugeException failure) {
                     LOG.error("Failed to retry peer cleanup for graph '{}'", graphName, failure);
                 }
@@ -3015,16 +3036,16 @@ public final class GraphManager {
     }
 
     private void loadAddedGraph(String graphName) {
-        String[] parts = graphName.split(DELIMITER);
+        GraphKey key = GraphKey.fromString(graphName);
         LOG.info("Not exist in cache, Starting construct graph {}", graphName);
-        Map<String, Object> config = this.metaManager.getGraphConfig(parts[0], parts[1]);
+        Map<String, Object> config = this.metaManager.getGraphConfig(key.graphSpace(), key.graphName());
         HugeGraph graph = null;
         if (config != null) {
             Object objc = config.get("creator");
             String creator = null == objc ? GraphSpace.DEFAULT_CREATOR_NAME : String.valueOf(objc);
             // Create graph without init; reread metadata instead of keeping an old event's configuration.
-            graph = this.createGraph(parts[0], parts[1], creator, config, false);
-            LOG.info("Add graph space:{} graph:{}", parts[0], parts[1]);
+            graph = this.createGraph(key.graphSpace(), key.graphName(), creator, config, false);
+            LOG.info("Add graph space:{} graph:{}", key.graphSpace(), key.graphName());
             graph.started(true);
             if (graph.tx().isOpen()) {
                 graph.tx().close();
@@ -3033,10 +3054,10 @@ public final class GraphManager {
             LOG.error("The graph config not exist: {}", graphName);
         }
         synchronized (this) {
-            if (this.graphs.get(graphName) == graph &&
+            if (this.graphs.get(key) == graph &&
                 (graph == null || (!graph.closed() && !this.rpcRemovingOwners.contains(graph)))) {
                 // Do not consume a notification newly retained by another cleanup owner.
-                this.pendingGraphAdds.remove(graphName);
+                this.pendingGraphAdds.remove(key);
             }
         }
     }
@@ -3060,24 +3081,24 @@ public final class GraphManager {
         List<String> graphNames = this.metaManager
                 .extractGraphsFromResponse(response);
         for (String graphName : graphNames) {
-            if (!this.graphs.containsKey(graphName) ||
-                this.removingGraphs.contains(graphName)) {
-                this.removingGraphs.remove(graphName);
+            GraphKey key = GraphKey.fromString(graphName);
+            if (!this.graphs.containsKey(key) ||
+                this.removingGraphs.contains(key)) {
+                this.removingGraphs.remove(key);
                 continue;
             }
 
             // Remove graph without clear
-            String[] parts = graphName.split(DELIMITER);
-            if (parts.length < 2) {
+            if (key.graphSpace().isEmpty() || key.graphName().isEmpty()) {
                 LOG.error("The graph name format is incorrect: {}", graphName);
                 continue;
             }
-            HugeGraph owner = (HugeGraph) this.graphs.get(graphName);
+            HugeGraph owner = (HugeGraph) this.graphs.get(key);
             try {
-                this.dropGraph(parts[0], parts[1], false, owner, true);
+                this.dropGraph(key.graphSpace(), key.graphName(), false, owner, true);
             } catch (HugeException e) {
                 synchronized (this) {
-                    if (this.graphs.get(graphName) == owner) {
+                    if (this.graphs.get(key) == owner) {
                         this.failedPeerRemovals.add(owner);
                     }
                 }
@@ -3091,8 +3112,9 @@ public final class GraphManager {
         List<String> graphNames = this.metaManager
                 .extractGraphsFromResponse(response);
         for (String graphName : graphNames) {
-            if (this.graphs.containsKey(graphName)) {
-                Graph graph = this.graphs.get(graphName);
+            GraphKey key = GraphKey.fromString(graphName);
+            if (this.graphs.containsKey(key)) {
+                Graph graph = this.graphs.get(key);
                 if (graph instanceof HugeGraph hugeGraph) {
                     String[] values =
                             graphName.split(MetaManager.META_PATH_JOIN);
@@ -3122,8 +3144,9 @@ public final class GraphManager {
         List<String> graphNames = this.metaManager
                 .extractGraphsFromResponse(response);
         for (String graphName : graphNames) {
-            if (this.graphs.containsKey(graphName)) {
-                Graph graph = this.graphs.get(graphName);
+            GraphKey key = GraphKey.fromString(graphName);
+            if (this.graphs.containsKey(key)) {
+                Graph graph = this.graphs.get(key);
                 if (graph instanceof HugeGraph hugeGraph) {
                     ((AbstractBackendStoreProvider) hugeGraph.storeProvider())
                             .notifyAndWaitEvent(Events.STORE_CLEAR);

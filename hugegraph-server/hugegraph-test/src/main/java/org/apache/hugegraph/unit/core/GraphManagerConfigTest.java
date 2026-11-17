@@ -71,6 +71,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.config.RpcOptions;
 import org.apache.hugegraph.config.ServerOptions;
+import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
@@ -815,8 +816,8 @@ public class GraphManagerConfigTest {
                             throw error.getCause();
                         }
                     });
-            Map<String, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
-            graphs.put(legacy.spaceGraphName(), legacy);
+            Map<GraphKey, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
+            graphs.put(GraphKey.fromString(legacy.spaceGraphName()), legacy);
             DefaultGraphManager bindings = new DefaultGraphManager(new Settings());
             bindings.putGraph(legacy.spaceGraphName(), legacy);
             CountDownLatch dropped = new CountDownLatch(1);
@@ -1087,8 +1088,8 @@ public class GraphManagerConfigTest {
             spaces.put("DEFAULT", space);
             if (lateSelfAdd) {
                 // Local creation is still waiting for its own PD acknowledgement.
-                java.util.Set<String> creating = Whitebox.getInternalState(manager, "creatingGraphs");
-                creating.add(key);
+                java.util.Set<GraphKey> creating = Whitebox.getInternalState(manager, "creatingGraphs");
+                creating.add(GraphKey.fromString(key));
             }
             String threadName = Thread.currentThread().getName();
             if (peer) {
@@ -1151,19 +1152,19 @@ public class GraphManagerConfigTest {
             }
             Assert.assertEquals(peer && addDuringCleanup ? 3 : 2, cleanupAttempts.get());
             Assert.assertNotSame(graph, factories.get(key));
-            java.util.Set<String> pending = Whitebox.getInternalState(manager, "pendingGraphAdds");
+            java.util.Set<GraphKey> pending = Whitebox.getInternalState(manager, "pendingGraphAdds");
             if (replayFailure == 1) {
                 Assert.assertNull(manager.graph(key));
                 Assert.assertNull(manager.graph("DEFAULT", name));
                 Assert.assertFalse(factories.containsKey(key));
-                Assert.assertFalse(pending.contains(key));
+                Assert.assertFalse(pending.contains(GraphKey.fromString(key)));
                 return;
             }
             Assert.assertSame(newConfig, latest.get());
             if (replayFailure == 2) {
                 Assert.assertNull(manager.graph(key));
                 Assert.assertFalse(factories.containsKey(key));
-                Assert.assertTrue(pending.contains(key));
+                Assert.assertTrue(pending.contains(GraphKey.fromString(key)));
                 Assert.assertEquals(1, singleConfigReads.get());
                 rejectReplay.set(false);
                 Whitebox.invoke(GraphManager.class, new Class<?>[]{Object.class},
@@ -1186,7 +1187,7 @@ public class GraphManagerConfigTest {
             Assert.assertEquals("new_generation", replacement.nickname());
             Assert.assertEquals(0L, replacement.traversal().V().count().next().longValue());
             Assert.assertTrue(replacement.started());
-            Assert.assertFalse(pending.contains(key));
+            Assert.assertFalse(pending.contains(GraphKey.fromString(key)));
             Assert.assertSame(replacement, bindings.getGraph(key));
             Assert.assertNotNull(bindings.getTraversalSource("__g_" + key));
             Assert.assertSame(replacement, bindings.getAsBindings().get(key));
@@ -1291,25 +1292,26 @@ public class GraphManagerConfigTest {
                 Whitebox.invoke(GraphManager.class, new Class<?>[]{Object.class},
                         "graphAddHandler", manager, "self-add");
             }
-            java.util.Set<String> pending = Whitebox.getInternalState(manager, "pendingGraphAdds");
+            java.util.Set<GraphKey> pending = Whitebox.getInternalState(manager, "pendingGraphAdds");
             if (duplicateAdd) {
                 Whitebox.invoke(GraphManager.class, new Class<?>[]{Object.class},
                         "graphAddHandler", manager, "foreign-add");
                 Assert.assertSame(owner, manager.graph(key));
                 Assert.assertSame(otherOwner, manager.graph("DEFAULT-" + other));
-                Assert.assertTrue(pending.contains(key));
-                Assert.assertTrue(pending.contains("DEFAULT-" + other));
+                Assert.assertTrue(pending.contains(GraphKey.fromString(key)));
+                Assert.assertTrue(pending.contains(GraphKey.fromString("DEFAULT-" + other)));
             }
             Mockito.clearInvocations(meta);
             long begin = System.nanoTime();
             System.out.println(String.format("self-add reload before: selfAdd=%s pending=%s graphs=%s",
-                                             selfAdd, pending.contains(key), manager.graphs().size()));
+                                             selfAdd, pending.contains(GraphKey.fromString(key)),
+                                             manager.graphs().size()));
             try {
                 api.reload(manager, Map.of("action", "reload"));
             } finally {
                 System.out.println(String.format("self-add reload after: selfAdd=%s durationMs=%s pending=%s graphs=%s",
                                                  selfAdd, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begin),
-                                                 pending.contains(key), manager.graphs().size()));
+                                                 pending.contains(GraphKey.fromString(key)), manager.graphs().size()));
             }
             Assert.assertTrue(owner.closed());
             Assert.assertTrue(otherOwner.closed());
@@ -1318,8 +1320,8 @@ public class GraphManagerConfigTest {
             Assert.assertNotSame(owner, manager.graph(key));
             Assert.assertNotSame(otherOwner, manager.graph("DEFAULT-" + other));
             Assert.assertEquals(2, manager.graphs().size());
-            Assert.assertFalse(pending.contains(key));
-            Assert.assertFalse(pending.contains("DEFAULT-" + other));
+            Assert.assertFalse(pending.contains(GraphKey.fromString(key)));
+            Assert.assertFalse(pending.contains(GraphKey.fromString("DEFAULT-" + other)));
             Mockito.verify(meta, Mockito.never()).getGraphConfig(Mockito.anyString(), Mockito.anyString());
             Mockito.verify(meta).graphConfigs("DEFAULT");
             Assert.assertSame(manager.graph(key), bindings.getGraph(key));
@@ -1511,12 +1513,12 @@ public class GraphManagerConfigTest {
                     manager, "DEFAULT", name, "I'm sure to drop the graph"));
             Assert.assertTrue(metadataEntered.await(5, TimeUnit.SECONDS));
             java.util.Set<?> removing = Whitebox.getInternalState(manager, "removingGraphs");
-            Assert.assertTrue(removing.contains(graph.spaceGraphName()));
+            Assert.assertTrue(removing.contains(GraphKey.fromString(graph.spaceGraphName())));
             if (consumeToken) {
                 Mockito.when(meta.extractGraphsFromResponse(Mockito.any())).thenReturn(
                         java.util.Collections.singletonList(graph.spaceGraphName()));
                 Whitebox.invoke(GraphManager.class, "graphRemoveHandler", manager, new Object());
-                Assert.assertFalse(removing.contains(graph.spaceGraphName()));
+                Assert.assertFalse(removing.contains(GraphKey.fromString(graph.spaceGraphName())));
             }
             Assert.assertFalse(graph.closed());
             Assert.assertSame(graph, manager.graph(graph.spaceGraphName()));
@@ -1929,12 +1931,12 @@ public class GraphManagerConfigTest {
             owner = manager.createGraphLocal(name, config + name + "\n");
             HugeGraph graph = owner;
             Map<String, HugeGraph> factories = Whitebox.getInternalState(HugeFactory.class, "GRAPHS");
-            Map<String, HugeGraph> managed = Whitebox.getInternalState(manager, "graphs");
+            Map<GraphKey, HugeGraph> managed = Whitebox.getInternalState(manager, "graphs");
             List<?> retained = Whitebox.getInternalState(owner, "closeResources");
             List<Runnable> rpc = Whitebox.getInternalState(owner, "rpcServiceCleanup");
             File file = owner.configuration().file();
             Assert.assertSame(owner, factories.get(owner.spaceGraphName()));
-            Assert.assertSame(owner, managed.get(owner.spaceGraphName()));
+            Assert.assertSame(owner, managed.get(GraphKey.fromString(owner.spaceGraphName())));
             Assert.assertTrue(file.isFile());
             Throwable controlled = fatal ? new AssertionError("fatal native cleanup boundary") :
                                            new IllegalStateException("persistent native cleanup boundary");
@@ -1973,7 +1975,7 @@ public class GraphManagerConfigTest {
             }
             boolean configRetained = file.isFile();
             boolean factoryRetained = factories.get(owner.spaceGraphName()) == owner;
-            boolean managerRetained = managed.get(owner.spaceGraphName()) == owner;
+            boolean managerRetained = managed.get(GraphKey.fromString(owner.spaceGraphName())) == owner;
             boolean completed = Whitebox.getInternalState(owner, "closeCompleted");
             int pending = retained.size();
             int rpcPending = rpc.size();
@@ -2014,7 +2016,7 @@ public class GraphManagerConfigTest {
             Assert.assertEquals(0, retained.size());
             Assert.assertFalse(file.exists());
             Assert.assertFalse(factories.containsKey(owner.spaceGraphName()));
-            Assert.assertFalse(managed.containsKey(owner.spaceGraphName()));
+            Assert.assertFalse(managed.containsKey(GraphKey.fromString(owner.spaceGraphName())));
             Assert.assertSame(keeper, manager.graph(keeper.spaceGraphName()));
         } finally {
             reject.set(false);
@@ -2080,8 +2082,8 @@ public class GraphManagerConfigTest {
                             throw error.getCause();
                         }
                     });
-            Map<String, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
-            graphs.put(graph.spaceGraphName(), graph);
+            Map<GraphKey, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
+            graphs.put(GraphKey.fromString(graph.spaceGraphName()), graph);
             DefaultGraphManager bindings = new DefaultGraphManager(new Settings());
             bindings.putGraph(graph.spaceGraphName(), graph);
             EventHub hub = Whitebox.getInternalState(manager, "eventHub");
@@ -2805,8 +2807,8 @@ public class GraphManagerConfigTest {
                     () -> manager.dropGraph("DEFAULT", name, false));
             Assert.assertSame(first, failedClose.getCause());
             Assert.assertTrue(graph.closed());
-            Map<String, HugeGraph> certificates = Whitebox.getInternalState(manager, "clearedGraphs");
-            Assert.assertFalse(certificates.containsKey(graph.spaceGraphName()));
+            Map<GraphKey, HugeGraph> certificates = Whitebox.getInternalState(manager, "clearedGraphs");
+            Assert.assertFalse(certificates.containsKey(GraphKey.fromString(graph.spaceGraphName())));
             Mockito.doCallRealMethod().when(provider).close();
 
             HugeException refused = Assert.assertThrows(HugeException.class, () ->
@@ -2865,8 +2867,8 @@ public class GraphManagerConfigTest {
                             throw failure.getCause();
                         }
                     });
-            Map<String, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
-            graphs.put(graph.spaceGraphName(), proxy);
+            Map<GraphKey, HugeGraph> graphs = Whitebox.getInternalState(manager, "graphs");
+            graphs.put(GraphKey.fromString(graph.spaceGraphName()), proxy);
             MetaManager meta = Mockito.mock(MetaManager.class);
             Whitebox.setInternalState(manager, "metaManager", meta);
             Whitebox.setInternalState(manager, "PDExist", true);
@@ -2892,19 +2894,19 @@ public class GraphManagerConfigTest {
             Assert.assertTrue(refusal.getCause() instanceof IllegalStateException);
             Assert.assertFalse(graph.closed());
             Assert.assertEquals(1, clears.get());
-            Map<String, HugeGraph> progress = Whitebox.getInternalState(manager, "clearedGraphs");
-            Assert.assertSame(proxy, progress.get(graph.spaceGraphName()));
+            Map<GraphKey, HugeGraph> progress = Whitebox.getInternalState(manager, "clearedGraphs");
+            Assert.assertSame(proxy, progress.get(GraphKey.fromString(graph.spaceGraphName())));
             Assert.assertSame(proxy, manager.graph(graph.spaceGraphName()));
             if (retryMode == 1) {
                 Assert.assertThrows(HugeException.class, () -> manager.dropGraph("DEFAULT", name, false));
-                Assert.assertSame(proxy, progress.get(graph.spaceGraphName()));
+                Assert.assertSame(proxy, progress.get(GraphKey.fromString(graph.spaceGraphName())));
                 Whitebox.invoke(GraphManager.class, "startRpcServer", manager);
                 RpcServer server = Whitebox.getInternalState(manager, "rpcServer");
                 RpcClientProvider client = Whitebox.getInternalState(manager, "rpcClient");
                 assertRpcResources(server, client, 0);
             } else if (retryMode == 2) {
                 manager.close();
-                Assert.assertSame(proxy, progress.get(graph.spaceGraphName()));
+                Assert.assertSame(proxy, progress.get(GraphKey.fromString(graph.spaceGraphName())));
             }
             release.countDown();
             transaction.get(5, TimeUnit.SECONDS);
@@ -2917,7 +2919,7 @@ public class GraphManagerConfigTest {
                 Assert.assertFalse(factory.containsKey(graph.spaceGraphName()));
             }
             Assert.assertTrue(graph.closed());
-            Assert.assertFalse(progress.containsKey(graph.spaceGraphName()));
+            Assert.assertFalse(progress.containsKey(GraphKey.fromString(graph.spaceGraphName())));
             Assert.assertEquals(1, clears.get());
             Mockito.verify(meta).removeGraphConfig("DEFAULT", name);
             Mockito.verify(meta).notifyGraphRemove("DEFAULT", name);
@@ -2927,11 +2929,11 @@ public class GraphManagerConfigTest {
                 BackendStoreProvider replacementProvider = Mockito.spy(replacement.storeProvider());
                 Whitebox.setInternalState(replacement, "storeProvider", replacementProvider);
                 // Even a stale certificate for the same name must not certify this new identity.
-                progress.put(replacement.spaceGraphName(), proxy);
+                progress.put(GraphKey.fromString(replacement.spaceGraphName()), proxy);
                 manager.dropGraph("DEFAULT", name, true);
                 Mockito.verify(replacementProvider).clear();
                 Assert.assertTrue(replacement.closed());
-                Assert.assertFalse(progress.containsKey(replacement.spaceGraphName()));
+                Assert.assertFalse(progress.containsKey(GraphKey.fromString(replacement.spaceGraphName())));
                 Mockito.verify(meta, Mockito.times(2)).removeGraphConfig("DEFAULT", name);
                 Mockito.verify(meta, Mockito.times(2)).notifyGraphRemove("DEFAULT", name);
             }
@@ -3206,7 +3208,7 @@ public class GraphManagerConfigTest {
                 // Retry the fenced deletion; successful clear must not re-export the removed owner.
                 if (notify) {
                     java.util.Set<?> removing = Whitebox.getInternalState(manager, "removingGraphs");
-                    Assert.assertTrue(removing.contains(graph.spaceGraphName()));
+                    Assert.assertTrue(removing.contains(GraphKey.fromString(graph.spaceGraphName())));
                 }
                 manager.dropGraph("DEFAULT", name, true);
             }

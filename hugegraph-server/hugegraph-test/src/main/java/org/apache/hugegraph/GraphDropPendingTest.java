@@ -33,6 +33,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
+import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.event.EventHub;
@@ -120,7 +121,7 @@ public class GraphDropPendingTest {
             }).when(scheduler).close();
             HugeGraph proxy = Mockito.mock(HugeGraph.class, org.mockito.AdditionalAnswers.delegatesTo(fixture.graph));
             Mockito.doReturn(scheduler).when(proxy).taskScheduler();
-            fixture.graphs.put(fixture.graph.spaceGraphName(), proxy);
+            fixture.graphs.put(GraphKey.fromString(fixture.graph.spaceGraphName()), proxy);
             ExecutorService caller = Executors.newSingleThreadExecutor();
             try {
                 Future<?> deletion = caller.submit(fixture::drop);
@@ -134,7 +135,7 @@ public class GraphDropPendingTest {
                 job.release.countDown();
                 caller.shutdown();
                 Assert.assertTrue(caller.awaitTermination(10L, TimeUnit.SECONDS));
-                fixture.graphs.replace(fixture.graph.spaceGraphName(), proxy, fixture.graph);
+                fixture.graphs.replace(GraphKey.fromString(fixture.graph.spaceGraphName()), proxy, fixture.graph);
             }
         }
     }
@@ -147,7 +148,7 @@ public class GraphDropPendingTest {
             TaskScheduler failed = Mockito.spy(fixture.scheduler);
             Mockito.doThrow(new IllegalStateException("scheduler close failed")).when(failed).close();
             Mockito.doReturn(failed).when((HugeGraph) proxy).taskScheduler();
-            fixture.graphs.put(fixture.graph.spaceGraphName(), proxy);
+            fixture.graphs.put(GraphKey.fromString(fixture.graph.spaceGraphName()), proxy);
             try {
                 RuntimeException error = Assert.assertThrows(RuntimeException.class, fixture::drop);
                 Assert.assertContains("scheduler close failed", error.getMessage());
@@ -155,7 +156,7 @@ public class GraphDropPendingTest {
                 Assert.assertFalse(fixture.graph.closed());
                 Assert.assertTrue(Files.exists(fixture.file));
             } finally {
-                fixture.graphs.put(fixture.graph.spaceGraphName(), fixture.graph);
+                fixture.graphs.put(GraphKey.fromString(fixture.graph.spaceGraphName()), fixture.graph);
             }
         }
     }
@@ -189,7 +190,7 @@ public class GraphDropPendingTest {
         private final Path directory;
         private final Path file;
         private final GraphManager manager;
-        private final Map<String, Graph> graphs;
+        private final Map<GraphKey, Graph> graphs;
         private final HugeGraph graph;
         private final HugeGraph neighbor;
         private final HugeGraphParams params;
@@ -259,7 +260,7 @@ public class GraphDropPendingTest {
             result.addVertex(T.id, "kept", T.label, "person");
             result.tx().commit();
             ((HugeGraphParams) Whitebox.getInternalState(result, "params")).closeTx();
-            this.graphs.put(result.spaceGraphName(), result);
+            this.graphs.put(GraphKey.fromString(result.spaceGraphName()), result);
             return result;
         }
 

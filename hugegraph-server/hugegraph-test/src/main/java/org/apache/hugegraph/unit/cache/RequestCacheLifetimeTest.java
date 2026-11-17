@@ -28,6 +28,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.api.graph.VertexAPI;
 import org.apache.hugegraph.api.graph.EdgeAPI;
+import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
@@ -175,7 +176,8 @@ public class RequestCacheLifetimeTest {
         Field field = Unsafe.class.getDeclaredField("theUnsafe");
         field.setAccessible(true);
         GraphManager manager = (GraphManager) ((Unsafe) field.get(null)).allocateInstance(GraphManager.class);
-        Whitebox.setInternalState(manager, "graphs", Collections.singletonMap(graph.spaceGraphName(), graph));
+        Whitebox.setInternalState(manager, "graphs",
+                                 Collections.singletonMap(GraphKey.fromString(graph.spaceGraphName()), graph));
         Class<?> bodyType = Class.forName(api.getName() + "$" + bodyClass);
         Object body = JsonUtil.fromJson("{\"properties\":{\"added\":\"" + value + "\"}}", bodyType);
         Method update = api.getMethod("update", GraphManager.class, String.class, String.class,
