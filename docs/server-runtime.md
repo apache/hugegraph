@@ -881,9 +881,9 @@ What it does not provide:
   Pin these requests to that Server: one client behind a load balancer can still reach
   different Servers before a previous change has propagated. Before moving schema
   writes to another Server, verify that it reads the previously committed schema.
-- A Server that stops for good between a schema write and its event. The other Servers
-  keep what they cached until the next schema change of that graph or their next watch
-  restart.
+- A Server that stops for good between a schema write and its event, including while
+  the event waits in the 1-second window. The other Servers keep what they cached until
+  the next schema change of that graph or their next watch restart.
 - A Server that cannot reach PD keeps serving its cached schema until it reconnects.
 - A PD watch that dies without an error is noticed only when another PD call from that
   Server fails.
