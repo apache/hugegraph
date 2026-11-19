@@ -37,6 +37,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.space.GraphSpaceAPI;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventHub.NotifyResult;
@@ -129,11 +130,11 @@ public class GraphManagerClearGraphSpaceTest {
             for (String space : new String[]{"gs", "gs2", "gs_x"}) {
                 spaces.put(space, new GraphSpace(space));
             }
-            Map<String, Graph> graphs =
+            Map<GraphKey, Graph> graphs =
                     Whitebox.getInternalState(manager, "graphs");
-            graphs.put("gs-g", cleared);
-            graphs.put("gs2-g", kept);
-            graphs.put("gs_x-g", keptUnderscore);
+            graphs.put(GraphKey.fromString("gs-g"), cleared);
+            graphs.put(GraphKey.fromString("gs2-g"), kept);
+            graphs.put(GraphKey.fromString("gs_x-g"), keptUnderscore);
             Map<String, Service> services =
                     Whitebox.getInternalState(manager, "services");
             services.put("gs-s", Mockito.mock(Service.class));
@@ -145,9 +146,9 @@ public class GraphManagerClearGraphSpaceTest {
             Mockito.verify(cleared).clearBackend();
             Mockito.verify(kept, Mockito.never()).clearBackend();
             Mockito.verify(keptUnderscore, Mockito.never()).clearBackend();
-            Assert.assertFalse(graphs.containsKey("gs-g"));
-            Assert.assertTrue(graphs.containsKey("gs2-g"));
-            Assert.assertTrue(graphs.containsKey("gs_x-g"));
+            Assert.assertFalse(graphs.containsKey(GraphKey.fromString("gs-g")));
+            Assert.assertTrue(graphs.containsKey(GraphKey.fromString("gs2-g")));
+            Assert.assertTrue(graphs.containsKey(GraphKey.fromString("gs_x-g")));
 
             Mockito.verify(meta).service("gs", "s");
             Mockito.verify(meta, Mockito.never()).service("gs2", "s");

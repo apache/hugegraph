@@ -43,6 +43,7 @@ import org.apache.hugegraph.auth.HugeResource;
 import org.apache.hugegraph.auth.ResourceType;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.RolePermission;
+import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
@@ -252,9 +253,9 @@ public class GraphSpaceAPITest extends BaseUnitTest {
                .thenReturn(Collections.emptyMap());
         Whitebox.setInternalState(manager, "metaManager", metaManager);
 
-        Map<String, Graph> graphs = new ConcurrentHashMap<>();
-        graphs.put("DEFAULT-hugegraph", Mockito.mock(Graph.class));
-        graphs.put("DEFAULT-" + SYS_GRAPH, Mockito.mock(Graph.class));
+        Map<GraphKey, Graph> graphs = new ConcurrentHashMap<>();
+        graphs.put(GraphKey.fromString("DEFAULT-hugegraph"), Mockito.mock(Graph.class));
+        graphs.put(GraphKey.fromString("DEFAULT-" + SYS_GRAPH), Mockito.mock(Graph.class));
         Whitebox.setInternalState(manager, "graphs", graphs);
 
         Set<String> result = manager.graphs("DEFAULT");
@@ -499,8 +500,8 @@ public class GraphSpaceAPITest extends BaseUnitTest {
                        GRAPHSPACE + "-" + GRAPH, Collections.emptyMap()));
         Whitebox.setInternalState(manager, "metaManager", metaManager);
 
-        Map<String, Graph> graphs = new ConcurrentHashMap<>();
-        graphs.put(GRAPHSPACE + "-" + GRAPH, Mockito.mock(HugeGraph.class));
+        Map<GraphKey, Graph> graphs = new ConcurrentHashMap<>();
+        graphs.put(GraphKey.fromString(GRAPHSPACE + "-" + GRAPH), Mockito.mock(HugeGraph.class));
         Whitebox.setInternalState(manager, "graphs", graphs);
 
         Mockito.when(authManager.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
@@ -530,8 +531,8 @@ public class GraphSpaceAPITest extends BaseUnitTest {
         spaces.put("DEFAULT", new GraphSpace("DEFAULT"));
         Whitebox.setInternalState(manager, "graphSpaces", spaces);
 
-        Map<String, Graph> graphs = new ConcurrentHashMap<>();
-        graphs.put("DEFAULT-hugegraph", Mockito.mock(HugeGraph.class));
+        Map<GraphKey, Graph> graphs = new ConcurrentHashMap<>();
+        graphs.put(GraphKey.fromString("DEFAULT-hugegraph"), Mockito.mock(HugeGraph.class));
         Whitebox.setInternalState(manager, "graphs", graphs);
         return manager;
     }

@@ -93,6 +93,7 @@ import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
 import org.apache.hugegraph.unit.core.GraphManagerClearGraphSpaceTest;
 import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
+import org.apache.hugegraph.unit.core.GraphManagerGraphKeyTest;
 import org.apache.hugegraph.unit.core.GraphManagerLocalGraphBindTest;
 import org.apache.hugegraph.unit.core.GraphManagerServiceNamesTest;
 import org.apache.hugegraph.unit.core.GroovyScriptEngineCompatibilityTest;
@@ -254,6 +255,7 @@ import org.junit.runners.Suite;
         GraphManagerAdminInitTest.class,
         GraphManagerClearGraphSpaceTest.class,
         GraphManagerConfigTest.class,
+        GraphManagerGraphKeyTest.class,
         GraphManagerLocalGraphBindTest.class,
         GraphManagerServiceNamesTest.class,
         HstoreSessionsTest.class,
