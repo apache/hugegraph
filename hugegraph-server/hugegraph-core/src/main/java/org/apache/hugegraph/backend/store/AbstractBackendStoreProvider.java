@@ -86,6 +86,17 @@ public abstract class AbstractBackendStoreProvider
         return this.graph;
     }
 
+    /**
+     * The stores opened so far (schema, graph, system), for a probe that has
+     * to cover every table of the graph, whichever store owns it.
+     */
+    public java.util.Collection<BackendStore> openedStores() {
+        if (this.stores == null) {
+            return java.util.Collections.emptyList();
+        }
+        return new java.util.ArrayList<>(this.stores.values());
+    }
+
     @Override
     public void open(String graph) {
         LOG.debug("Graph '{}' open StoreProvider", this.graph);

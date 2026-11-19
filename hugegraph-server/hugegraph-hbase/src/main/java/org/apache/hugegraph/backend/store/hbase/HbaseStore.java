@@ -20,10 +20,17 @@ package org.apache.hugegraph.backend.store.hbase;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -38,6 +45,8 @@ import org.apache.hugegraph.backend.store.BackendAction;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendMutation;
+import org.apache.hugegraph.backend.store.AbstractBackendStoreProvider;
+import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.BackendTable;
 import org.apache.hugegraph.config.HugeConfig;
@@ -87,6 +96,117 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
             HbaseMetrics metrics = new HbaseMetrics(this.sessions);
             return metrics.compact(this.tableNames());
         });
+
+        this.registerMetaHandler(META_STORAGE_READINESS, (session, meta, args) -> {
+            E.checkArgument(args.length == 1 && args[0] instanceof Number,
+                            "Expect the timeout in ms as the only argument");
+            return this.storageReadiness(((Number) args[0]).longValue());
+        });
+    }
+
+    public static final String META_STORAGE_READINESS = "storage_readiness";
+
+    private static final ExecutorService READINESS_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "hbase-readiness");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /**
+     * Whether the HBase cluster can serve this graph: admin round trips
+     * (is every table of every store of the graph enabled and available)
+     * within the budget. The probe is dispatched to the graph store, so it
+     * collects the tables of the schema store (labels, property keys,
+     * counters) and of the system store from the provider as well; every
+     * store shares the graph's namespace, so this store's sessions can check
+     * them all. The body carries no addresses and no raw exception text,
+     * since the readiness endpoint is unauthenticated.
+     */
+    private Map<String, Object> storageReadiness(long timeoutMs) {
+        List<String> tables = graphTables(this);
+        return readinessOf(() -> firstUnavailable(tables, this.sessions::tableAvailable),
+                           timeoutMs, READINESS_EXECUTOR);
+    }
+
+    /**
+     * The tables of every opened store of the graph, schema store first (so
+     * a disabled schema table is reported with the lowest number), without
+     * duplicates; the store's own tables when the provider has none opened.
+     */
+    static List<String> graphTables(HbaseStore self) {
+        List<BackendStore> stores = new ArrayList<>();
+        if (self.provider instanceof AbstractBackendStoreProvider) {
+            stores.addAll(((AbstractBackendStoreProvider) self.provider).openedStores());
+        }
+        List<HbaseStore> ordered = new ArrayList<>();
+        for (BackendStore store : stores) {
+            if (store instanceof HbaseSchemaStore) {
+                ordered.add(0, (HbaseStore) store);
+            } else if (store instanceof HbaseStore) {
+                ordered.add((HbaseStore) store);
+            }
+        }
+        if (ordered.isEmpty()) {
+            ordered.add(self);
+        }
+        java.util.LinkedHashSet<String> tables = new java.util.LinkedHashSet<>();
+        for (HbaseStore store : ordered) {
+            tables.addAll(store.tableNames());
+        }
+        return new ArrayList<>(tables);
+    }
+
+    /**
+     * Every table of the graph (labels, property keys and counters of the
+     * schema store; vertices, edges and indexes of the graph store; the
+     * system store's meta) must be enabled and available: the number of the
+     * first one that is not, or 0. Checked one after another inside the
+     * probe's time budget.
+     */
+    public static int firstUnavailable(List<String> tables, TableCheck check) throws Exception {
+        if (tables.isEmpty()) {
+            return 1;
+        }
+        for (int i = 0; i < tables.size(); i++) {
+            if (!check.available(tables.get(i))) {
+                return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    @FunctionalInterface
+    public interface TableCheck {
+        boolean available(String table) throws Exception;
+    }
+
+    /** The probe outcome of one bounded availability check; public for the unit test. */
+    public static Map<String, Object> readinessOf(Callable<Integer> unavailable, long timeoutMs,
+                                                  ExecutorService executor) {
+        E.checkArgument(timeoutMs > 0, "The probe timeout must be > 0, but got %s", timeoutMs);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ready", false);
+        long start = System.currentTimeMillis();
+        Future<Integer> check = executor.submit(unavailable);
+        try {
+            int missing = check.get(timeoutMs, TimeUnit.MILLISECONDS);
+            boolean ok = missing == 0;
+            body.put("ready", ok);
+            body.put("reason", ok ? "ok" : "table " + missing + " of the graph is not available");
+        } catch (TimeoutException e) {
+            check.cancel(true);
+            body.put("reason", "hbase did not answer within " + timeoutMs + " ms");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            LOG.warn("Storage readiness: the hbase admin call failed", cause);
+            body.put("reason", "hbase failed: " + cause.getClass().getSimpleName());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            check.cancel(true);
+            body.put("reason", "interrupted");
+        }
+        body.put("hbase_millis", System.currentTimeMillis() - start);
+        return body;
     }
 
     protected void registerTableManager(HugeType type, HbaseTable table) {
