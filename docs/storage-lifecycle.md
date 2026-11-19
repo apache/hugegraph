@@ -503,7 +503,30 @@ Use a stopped Server distribution on Linux x86_64 with a Java 17 JDK. If your
 distribution lacks these scripts, [build it from this source](#build-and-prepare) first.
 Prepare the runtime once, select it, then initialize and start the Server. The graph
 APIs and normal start/stop commands stay the same; Topling's native options are
-configured in `conf/toplingdb.yaml`. Use new, empty, service-writable data and WAL
+configured in `conf/toplingdb.yaml`. The shipped native profile uses community-compatible SkipList
+memtables and BlockBasedTable files; it does not require CSPP, DispatcherTable
+or private compression plugins. Its 64 MiB cache and 16 MiB write buffers are
+individual native budgets, not a process memory limit. Budget for every database
+and column family and tune the profile for the deployment.
+
+With the tested community JNI, EasyMigrate applies these YAML values when the
+database opens, overriding the corresponding Java RocksDBOptions values.
+The observed settings are a 64 MiB block cache, 16 MiB write buffers and three
+write buffers; Java initializes the latter two to 128 MiB and six beforehand.
+Other JNI builds must be checked against their persisted OPTIONS files and
+`rocksdb.block-cache-capacity`; Java option getters before open do not establish
+the effective native settings.
+
+Custom profiles can require additional plugins in the chosen JNI. Preparation
+imports the selected profile to verify its plugins before installing the
+runtime. Existing data written with other table formats still requires those
+formats' readers; changing this default does not convert existing SST files.
+For existing CSPP installations, preserve the matching JNI and native options;
+`conf/toplingdb-legacy-cspp.yaml` retains the prior configuration and readers in
+Server, PD and Store distributions. Read the [Topling upgrade notes](upgrade-notes.md#topling-native-profiles)
+before applying the new profile or its smaller memory and compaction defaults.
+
+Use new, empty, service-writable data and WAL
 directories outside the distribution for this example.
 
 **1. Prepare the runtime.** Supply your ToplingDB JNI JAR and its trusted SHA-256:
@@ -569,8 +592,18 @@ entry, the ELF architecture and native dependencies. Before installation, it ope
 closes a disposable database with the selected JNI and checks that a probe configuration
 changes the persisted write-buffer size. A marker or matching hash alone is
 insufficient: builds without the EasyMigrate configuration entry point are rejected. The
-probe validates the configuration entry point, not existing-data compatibility or every
-setting in your production profile. Its checksum receipt binds the probe to the
+probe validates the configuration entry point. A second native import validates
+`TOPLINGDB_EASY_MIGRATE_CONF` when set, otherwise the component's
+`conf/toplingdb.yaml`; unavailable plugins fail preparation before publication.
+It does not open databases using production WAL/log paths.
+Relative profile overrides are converted to absolute paths against the caller's
+working directory by both preparation and runtime selection, before the launcher
+changes directories. Resolution ignores `CDPATH` and follows physical directory
+semantics for symlinks combined with `..`, matching the file checked for readability.
+Use the same file for preparation and service startup.
+This is not an existing-data compatibility test or validation of every production
+column family. Keep an explicit profile override in the service environment too.
+The checksum receipt binds the capability probe to the
 installed JAR and native library. Launchers reject missing or stale receipts; prepare a
 fresh distribution when upgrading from an older preparation script. It installs
 `topling/rocksdbjni.jar`, its matching native library and optional web resources outside

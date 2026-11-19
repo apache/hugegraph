@@ -33,7 +33,7 @@ topling_remove_path() {
 topling_select_runtime() {
     local top provider native jar conf inherited entry
     local -a preloads
-    top="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || return 1
+    top="$(CDPATH= cd -P -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || return 1
     provider="${TOPLINGDB_ROCKSDB_PROVIDER:-rocksdb}"
     case "$provider" in rocksdb | topling) ;; *)
         echo "Error: invalid TOPLINGDB_ROCKSDB_PROVIDER '$provider'" >&2; return 1 ;;
@@ -83,9 +83,12 @@ topling_select_runtime() {
     conf="${TOPLINGDB_EASY_MIGRATE_CONF:-}"
     if [ -z "$conf" ]; then
         conf="$top/conf/toplingdb.yaml"
-        export TOPLING_AUTO_MIGRATE_CONF="$conf"
     fi
     [ -r "$conf" ] || { echo "Error: unreadable Easy Migrate configuration: $conf" >&2; return 1; }
+    conf="$(CDPATH= cd -P -- "$(dirname "$conf")" && pwd)/$(basename "$conf")" || return 1
+    if [ -z "${TOPLINGDB_EASY_MIGRATE_CONF:-}" ]; then
+        export TOPLING_AUTO_MIGRATE_CONF="$conf"
+    fi
     export TOPLINGDB_EASY_MIGRATE_CONF="$conf"
     export LD_LIBRARY_PATH="$top/topling${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     # The selected JNI must precede inherited preloads during native symbol lookup.

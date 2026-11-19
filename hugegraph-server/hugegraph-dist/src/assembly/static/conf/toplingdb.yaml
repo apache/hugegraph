@@ -14,144 +14,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# common parameters
+
+# Community image defaults. Memory grows with databases and column families;
+# these are individual native budgets, not a process memory limit.
 http:
-  # normally parent path of db path
-  document_root: ./topling/rocksdb_resource
-  listening_ports: '127.0.0.1:2011'
   auto_start_http: false
 Cache:
   lru_cache:
     class: LRUCache
     params:
-      capacity: 8G
-      num_shard_bits: -1
-      strict_capacity_limit: false
-      high_pri_pool_ratio: 0.5
-      use_adaptive_mutex: false
-      metadata_charge_policy: kFullChargeCacheMetadata
-Statistics:
-  stat:
-    class: default
-    params:
-      discard_tickers:
-        - rocksdb.block.cache
-        - rocksdb.block.cachecompressed
-        - rocksdb.block
-        - rocksdb.memtable.payload.bytes.at.flush
-        - rocksdb.memtable.garbage.bytes.at.flush
-        - rocksdb.txn
-        - rocksdb.blobdb
-        - rocksdb.row.cache
-        - rocksdb.number.block
-        - rocksdb.bloom.filter
-        - rocksdb.persistent
-        - rocksdb.sim.block.cache
-      discard_histograms:
-        # comment: ....
-        - rocksdb.blobdb
-        - rocksdb.bytes.compressed
-        - rocksdb.bytes.decompressed
-        - rocksdb.num.index.and.filter.blocks.read.per.level
-        - rocksdb.num.data.blocks.read.per.level
-        - rocksdb.compression.times.nanos
-        - rocksdb.decompression.times.nanos
-        - rocksdb.read.block.get.micros
-        - rocksdb.write.raw.block.micros
-      # comment end of array
-      #stats_level: kAll
-      stats_level: kDisableAll
+      capacity: 64M
 MemTableRepFactory:
-  cspp:
-    class: cspp
-    params:
-      mem_cap: 16G
-      use_vm: false
-      token_use_idle: true
-      chunk_size: 16K
-      convert_to_sst: kFileMmap
-      sync_sst_file: false
   skiplist:
     class: SkipList
     params:
       lookahead: 0
 TableFactory:
-  cspp_memtab_sst:
-    class: CSPPMemTabTable
-    params: # empty params
-  bb:
+  block_based:
     class: BlockBasedTable
     params:
-      checksum: kCRC32c
-      block_size: 4K
-      block_restart_interval: 16
-      index_block_restart_interval: 1
-      metadata_block_size: 4K
-      enable_index_compression: true
       block_cache: "${lru_cache}"
-      readers:
-        BlockBasedTable: bb
-        CSPPMemTabTable: cspp_memtab_sst
-      block_cache_compressed:
-      persistent_cache:
-      filter_policy:
-  dispatch:
-    class: DispatcherTable
-    params:
-      default: bb
-      readers:
-        BlockBasedTable: bb
-        CSPPMemTabTable: cspp_memtab_sst
-      level_writers: [ bb, bb, bb, bb, bb, bb ]
 CFOptions:
   default:
-    max_write_buffer_number: 6
-    memtable_factory: "${cspp}"
-    write_buffer_size: 128M
-    # set target_file_size_base as small as 512K is to make many SST files,
-    # thus key prefix cache can present efficiency
-    target_file_size_base: 64M
-    target_file_size_multiplier: 1
-    table_factory: dispatch
-    max_bytes_for_level_base: 512M
-    max_bytes_for_level_multiplier: 10
-    level_compaction_dynamic_level_bytes: false
-    level0_slowdown_writes_trigger: 20
-    level0_stop_writes_trigger: 36
-    level0_file_num_compaction_trigger: 2
-    merge_operator: uint64add # support merge
-    level_compaction_dynamic_file_size: true
-    optimize_filters_for_hits: true
-    allow_merge_memtables: true
-    min_write_buffer_number_to_merge: 2
-    compression_per_level:
-      - kNoCompression
-      - kNoCompression
-      - kSnappyCompression
-      - kSnappyCompression
-      - kSnappyCompression
-      - kSnappyCompression
-      - kSnappyCompression
+    memtable_factory: "${skiplist}"
+    table_factory: block_based
+    write_buffer_size: 16M
+    max_write_buffer_number: 3
+    merge_operator: uint64add
 DBOptions:
   log:
     create_if_missing: true
     create_missing_column_families: true
   default:
     create_if_missing: true
-    create_missing_column_families: false # this is important, must be false to hugegraph
-    max_background_compactions: -1
-    max_subcompactions: 4
-    max_level1_subcompactions: 0
-    inplace_update_support: false
-    WAL_size_limit_MB: 0
-    statistics: "${stat}"
-    max_manifest_file_size: 100M
-    max_background_jobs: 8
-    # Java org.rocksdb.WriteBatch has no Topling mmap WAL. With
-    # memtable_as_log_index enabled, every batch write fails:
-    # "WriteBatch has no mmap wal". Keep the option false for this client.
-    # convert_to_sst is still Topling-specific. Do not open data written by
-    # this profile with the standard RocksDB provider; restore a snapshot
-    # taken before migration instead.
-    compaction_readahead_size: 0
+    create_missing_column_families: false
+    max_background_jobs: 2
+    # Java WriteBatch does not carry Topling's mmap WAL references.
     memtable_as_log_index: false

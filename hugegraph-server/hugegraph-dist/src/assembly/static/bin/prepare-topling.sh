@@ -17,7 +17,7 @@
 #
 # Run only after stopping this component. Runtime preparation never changes data.
 set -Eeuo pipefail
-TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOP="$(CDPATH= cd -P -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ] || {
     echo 'Error: Topling requires Linux x86_64' >&2; exit 1;
 }
@@ -30,6 +30,9 @@ TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ ! -e "$TOP/topling" ] && [ ! -L "$TOP/topling" ] || {
     echo 'Error: runtime already prepared; use a fresh stopped distribution to replace it' >&2; exit 1;
 }
+profile="${TOPLINGDB_EASY_MIGRATE_CONF:-$TOP/conf/toplingdb.yaml}"
+[ -r "$profile" ] || { echo 'Error: Topling configuration must be readable' >&2; exit 1; }
+profile="$(CDPATH= cd -P -- "$(dirname "$profile")" && pwd)/$(basename "$profile")"
 staging=$(mktemp -d "$TOP/.topling-prepare.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 cp "$TOPLING_JNI_JAR" "$staging/rocksdbjni.jar"
@@ -76,6 +79,7 @@ import java.nio.file.Path;
 import java.util.regex.Pattern;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
+import org.rocksdb.SidePluginRepo;
 
 class ToplingRuntimeProbe {
     public static void main(String[] args) throws Exception {
@@ -83,6 +87,12 @@ class ToplingRuntimeProbe {
             throw new IllegalStateException("Prepare Topling with Java 17");
         }
         RocksDB.loadLibrary();
+        if (args.length == 2 && "--profile".equals(args[0])) {
+            try (SidePluginRepo repo = new SidePluginRepo()) {
+                repo.importAutoFile(args[1]);
+            }
+            return;
+        }
         Path database = Path.of(args[0]);
         try (Options options = new Options().setCreateIfMissing(true);
              RocksDB db = RocksDB.open(options, database.toString())) {
@@ -110,6 +120,17 @@ if ! LD_LIBRARY_PATH="$staging${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
      java --add-opens=java.base/java.nio=ALL-UNNAMED --source 17 \
      --class-path "$staging/rocksdbjni.jar" "$staging/ToplingRuntimeProbe.java" "$staging/probe-db"; then
     echo 'Error: Java 17 JDK / Topling EasyMigrate capability probe failed' >&2
+    exit 1
+fi
+# Import the selected profile without opening its databases. In particular, do
+# not let production WAL/log paths redirect the disposable write probe above.
+# EasyMigrate support alone does not prove that every named plugin is present.
+if ! LD_LIBRARY_PATH="$staging${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+     LD_PRELOAD="$staging/librocksdbjni-linux64.so" \
+     TOPLINGDB_EASY_MIGRATE_CONF="$staging/probe.yaml" \
+     java --add-opens=java.base/java.nio=ALL-UNNAMED --source 17 \
+     --class-path "$staging/rocksdbjni.jar" "$staging/ToplingRuntimeProbe.java" --profile "$profile"; then
+    echo 'Error: Topling configuration validation failed; runtime was not installed' >&2
     exit 1
 fi
 native_hash=$(sha256sum "$staging/librocksdbjni-linux64.so" | awk '{print $1}')

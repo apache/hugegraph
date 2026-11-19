@@ -188,6 +188,7 @@ jobs:
       - name: Check explicit Topling launcher selection
         run: |
           bash $TRAVIS_DIR/test-topling-selection.sh
+          bash $TRAVIS_DIR/test-topling-prepare.sh
           bash hugegraph-store/hg-store-dist/src/assembly/travis/test-store-preloads.sh
 
       - name: Run PD docker entrypoint secret override tests

@@ -59,6 +59,7 @@ RUN apt-get -q update \
        procps \
        curl \
        iproute2 \
+       unzip \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -72,7 +73,8 @@ ARG HG_GID=10001
 RUN groupadd --system --gid "${HG_GID}" hugegraph \
     && useradd --system --uid "${HG_UID}" --gid hugegraph --no-create-home \
        --home-dir /hugegraph-server --shell /usr/sbin/nologin hugegraph \
-    && install -d -o "${HG_UID}" -g "${HG_GID}" /hugegraph-server /hugegraph-server/logs
+    && install -d -o "${HG_UID}" -g "${HG_GID}" \
+       /hugegraph-server /hugegraph-server/rocksdb-data /hugegraph-server/logs
 
 COPY --from=build --chown=${HG_UID}:${HG_GID} /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
 USER ${HG_UID}:${HG_GID}
