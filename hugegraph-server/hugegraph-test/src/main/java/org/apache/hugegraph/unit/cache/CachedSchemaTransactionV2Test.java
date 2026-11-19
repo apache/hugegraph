@@ -183,14 +183,14 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     }
 
     @Test
-    public void testBurstSharesOneFixedWindowWithoutAnImmediateEvent() {
+    public void testBurstSharesOneScheduledWindowWithoutAnImmediateEvent() {
         this.publisher.reset();
         this.withWindowScheduler(tasks -> {
             for (int version = 1; version <= 15; version++) {
                 this.tx.updatePropertyKey(this.propertyKey(1, "name", version));
             }
 
-            // Later edits neither send immediately nor replace the first deadline.
+            // Later edits neither send immediately nor replace the scheduled flush.
             Assert.assertEquals(0, this.publisher.attempts.get());
             Assert.assertEquals(1, tasks.size());
             Assert.assertEquals(1, scheduledClears().size());
@@ -207,7 +207,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             Assert.assertTrue(scheduledClears().isEmpty());
             Assert.assertTrue(pendingMap().isEmpty());
 
-            // A later isolated edit gets a new bounded window.
+            // A later isolated edit gets a new scheduled clear.
             this.tx.updatePropertyKey(this.propertyKey(1, "name", 16));
             Assert.assertEquals(2, tasks.size());
             Assert.assertEquals(1, this.publisher.count(this.graphName));
@@ -333,6 +333,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     @Test
     public void testUpdatePublishes() {
         this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         this.publisher.reset();
 
         this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
@@ -346,6 +347,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     public void testStatusChangePublishes() {
         PropertyKey pk = this.propertyKey(1, "name", 1);
         this.tx.addPropertyKey(pk);
+        flushScheduledClearEvents();
         this.publisher.reset();
 
         this.tx.updateSchemaStatus(pk, SchemaStatus.INVALID);
@@ -364,6 +366,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
                     CoreOptions.TASK_SYNC_DELETION.name(), String.valueOf(syncDeletion));
             PropertyKey pk = this.propertyKey(1, "name", 1);
             this.tx.addPropertyKey(pk);
+            flushScheduledClearEvents();
             this.publisher.reset();
 
             this.tx.removeSchema(pk);
@@ -385,6 +388,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
 
         for (String event : new String[]{Events.STORE_CLEAR, Events.STORE_TRUNCATE}) {
             this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+            flushScheduledClearEvents();
             this.publisher.reset();
             long reads = this.store.reads();
 
@@ -398,13 +402,18 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         }
 
         this.publisher.reset();
-        storeListener.event(new Event(this.provider, Events.STORE_INIT));
-        Assert.assertEquals(0, this.publisher.count(this.graphName));
+        this.withWindowScheduler(tasks -> {
+            storeListener.event(new Event(this.provider, Events.STORE_INIT));
+            Assert.assertTrue(tasks.isEmpty());
+            Assert.assertTrue(scheduledClears().isEmpty());
+            Assert.assertEquals(0, this.publisher.count(this.graphName));
+        });
     }
 
     @Test
     public void testSchemaClearPublishes() {
         this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         this.publisher.reset();
 
         this.tx.clear();
@@ -424,17 +433,29 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
             seen.add(stored == null ? -1 : this.version(stored));
         };
         PropertyKey pk = this.propertyKey(1, "name", 1);
-        this.tx.addPropertyKey(pk);
-        flushScheduledClearEvents();
-        this.tx.updatePropertyKey(this.propertyKey(1, "name", 2));
-        flushScheduledClearEvents();
-        this.tx.removeSchema(pk);
-        flushScheduledClearEvents();
-        this.tx.addPropertyKey(this.propertyKey(1, "name", 3));
-        flushScheduledClearEvents();
-        this.tx.clear();
-        flushScheduledClearEvents();
-        this.publisher.intercept = null;
+        try {
+            this.withWindowScheduler(tasks -> {
+                this.assertClearQueuedAfterStoreWrite(
+                        tasks, this.store.stopNext("put", "/NAME/name"),
+                        () -> this.tx.addPropertyKey(pk));
+                this.assertClearQueuedAfterStoreWrite(
+                        tasks, this.store.stopNext("put", "/NAME/name"),
+                        () -> this.tx.updatePropertyKey(
+                                this.propertyKey(1, "name", 2)));
+                this.assertClearQueuedAfterStoreWrite(
+                        tasks, this.store.stopNext("delete", "/ID/1"),
+                        () -> this.tx.removeSchema(pk));
+                this.assertClearQueuedAfterStoreWrite(
+                        tasks, this.store.stopNext("put", "/NAME/name"),
+                        () -> this.tx.addPropertyKey(
+                                this.propertyKey(1, "name", 3)));
+                this.assertClearQueuedAfterStoreWrite(
+                        tasks, this.store.stopNext("delete", "/SCHEMA"),
+                        this.tx::clear);
+            });
+        } finally {
+            this.publisher.intercept = null;
+        }
 
         // added, updated, removed, added again, cleared
         Assert.assertEquals(Arrays.asList(1, 2, -1, 3, -1), seen);
@@ -447,6 +468,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         Id id = IdGenerator.of(1);
         this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
         this.tx.getPropertyKeys();
+        flushScheduledClearEvents();
         this.publisher.reset();
 
         // The id key is replaced, then the store fails before the name key
@@ -476,6 +498,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     @Test
     public void testFailedWriteKeepsItsEventWhenThePublishFailsToo() throws Exception {
         this.tx.addPropertyKey(this.propertyKey(1, "name", 1));
+        flushScheduledClearEvents();
         this.publisher.reset();
         this.publisher.fail = true;
         this.store.hook = (operation, key) -> {
@@ -500,6 +523,7 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
         PropertyKey pk = this.propertyKey(1, "name", 1);
         this.tx.addPropertyKey(pk);
         Assert.assertNotNull(this.tx.getPropertyKey("name"));
+        flushScheduledClearEvents();
         this.publisher.reset();
 
         // The name key is deleted, then the store fails before the id key
@@ -1297,6 +1321,32 @@ public class CachedSchemaTransactionV2Test extends BaseUnitTest {
     }
 
     // ------------------------------------------------------------ helpers
+
+    private void assertClearQueuedAfterStoreWrite(List<Runnable> tasks,
+                                                  Gate gate,
+                                                  Runnable write) {
+        int tasksBefore = tasks.size();
+        Future<?> future = this.executor.submit(write);
+        gate.awaitReached();
+        try {
+            Assert.assertEquals(tasksBefore, tasks.size());
+            Assert.assertTrue(scheduledClears().isEmpty());
+        } finally {
+            gate.open();
+        }
+        try {
+            future.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for schema write", e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new AssertionError("Schema write did not finish", e);
+        }
+        Assert.assertEquals(tasksBefore + 1, tasks.size());
+        Assert.assertEquals(1, scheduledClears().size());
+        tasks.get(tasksBefore).run();
+        Assert.assertTrue(scheduledClears().isEmpty());
+    }
 
     private PropertyKey propertyKey(int id, String name, int version) {
         PropertyKey pk = this.objects.newPropertyKey(IdGenerator.of(id), name);

@@ -604,9 +604,9 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
     /**
      * Queue a clear event after the schema write. Changes of this graph share
-     * a fixed window; local cache changes have already happened. A failed
-     * publish is kept and sent again, see
-     * {@link PendingClearEvents}.
+     * one scheduled clear until its callback removes the window; local cache
+     * changes have already happened. A failed publish is kept and sent again,
+     * see {@link PendingClearEvents}.
      */
     private void publishClearEvent() {
         PENDING_CLEAR_EVENTS.request(this.graph().graphSpace(),
@@ -757,7 +757,9 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     /**
      * Coalesced clear events and failed publishes of this Server.
      * <p>
-     * Normal changes share one fixed window per graph. Remove the window
+     * The first normal change of a graph schedules a clear after one second.
+     * Later changes share it until its callback removes the window; scheduler
+     * backlog can therefore extend the effective window. Remove the window
      * before publishing so a concurrent change can start the next one. Graph
      * open and watch recovery bypass this delay. No task runs while idle.
      * <p>
@@ -796,7 +798,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         synchronized void request(String graphSpace, String graph) {
             GraphRef ref = new GraphRef(graphSpace, graph);
             if (!this.scheduledClears.containsKey(ref)) {
-                // Later changes share this deadline instead of postponing it.
+                // Later changes share this scheduled callback until flush()
+                // removes the window; they don't replace or postpone it.
                 this.scheduledClears.put(ref, this.executor().schedule(
                         () -> this.flush(ref), CLEAR_DELAY, TimeUnit.MILLISECONDS));
             }

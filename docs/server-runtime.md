@@ -838,13 +838,15 @@ What a deployment can rely on once every Server runs this version:
   removing property keys, labels and index labels, the status changes made by index and
   label jobs, and clearing or truncating a graph. A removal is published whatever
   `task.sync_deletion` is set to.
-- Normal change notifications on the same Server share a fixed 1-second window per
-  `(graphSpace, graph)`. The first change starts the window without an immediate
-  broadcast; later changes do not reset its deadline. Changes during a publish queue
-  another window. Local cache updates and invalidation still happen immediately.
-  The window is a batching delay, not a propagation deadline: a shared scheduler,
-  slow PD calls, retries and watch delivery can add time. Different Servers batch
-  independently, and one long-running script can span several windows.
+- Normal change notifications on the same Server share one scheduled clear per
+  `(graphSpace, graph)`. The first change schedules it after 1 second without an
+  immediate broadcast; later changes do not replace or postpone that callback. They
+  can still join the same clear until its callback removes the window. A shared
+  scheduler or a slow PD call can therefore extend both the effective batching window
+  and propagation latency; retries and watch delivery can add more time. A change
+  after the window is removed, including during publication, schedules another clear.
+  Local cache updates and invalidation still happen immediately. Different Servers
+  batch independently, and one long-running script can span several windows.
 - A schema change that fails after it changed part of what PD stores is published
   too. The Server that made it drops its own copy of that element, and the caller
   still gets the error.
@@ -872,9 +874,11 @@ What it does not provide:
   part of the label, is missing from the index. Normally this is a write in flight for
   a few milliseconds without batching; the notification window also extends it.
   It can be longer on a Server whose PD watch is down while the index is created.
-  Batching provides no index-completeness guarantee. Create indexes while writes to
-  the label are stopped, or rebuild the index afterwards, when a complete index
-  is required.
+  Batching provides no index-completeness guarantee. For a complete index, stop
+  writes to the label and drain in-flight writes, wait for the create or rebuild
+  task to succeed, then verify on every write-serving Server that the index and its
+  association with the base label are visible before resuming writes. Do not replace
+  that verification with a fixed wait.
 - Two Servers changing the same schema element at the same time. An update writes the
   whole element, so one of the two changes can be lost. Send schema changes for one
   element to the same Server, and wait for each to return before sending the next.
@@ -882,8 +886,8 @@ What it does not provide:
   different Servers before a previous change has propagated. Before moving schema
   writes to another Server, verify that it reads the previously committed schema.
 - A Server that stops for good between a schema write and its event, including while
-  the event waits in the 1-second window. The other Servers keep what they cached until
-  the next schema change of that graph or their next watch restart.
+  the event waits for its scheduled clear. The other Servers keep what they cached
+  until the next schema change of that graph or their next watch restart.
 - A Server that cannot reach PD keeps serving its cached schema until it reconnects.
 - A PD watch that dies without an error is noticed only when another PD call from that
   Server fails.
