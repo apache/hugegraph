@@ -37,6 +37,20 @@ public interface MetaDriver {
 
     <T> void listen(String key, Consumer<T> consumer);
 
+    /**
+     * Listen on a key and get told each time the watch becomes live: when it
+     * first starts and whenever it starts again after a disconnect. Events
+     * committed while a watch is down are not replayed, so {@code onStarted}
+     * is where a listener rebuilds whatever it derives from them.
+     * <p>
+     * A driver that can't report this falls back to a plain listen and never
+     * calls {@code onStarted}.
+     */
+    default <T> void listen(String key, Consumer<T> consumer,
+                            Runnable onStarted) {
+        this.listen(key, consumer);
+    }
+
     <T> void listenPrefix(String prefix, Consumer<T> consumer);
 
     <T> List<String> extractValuesFromResponse(T response);

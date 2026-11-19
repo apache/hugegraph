@@ -185,6 +185,12 @@ public class GraphMetaManager extends AbstractMetaManager {
         this.listen(this.schemaCacheClearKey(), consumer);
     }
 
+    public <T> void listenSchemaCacheClear(Consumer<T> consumer,
+                                           Runnable onStarted) {
+        this.metaDriver.listen(this.schemaCacheClearKey(), consumer,
+                               onStarted);
+    }
+
     public <T> void listenGraphCacheClear(Consumer<T> consumer) {
         this.listen(this.graphCacheClearKey(), consumer);
     }
