@@ -18,11 +18,13 @@
 package org.apache.hugegraph.unit.core;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphKey;
 import org.apache.hugegraph.core.GraphManager;
@@ -30,6 +32,7 @@ import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.define.GraphReadMode;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.junit.After;
 import org.junit.Before;
@@ -123,5 +126,55 @@ public class GraphManagerGraphKeyTest {
         Assert.assertSame(graph, this.manager.graph("team", "movies"));
         Assert.assertSame(graph, this.manager.graph("team-movies"));
         Mockito.verify(meta).graphConfigs("team");
+    }
+
+    @Test
+    public void testUpdateUsesGraphKeyForDefaultSpace() {
+        this.checkUpdateUsesGraphKey("DEFAULT");
+    }
+
+    @Test
+    public void testUpdatePreservesGraphSpaceSeparators() {
+        // Injected identity: normal graph-space creation rejects hyphens.
+        this.checkUpdateUsesGraphKey("team-east");
+    }
+
+    private void checkUpdateUsesGraphKey(String graphSpace) {
+        MetaManager meta = Mockito.mock(MetaManager.class);
+        Whitebox.setInternalState(this.manager, "metaManager", meta);
+        HugeGraph target = Mockito.mock(HugeGraph.class);
+        HugeGraph neighbor = Mockito.mock(HugeGraph.class);
+        this.graphs.put(new GraphKey(graphSpace, "movies"), target);
+        this.graphs.put(new GraphKey("team", "east"), neighbor);
+        Mockito.when(meta.extractGraphsFromResponse("update"))
+               .thenReturn(List.of(graphSpace + "-movies"));
+        Mockito.when(meta.getGraphConfig(graphSpace, "movies"))
+               .thenReturn(Map.of(CoreOptions.GRAPH_READ_MODE.name(), "ALL"));
+
+        Whitebox.invoke(GraphManager.class, new Class<?>[]{Object.class},
+                       "graphUpdateHandler", this.manager, "update");
+
+        Mockito.verify(meta).getGraphConfig(graphSpace, "movies");
+        Mockito.verify(meta, Mockito.never()).getGraphConfig("team", "east");
+        Mockito.verify(target).readMode(GraphReadMode.ALL);
+        Mockito.verifyNoInteractions(neighbor);
+    }
+
+    @Test
+    public void testUpdateSkipsMalformedAndUnknownNames() {
+        MetaManager meta = Mockito.mock(MetaManager.class);
+        Whitebox.setInternalState(this.manager, "metaManager", meta);
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        // Even if malformed identities reach the registry, updates must skip them.
+        this.graphs.put(new GraphKey("", "movies"), graph);
+        this.graphs.put(new GraphKey("DEFAULT", ""), graph);
+        Mockito.when(meta.extractGraphsFromResponse("update"))
+               .thenReturn(List.of("movies", "-movies", "DEFAULT-", "", "DEFAULT-unknown"));
+
+        Whitebox.invoke(GraphManager.class, new Class<?>[]{Object.class},
+                       "graphUpdateHandler", this.manager, "update");
+
+        Mockito.verify(meta, Mockito.never()).getGraphConfig(Mockito.anyString(), Mockito.anyString());
+        Mockito.verifyNoInteractions(graph);
     }
 }

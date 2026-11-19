@@ -3116,17 +3116,13 @@ public final class GraphManager {
             if (this.graphs.containsKey(key)) {
                 Graph graph = this.graphs.get(key);
                 if (graph instanceof HugeGraph hugeGraph) {
-                    String[] values =
-                            graphName.split(MetaManager.META_PATH_JOIN);
-                    if (values.length < 2) {
+                    if (key.graphSpace().isEmpty() || key.graphName().isEmpty()) {
                         LOG.error("The graph name format is incorrect: {}", graphName);
                         continue;
                     }
-                    String graphSpace = values[0];
-                    String graphNameInSpace = values[1];
                     Map<String, Object> configs =
-                            this.metaManager.getGraphConfig(graphSpace,
-                                                            graphNameInSpace);
+                            this.metaManager.getGraphConfig(key.graphSpace(),
+                                                            key.graphName());
                     String readMode = configs.getOrDefault(
                             CoreOptions.GRAPH_READ_MODE.name(),
                             CoreOptions.GRAPH_READ_MODE.defaultValue()).toString();
@@ -3134,7 +3130,7 @@ public final class GraphManager {
                     // TODO: Implement alias graph update logic after
                     // alias graph feature is fully designed and implemented
                     // this.updateAliasGraph(hugeGraph, configs);
-                    LOG.info("Update graph space:{} graph:{}", values[0], values[1]);
+                    LOG.info("Update graph space:{} graph:{}", key.graphSpace(), key.graphName());
                 }
             }
         }
