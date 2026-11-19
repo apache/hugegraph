@@ -17,7 +17,7 @@
 
 ---
 
-**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Ecosystem](#ecosystem) • [For Contributors](#contributing) • [Community](#community)
+**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Documentation](#documentation) • [Ecosystem](#ecosystem) • [For Contributors](#contributing) • [Community](#community)
 
 ---
 
@@ -33,9 +33,55 @@ achieved through the powerful [Gremlin](https://tinkerpop.apache.org/gremlin.htm
 - **Schema Metadata Management**: VertexLabel, EdgeLabel, PropertyKey, and IndexLabel
 - **Multi-type Indexes**: Exact query, range query, and complex conditions combination query
 - **Plug-in Backend Store Framework**: RocksDB powers standalone deployments and HStore powers distributed clusters. See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for compatibility details.
+- **Backend Compatibility**: HBase is deprecated but remains supported; see the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility).
 - **Big Data Integration**: Seamless integration with `Flink`/`Spark`/`HDFS`
 - **Complete Graph Ecosystem**: In/out-memory Graph Computing + Graph Visualization & Tools + Graph Learning & AI
 - **Dual Query Language Support**: [Gremlin](https://tinkerpop.apache.org/gremlin.html) (via [Apache TinkerPop 3](https://tinkerpop.apache.org/)) and [Cypher](https://en.wikipedia.org/wiki/Cypher_(query_language)) (OpenCypher)
+
+## Quick Start
+
+### 5 Minutes Quick Start
+
+Start a standalone server for local evaluation, bind it to the loopback interface and wait until a Gremlin query succeeds before continuing:
+
+```bash
+(
+  docker run -d --name hugegraph \
+    -p 127.0.0.1:8080:8080 hugegraph/hugegraph || exit 1
+
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 2 -o /dev/null \
+      -X POST http://127.0.0.1:8080/gremlin \
+      -H 'Content-Type: application/json' \
+      -d '{"gremlin":"g.V().limit(1)"}'; then
+      exit 0
+    fi
+    if [ "${attempt}" -eq 60 ]; then
+      printf 'Server query did not become ready; inspect the logs before continuing.\n' >&2
+      docker logs hugegraph
+      exit 1
+    fi
+    sleep 2
+  done
+)
+```
+
+After the readiness query succeeds, run a small graph query:
+
+```bash
+curl -X POST http://127.0.0.1:8080/gremlin \
+  -H 'Content-Type: application/json' \
+  -d '{"gremlin":"g.V().limit(5)"}'
+```
+
+A timeout deliberately leaves the named container available for diagnosis. Inspect `docker logs hugegraph` and preserve any required data or attached volumes first. When it is safe to discard the failed container, stop and remove it before retrying:
+
+```bash
+docker stop hugegraph 2>/dev/null || true
+docker rm hugegraph
+```
+
+The loopback bind keeps this evaluation endpoint off ordinary remote interfaces while authentication is not enabled. Users of older Docker or unusual host-network setups should also restrict host firewall access explicitly. Pin a released image for repeatable deployments and enable authentication before exposing the service outside a trusted network. See the [server deployment guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/) for packages, configuration and production preparation.
 
 ## Ecosystem
 
@@ -51,23 +97,64 @@ Complete **HugeGraph** ecosystem components:
 
 3. **[hugegraph-ai](https://github.com/apache/hugegraph-ai)** - **Graph AI/LLM/Knowledge Graph** integration
 
-4. **[hugegraph-website](https://github.com/apache/hugegraph-doc)** - **Documentation & website** repository
+4. **[hugegraph-doc](https://github.com/apache/hugegraph-doc)** - **Documentation & website** repository
 
 ## Architecture
 
 HugeGraph supports both **standalone** and **distributed** deployments:
 
+```mermaid
+flowchart TB
+    CLIENTS["Client Layer<br/>Gremlin Console · REST Client · Cypher Client · SDK/Tools"]
+
+    subgraph Server["HugeGraph Server :8080"]
+        API[REST API<br/>Jersey 3]
+        GS[Gremlin Server<br/>TinkerPop]
+        CS[Cypher Engine<br/>OpenCypher]
+        CORE[Graph Engine<br/>hugegraph-core]
+
+        API --> CORE
+        GS --> CORE
+        CS --> CORE
+    end
+
+    subgraph Storage["Storage Layer"]
+        subgraph Standalone["Standalone Mode"]
+            ROCKS[(RocksDB<br/>Embedded)]
+        end
+
+        subgraph Distributed["Distributed Mode"]
+            PD[HugeGraph PD<br/>Metadata and placement]
+            HSTORE[(HStore<br/>Partitioned storage)]
+        end
+    end
+
+    CLIENTS --> Server
+    CORE --> ROCKS
+    CORE -.->|metadata and placement| PD
+    CORE -->|graph data requests| HSTORE
+    PD -.->|coordinates| HSTORE
+
+    style Server fill:#e1f5ff
+    style Distributed fill:#fff4e1
+    style Standalone fill:#f0f0f0
+```
+
+
+<details>
+<summary><b>Text architecture diagram</b></summary>
+
 ```
                         ┌─────────────────────────────────────────────────────┐
                         │                    Client Layer                     │
-                        │  Gremlin Console │ REST API │ Cypher │ SDK/Tools    │
+                        │  Gremlin Console │ REST Client │ Cypher │ SDK/Tools │
                         └─────────────────────────┬───────────────────────────┘
                                                   │
                         ┌─────────────────────────▼───────────────────────────┐
                         │             HugeGraph Server (:8080)                │
                         │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
                         │  │ REST API │  │ Gremlin  │  │   Cypher Engine  │   │
-                        │  │(Jersey 3)│  │(TP 3.8.1)│  │   (OpenCypher)   │   │
+                        │  │(Jersey 3)│  │TinkerPop │  │   (OpenCypher)   │   │
                         │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
                         │       └─────────────┼─────────────────┘             │
                         │            ┌────────▼────────┐                      │
@@ -85,19 +172,23 @@ HugeGraph supports both **standalone** and **distributed** deployments:
              │  │      (embedded)       │  │     │  │   (Raft, 3-5 nodes)   │  │
              │  └───────────────────────┘  │     │  │      :8620/:8686      │  │
              │                             │     │  └───────────┬───────────┘  │
-             │  Use Case:                  │     │              │              │
+             │  Use Case:                  │     │  coordinates │              │
              │  Development/Testing        │     │  ┌───────────▼───────────┐  │
              │  Single Node                │     │  │         HStore        │  │
              │                             │     │  │    (Raft, 3+ nodes)   │  │
-             │  Data Scale: < 1TB          │     │  │         :8520         │  │
+             │  Single-node storage        │     │  │         :8520         │  │
              └─────────────────────────────┘     │  └───────────────────────┘  │
                                                  │                             │
                                                  │  Use Case:                  │
                                                  │  Production/HA/Cluster      │
                                                  │                             │
-                                                 │  Data Scale: < 1000 TB      │
+                                                 │  Horizontal scaling         │
                                                  └─────────────────────────────┘
 ```
+
+</details>
+
+In distributed mode, Server asks PD for metadata and placement, then sends graph data requests directly to HStore; PD coordinates the storage nodes and does not forward graph data.
 
 See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for lifecycle and historical compatibility guidance.
 
@@ -105,10 +196,12 @@ To use ToplingDB with the RocksDB backend, follow the [three-step switching guid
 
 ### Deployment Mode Comparison
 
-| Mode | Components | Use Case | Data Scale | High Availability |
-|------|------------|----------|------------|-------------------|
-| **Standalone** | Server + RocksDB | Development, Testing, Single Node | < 1TB | Basic |
-| **Distributed** | Server + PD + HStore | Production, HA, Horizontal Scaling | < 1000 TB | Yes |
+| Mode | Components | Use Case | Scaling | High Availability |
+|------|------------|----------|---------|-------------------|
+| **Standalone** | Server + RocksDB | Development, Testing, Single Node | Single node | Basic |
+| **Distributed** | Server + PD + HStore | Production, HA, Horizontal Scaling | Horizontal scaling | Yes |
+
+Actual capacity depends on hardware, data and workload.
 
 ### Module Overview
 
@@ -122,65 +215,11 @@ To use ToplingDB with the RocksDB backend, follow the [three-step switching guid
 
 See the [1.8.0 shared-foundation migration guide](docs/shared-foundation-migration.md) for Java API changes, module ownership and coordinated upgrade requirements.
 
-<details>
-<summary><b>📊 Click to view detailed architecture diagram (Mermaid)</b></summary>
 
-```mermaid
-flowchart TB
-    CLIENTS["Client Layer<br/>Gremlin Console · REST Client · Cypher Client · SDK/Tools"]
 
-    subgraph Server["HugeGraph Server :8080"]
-        API[REST API<br/>Jersey 3]
-        GS[Gremlin Server<br/>TinkerPop 3.8.1]
-        CS[Cypher Engine<br/>OpenCypher]
-        CORE[Graph Engine<br/>hugegraph-core]
-
-        API --> CORE
-        GS --> CORE
-        CS --> CORE
-    end
-
-    subgraph Storage["Storage Layer"]
-        subgraph Standalone["Standalone Mode"]
-            ROCKS[(RocksDB<br/>Embedded)]
-        end
-
-        subgraph Distributed["Distributed Mode"]
-            PD_HSTORE[PD + HStore<br/>Raft Cluster]
-        end
-    end
-
-    CLIENTS --> Server
-    CORE --> ROCKS
-    CORE --> PD_HSTORE
-
-    style Server fill:#e1f5ff
-    style Distributed fill:#fff4e1
-    style Standalone fill:#f0f0f0
-```
-
-</details>
-
-## Quick Start
+## Installation
 
 <!-- TODO: update release downloads, package names, image tags and version examples after 1.8.0 is published. -->
-
-### 5 Minutes Quick Start
-
-```bash
-# Start HugeGraph (standalone mode)
-docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
-
-# Verify server is running
-curl http://localhost:8080/versions
-
-# Try a Gremlin query
-curl -X POST http://localhost:8080/gremlin \
-  -H "Content-Type: application/json" \
-  -d '{"gremlin":"g.V().limit(5)"}'
-```
-
-> **Production Note**: For production environments or public network exposure, you **must** enable the [AuthSystem](https://hugegraph.apache.org/docs/config/config-authentication/) for security.
 
 ### Prerequisites
 
@@ -196,17 +235,17 @@ for client configuration and query compatibility checks.
 
 ### Option 1: Docker (Fastest)
 
-Docker is the quickest way to get started for **testing or development**:
+Docker is the quickest way to get started for **testing or development**. Each command below is an alternative; remove or rename an existing `hugegraph` container before trying another. The loopback port binding is for local use:
 
 ```bash
 # Basic usage
-docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -p 127.0.0.1:8080:8080 hugegraph/hugegraph:1.7.0
 
 # With sample graph preloaded
-docker run -itd --name=hugegraph -e PRELOAD=true -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -e PRELOAD=true -p 127.0.0.1:8080:8080 hugegraph/hugegraph:1.7.0
 
 # With authentication enabled
-docker run -itd --name=hugegraph -e PASSWORD=your_password -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -e PASSWORD=your_password -p 127.0.0.1:8080:8080 hugegraph/hugegraph:1.7.0
 ```
 
 For advanced Docker configurations, see:
@@ -233,7 +272,7 @@ upgrade guidance.
 <details>
 <summary><b>Option 3: Download Binary Package</b></summary>
 
-Download pre-built packages from the [Download Page](https://hugegraph.apache.org/docs/download/download/):
+Download pre-built packages from the [Download Page](https://hugegraph.apache.org/docs/download/download/). Replace `{version}` below with the version of the package you choose:
 
 ```bash
 # Download and extract
@@ -276,9 +315,10 @@ cd hugegraph
 # Build all modules (skip tests for faster build)
 mvn clean package -DskipTests
 
-# Extract built package
-tar -xzf target/apache-hugegraph-{version}.tar.gz
-cd apache-hugegraph-{version}/apache-hugegraph-server-{version}
+# Replace VERSION with the project version from pom.xml before extracting
+VERSION="<project-version>"
+tar -xzf "hugegraph-server/apache-hugegraph-server-${VERSION}.tar.gz"
+cd "apache-hugegraph-server-${VERSION}"
 
 # Initialize and start
 bin/init-store.sh
@@ -298,20 +338,15 @@ Once the server is running, verify the installation:
 # Check server version
 curl http://localhost:8080/versions
 
-# Expected output:
-# {
-#   "versions": {
-#     "version": "v1",
-#     "core": "1.7.0",
-#     "gremlin": "3.8.1",
-#     "api": "1.7.0"
-#   }
-# }
+# The response reports the installed server and Gremlin versions.
 
 # Try Gremlin console (if installed locally)
 bin/gremlin-console.sh
+```
 
-# In Gremlin console:
+In the Gremlin console:
+
+```text
 gremlin> :remote connect tinkerpop.server conf/remote.yaml
 gremlin> :> g.V().limit(5)
 ```
@@ -323,6 +358,9 @@ Read the [storage lifecycle and recovery guide](docs/storage-lifecycle.md) befor
 </details>
 
 ## Module Map
+
+<details>
+<summary><b>Developer navigation</b></summary>
 
 **Developer Navigation**: Find the right module for your task
 
@@ -340,6 +378,8 @@ Read the [storage lifecycle and recovery guide](docs/storage-lifecycle.md) befor
 | Run tests | `hugegraph-test` | Test suites with multiple profiles |
 
 For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
+
+</details>
 
 <details>
 <summary><b>For Contributors</b></summary>
@@ -377,6 +417,12 @@ For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
    - Use [GitHub Desktop](https://desktop.github.com/) to simplify the PR process
 
 </details>
+
+## Documentation
+
+- [Repository documentation index](docs/README.md): build, API, runtime, storage and internal design guides.
+- [Official HugeGraph documentation](https://hugegraph.apache.org/docs/): user guides and released-product instructions.
+- [Helm documentation index](helm/hugegraph/docs/README.md): Kubernetes installation, operations and optional components.
 
 ## Contributing
 
