@@ -82,6 +82,9 @@ RUN sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/
 COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
 COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
 COPY --chown=${HG_UID}:${HG_GID} --chmod=755 hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
+# props.awk needs no COPY: it ships in the assembly bin/ above, which is also
+# where bin/enable-auth.sh finds it.  yamlscan.awk serves only the entrypoint.
+COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/yamlscan.awk .
 
 EXPOSE 8080
 VOLUME /hugegraph-server
