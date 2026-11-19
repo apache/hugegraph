@@ -21,6 +21,7 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.CT_PACKAGE_PATH;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -55,6 +56,8 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
     protected int index;
     protected List<String> fileNames;
     protected String startLine;
+    // Where in the startup log the running process began to write
+    private long startupLogOffset;
 
     public AbstractNodeWrapper() {
         this.clusterIndex = 1;
@@ -154,8 +157,10 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
             return false;
         }
 
-        try (Scanner sc = new Scanner(Paths.get(getLogPath()),
-                                      StandardCharsets.UTF_8.name())) {
+        try (InputStream log = Files.newInputStream(Paths.get(getLogPath()))) {
+            // Skip what an earlier run of this node wrote before a restart
+            log.skipNBytes(this.startupLogOffset);
+            Scanner sc = new Scanner(log, StandardCharsets.UTF_8.name());
             while (sc.hasNextLine()) {
                 String line = sc.nextLine();
                 if (line.contains(startLine)) return true;
@@ -163,6 +168,32 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
         } catch (IOException ignored) {
         }
         return false;
+    }
+
+    /**
+     * Stop the process and start it again in the same directory, so the node
+     * comes back with its data. {@link #stop()} is for the end of a test: it
+     * also removes the directory.
+     */
+    public void restart() {
+        if (this.instance != null && this.instance.isAlive()) {
+            this.instance.destroy();
+            try {
+                if (!this.instance.waitFor(20, TimeUnit.SECONDS)) {
+                    this.instance.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while stopping " + getID(), e);
+            }
+        }
+        try {
+            Path log = Paths.get(getLogPath());
+            this.startupLogOffset = Files.isRegularFile(log) ? Files.size(log) : 0L;
+        } catch (IOException e) {
+            throw new AssertionError("Can't read the startup log of " + getID(), e);
+        }
+        this.start();
     }
 
     protected String moduleOptions(Path options) throws IOException {
