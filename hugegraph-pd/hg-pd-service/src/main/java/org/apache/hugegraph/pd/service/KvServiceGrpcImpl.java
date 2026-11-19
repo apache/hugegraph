@@ -41,6 +41,8 @@ import org.apache.hugegraph.pd.grpc.kv.LockResponse;
 import org.apache.hugegraph.pd.grpc.kv.ScanPrefixResponse;
 import org.apache.hugegraph.pd.grpc.kv.TTLRequest;
 import org.apache.hugegraph.pd.grpc.kv.TTLResponse;
+import org.apache.hugegraph.pd.grpc.kv.TxnRequest;
+import org.apache.hugegraph.pd.grpc.kv.TxnResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchKv;
 import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
 import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
@@ -588,6 +590,31 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
                 return;
             }
             response = builder.setHeader(getResponseHeader(e)).build();
+        }
+        responseObserver.onNext(response);
+        responseObserver.onCompleted();
+    }
+
+    /**
+     * Atomic multi-key write; a failed compare or a rejected record is not an error
+     */
+    @Override
+    public void txn(TxnRequest request, StreamObserver<TxnResponse> responseObserver) {
+        if (!isLeader()) {
+            redirectToLeader(channel, KvServiceGrpc.getTxnMethod(), request, responseObserver);
+            return;
+        }
+        TxnResponse response;
+        try {
+            response = this.kvService.txn(request).toBuilder()
+                                     .setHeader(getResponseHeader()).build();
+        } catch (PDException e) {
+            /*
+             * Not forwarded, also when this node lost the leadership meanwhile: the entry may
+             * be on a majority already, and the next leader would apply it a second time. The
+             * caller gets the error, an unknown outcome.
+             */
+            response = TxnResponse.newBuilder().setHeader(getResponseHeader(e)).build();
         }
         responseObserver.onNext(response);
         responseObserver.onCompleted();

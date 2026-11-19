@@ -18,13 +18,17 @@
 package org.apache.hugegraph.pd.raft;
 
 import com.alipay.sofa.jraft.Node;
+import com.alipay.sofa.jraft.core.NodeImpl;
 import com.alipay.sofa.jraft.core.Replicator;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.storage.LogManager;
+import org.apache.hugegraph.testutil.Whitebox;
 
 import org.junit.Assert;
 import org.junit.Test;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class RaftReflectionUtilTest {
 
@@ -59,5 +63,28 @@ public class RaftReflectionUtilTest {
 
         // Verify the results
         Assert.assertNull(result);
+    }
+
+    /**
+     * The replay guard reads the raft log through the private field NodeImpl.logManager of the
+     * jraft in the pom. A jraft that renames or retypes it fails here, not on a production
+     * restart, where every replay would go unchecked
+     */
+    @Test
+    public void testLogManagerIsReadFromTheJraftNode() {
+        NodeImpl node = new NodeImpl("pd_raft", new PeerId());
+        Assert.assertNull(RaftReflectionUtil.getLogManager(node));
+
+        LogManager logManager = mock(LogManager.class);
+        when(logManager.getLastLogIndex()).thenReturn(42L);
+        when(logManager.getTerm(42L)).thenReturn(7L);
+        Whitebox.setInternalState(node, "logManager", logManager);
+        Assert.assertSame(logManager, RaftReflectionUtil.getLogManager(node));
+        Assert.assertEquals(42L, RaftReflectionUtil.getLogManager(node).getLastLogIndex());
+        Assert.assertEquals(7L, RaftReflectionUtil.getLogManager(node).getTerm(42L));
+
+        // A node that is not a NodeImpl has no such field: unknown, not a failure
+        Assert.assertNull(RaftReflectionUtil.getLogManager(mock(Node.class)));
+        Assert.assertNull(RaftReflectionUtil.getLogManager(null));
     }
 }

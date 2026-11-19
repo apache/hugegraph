@@ -59,6 +59,7 @@ public class RaftRpcProcessor<T extends RaftRpcProcessor.BaseRequest> implements
         rep.setRaftAddress(raftEngine.getConfig().getAddress());
         rep.setRestAddress(
                 raftEngine.getConfig().getHost() + ":" + raftEngine.getConfig().getPort());
+        rep.setMaxKvOp(KVOperation.TXN);
         rep.setStatus(Status.OK);
         return rep;
     }
@@ -126,5 +127,11 @@ public class RaftRpcProcessor<T extends RaftRpcProcessor.BaseRequest> implements
         private String grpcAddress;
         private String datePath;
         private String restAddress;
+        /**
+         * The highest KV opcode this node applies, {@link KVOperation#TXN} since the TXN
+         * entry; 0 from a release before it, which has no such field (the response is
+         * Hessian-serialized, so a missing field reads as its default)
+         */
+        private byte maxKvOp;
     }
 }

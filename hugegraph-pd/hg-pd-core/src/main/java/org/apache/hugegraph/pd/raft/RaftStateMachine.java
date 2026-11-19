@@ -141,6 +141,8 @@ public class RaftStateMachine extends StateMachineAdapter {
                 } else {
                     kvOp = KVOperation.fromByteArray(iter.getData().array());
                 }
+                kvOp.setIndex(iter.getIndex());
+                kvOp.setTerm(iter.getTerm());
                 for (RaftTaskHandler taskHandler : taskHandlers) {
                     taskHandler.invoke(kvOp, done);
                 }
@@ -452,24 +454,26 @@ public class RaftStateMachine extends StateMachineAdapter {
             }
         }
 
+        // A task handler sets the result of an entry here, the waiting caller reads it from
+        // the wrapped closure
         @Override
         public Pdpb.Error getError() {
-            return null;
+            return closure.getError();
         }
 
         @Override
         public void setError(Pdpb.Error error) {
-
+            closure.setError(error);
         }
 
         @Override
         public Object getData() {
-            return null;
+            return closure.getData();
         }
 
         @Override
         public void setData(Object data) {
-
+            closure.setData(data);
         }
     }
 }

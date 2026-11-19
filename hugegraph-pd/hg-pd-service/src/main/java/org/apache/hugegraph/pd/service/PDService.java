@@ -1777,6 +1777,16 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
 
             log.info("pd raft update with new config: {}", config);
 
+            // A peer that joins applies the log, TXN entries included
+            try {
+                RaftEngine.getInstance().checkTxnPeers(config);
+            } catch (PDException e) {
+                log.error("updatePdRaft refused: {}", e.getMessage());
+                response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                    .setHeader(newErrorHeader(e)).build();
+                break;
+            }
+
             node.changePeers(config, status -> {
                 if (status.isOk()) {
                     log.info("updatePdRaft, change peers success");
