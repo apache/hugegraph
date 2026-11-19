@@ -403,8 +403,12 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             if (subscription.observer.get() != sourceObserver) {
                 return FrameOrder.STALE;
             }
-            subscription.firstFrameReceived = true;
-            cancelStartTimeout(subscription);
+            // For registration-aware watches, Alive does not prove readiness.
+            if (subscription.startedCallback == null ||
+                state == WatchState.Starting || state == WatchState.Started) {
+                subscription.firstFrameReceived = true;
+                cancelStartTimeout(subscription);
+            }
             if (!subscription.watchStarted &&
                 (state == WatchState.Starting || state == WatchState.Started)) {
                 subscription.watchStarted = true;
@@ -459,7 +463,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                 return;
             }
         }
-        log.warn("Watch for key {} did not receive its first response in {} ms",
+        log.warn("Watch for key {} did not become ready in {} ms",
                  subscription.key, WATCH_START_TIMEOUT_MS);
         requestReconnect(subscription, sourceObserver, true, true);
     }

@@ -575,16 +575,43 @@ public class KvClientTest extends BaseClientTest {
             observer.onNext(alive);
             observer.onNext(alive);
             assertThat(started.get()).isZero();
-            // Preserve the existing transport timeout behavior for any first frame
-            context.runNextWatchTimeout();
-            assertThat(context.reconnectTasks).isEmpty();
-
+            // Only Starting confirms the registration for this callback.
             observer.onNext(startingResponse(7L));
             assertThat(started.get()).isEqualTo(1);
+            context.runNextWatchTimeout();
+            assertThat(context.reconnectTasks).isEmpty();
             observer.onNext(alive);
             observer.onNext(startingResponse(7L));
             observer.onNext(eventResponse(7L));
             assertThat(started.get()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testAliveOnlyWatchWithStartedCallbackReconnects() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicInteger started = new AtomicInteger();
+            context.client.listen("key", response -> { }, throwable -> { },
+                                  started::incrementAndGet);
+            StreamObserver<WatchResponse> old = context.client.call(0).observer;
+            old.onNext(WatchResponse.newBuilder().setState(WatchState.Alive).build());
+            old.onNext(WatchResponse.newBuilder().setState(WatchState.Alive).build());
+            assertThat(started.get()).isZero();
+            assertThat(context.watchTimeoutDelaysMs).containsExactly(5000L);
+
+            // Heartbeats without a registered watch must not suppress reconnect.
+            context.runNextWatchTimeout();
+            assertThat(context.reconnectTasks).hasSize(1);
+            context.runNextReconnect();
+            assertThat(context.client.calls).hasSize(2);
+            assertThat(context.client.stubInvalidations).isEqualTo(1);
+
+            old.onNext(startingResponse(7L));
+            assertThat(started.get()).isZero();
+            context.client.call(1).observer.onNext(startingResponse(8L));
+            assertThat(started.get()).isEqualTo(1);
+            context.runNextWatchTimeout();
+            assertThat(context.reconnectTasks).isEmpty();
         }
     }
 
