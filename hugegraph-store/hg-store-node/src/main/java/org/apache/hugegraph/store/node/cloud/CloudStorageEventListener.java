@@ -590,6 +590,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
 
     @Override
     public void onDBOpening(String dbName, String dbPath) {
+        // A name reopened at a NEW dir (snapshot install, destroy-then-recreate) must not inherit
+        // upload confirmations or the published generation of the previous directory. This runs
+        // before recordDb and preHydrateDbFiles, which seed the tracker for the new dir.
+        resetStateIfDbMovedDir(dbName, dbPath);
         // Register the dir -> logical-name mapping first: native events that arrive before
         // onDBCreated (or on a disabled-hydration node) must resolve to the logical name.
         recordDb(dbName, dbPath);
@@ -1758,6 +1762,28 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     // -----------------------------------------------------------------------
     // Metadata mirroring
     // -----------------------------------------------------------------------
+
+    /**
+     * Drops per-name upload state when {@code dbName} is already mapped to a different directory.
+     * The old dir's mapping is kept so its native events still resolve; onDBDeleted removes it.
+     * Reopening at the same dir, or a name with no mapping, leaves the state untouched.
+     */
+    private void resetStateIfDbMovedDir(String dbName, String dbPath) {
+        if (dbName == null || dbPath == null) {
+            return;
+        }
+        String dir = normaliseDir(dbPath);
+        for (Map.Entry<String, String> e : dbNameByDir.entrySet()) {
+            if (dbName.equals(e.getValue()) && !dir.equals(e.getKey())) {
+                log.info("Cloud DB {} reopened at {} (previously {}); resetting upload confirmations "
+                         + "and published generation", dbName, dir, e.getKey());
+                // clearDb bumps the epoch, so in-flight confirmations from the old dir are dropped.
+                syncTracker.clearDb(dbName);
+                lastPublishedMetadataGeneration.remove(dbName);
+                return;
+            }
+        }
+    }
 
     /** Records the resolved DB directory for a logical DB name (idempotent). */
     private void recordDb(String dbName, String dbDir) {

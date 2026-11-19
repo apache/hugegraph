@@ -702,6 +702,82 @@ public class CloudStorageEventListenerTest {
                      "only newer generation should be published");
     }
 
+    @Test
+    public void onDBOpening_atNewDir_resetsConfirmationsAndPublishedGeneration() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-reopen-moved");
+        Path dirA = tmpRoot.resolve("db_0");
+        Path dirB = tmpRoot.resolve("db_1");
+        Files.createDirectories(dirA);
+        Files.createDirectories(dirB);
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        AtomicReference<MetadataSnapshot> next = new AtomicReference<>();
+        CloudStorageEventListener l = metadataListener(tmpRoot, tracker, next);
+        try {
+            l.onDBOpening("0", dirA.toString());
+            tracker.markConfirmed("0", dirA.resolve("000007.sst").toString());
+            next.set(generationSnapshot("hgstore-meta-moved-high", 300L));
+            assertTrue(l.syncMetadataSnapshotInline(new CapturingProvider(), "0"));
+            next.set(generationSnapshot("hgstore-meta-moved-low", 100L));
+            assertFalse(l.syncMetadataSnapshotInline(new CapturingProvider(), "0"),
+                        "lower generation is stale while the same dir is open");
+
+            l.onDBOpening("0", dirB.toString());
+
+            assertFalse(tracker.isConfirmed("0", dirB.resolve("000007.sst").toString()),
+                        "reused SST number must not count as uploaded for the new dir");
+            next.set(generationSnapshot("hgstore-meta-moved-low2", 100L));
+            assertTrue(l.syncMetadataSnapshotInline(new CapturingProvider(), "0"),
+                       "old dir's published generation must not block the new DB");
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void onDBOpening_atSameDir_keepsConfirmationsAndPublishedGeneration() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-reopen-same");
+        Path dirA = tmpRoot.resolve("db_0");
+        Files.createDirectories(dirA);
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        AtomicReference<MetadataSnapshot> next = new AtomicReference<>();
+        CloudStorageEventListener l = metadataListener(tmpRoot, tracker, next);
+        try {
+            l.onDBOpening("0", dirA.toString());
+            tracker.markConfirmed("0", dirA.resolve("000007.sst").toString());
+            next.set(generationSnapshot("hgstore-meta-same-high", 300L));
+            assertTrue(l.syncMetadataSnapshotInline(new CapturingProvider(), "0"));
+
+            l.onDBOpening("0", dirA.toString());
+
+            assertTrue(tracker.isConfirmed("0", dirA.resolve("000007.sst").toString()),
+                       "reopening at the same dir must keep confirmations");
+            next.set(generationSnapshot("hgstore-meta-same-low", 100L));
+            assertFalse(l.syncMetadataSnapshotInline(new CapturingProvider(), "0"),
+                        "reopening at the same dir must keep the published generation");
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    /** Listener whose metadata capture returns {@code next} and whose upload always succeeds. */
+    private static CloudStorageEventListener metadataListener(Path root, CloudSyncTracker tracker,
+                                                              AtomicReference<MetadataSnapshot> next) {
+        return new CloudStorageEventListener(new CapturingProvider(), List.of(root.toString()),
+                                             true, 0L, null, tracker, null,
+                                             CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS) {
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                return next.get();
+            }
+
+            @Override
+            boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
+                                           MetadataSnapshot snapshot) {
+                return true;
+            }
+        };
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
