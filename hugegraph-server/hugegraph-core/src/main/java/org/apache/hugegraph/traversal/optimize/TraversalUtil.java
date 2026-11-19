@@ -1390,10 +1390,11 @@ public final class TraversalUtil {
                             traversal, 0, limit);
                     TraversalHelper.replaceStep(range, newRange, traversal);
                 }
+                // Only the first range is in the backend query's coordinates.
+                // Later ranges apply to the already-limited stream, so keep them as local steps.
+                break;
             }
-        } while (step instanceof RangeGlobalStep ||
-                 step instanceof IdentityStep ||
-                 step instanceof NoOpBarrierStep);
+        } while (step instanceof IdentityStep || step instanceof NoOpBarrierStep);
     }
 
     public static void extractCount(Step<?, ?> newStep,
