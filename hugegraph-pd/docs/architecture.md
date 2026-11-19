@@ -399,11 +399,14 @@ Automated background tasks for cluster maintenance.
 **Scheduled Tasks**:
 - **Partition Patrol**: Periodically scan all partitions for health issues
 - **Balance Check**: Detect imbalanced partition distribution
+- **Leader Balance** (optional): Move partition leaders back toward an even spread across Stores
 - **Store Monitor**: Check store health and trigger failover
 - **Metrics Collection**: Aggregate cluster metrics
 
 **Configuration**:
 - `pd.patrol-interval`: Patrol interval in seconds (default: 1800)
+- `pd.balance-leader-enable`, `pd.balance-leader-interval`, `pd.balance-leader-max-skew`:
+  periodic leader balancing, off by default (see [configuration](configuration.md#pd-core-settings))
 
 #### KvService
 
