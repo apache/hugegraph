@@ -8,6 +8,8 @@ HugeGraph Server consists of two layers of functionality: the graph engine layer
   - REST Server: Provides a RESTful API for querying graph/schema information, supports the [Gremlin](https://tinkerpop.apache.org/gremlin.html) and [Cypher](https://en.wikipedia.org/wiki/Cypher) query languages, and offers APIs for service monitoring and operations.
   - See [Cypher HTTP contracts](../docs/server-runtime.md#cypher-http-contracts) for request forms, verified behavior, and
     unverified scope.
+  - See [REST Gremlin execution](../docs/gremlin-rest-execution.md) for automatic local in-process
+    execution, supported configurations and compatibility boundaries.
   - Graph Engine: Supports both OLTP and OLAP graph computation types, with OLTP implementing the [Apache TinkerPop3](https://tinkerpop.apache.org) framework.
   - Backend Interface: Implements the storage of graph data to the backend.
 
