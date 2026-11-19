@@ -652,6 +652,14 @@ At request/task completion, explicitly committed writes are preserved; unfinishe
 are rolled back and cached backend leases are released. Shared schema and element caches
 retain their invalidation listeners until the graph closes.
 
+For standalone Topling storage, graph truncate and OLAP property clear retain column
+families and their native handles. OLAP clear removes only the selected property table
+in its owning database; pending writes on the clearing thread are discarded before the
+clear is committed. Other threads retain their pending batches. If those threads commit
+after the clear, their writes can populate the cleared table again. Callers that require
+the table to remain empty must coordinate concurrent writers. Graph truncate resets
+pending batches across all sessions instead.
+
 Stop incoming work and use the component's normal stop script. PD drains its scheduled
 metadata work, joins Raft and closes the metadata database and native options. Do not
 use a forced kill as evidence of normal resource cleanup.
