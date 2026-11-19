@@ -59,3 +59,7 @@ apache-hugegraph-*/
 **/docker-compose*.yaml
 **/*.md
 docs/
+# The Store assembly packages this upgrade guide.
+!docs/
+docs/*
+!docs/graphid-upgrade.md

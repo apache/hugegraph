@@ -697,6 +697,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         try {
             try (final Options options = new Options();
                  final ColumnFamilyOptions cfOptions = new ColumnFamilyOptions()) {
+                RocksDBSession.initOptions(this.hugeConfig, null, null, cfOptions, cfOptions);
                 List<ColumnFamilyDescriptor> columnFamilyDescriptorList = new ArrayList<>();
                 List<byte[]> columnFamilyBytes = RocksDB.listColumnFamilies(options, snapshotPath);
 
@@ -711,15 +712,27 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                 }
                 List<ColumnFamilyHandle> columnFamilyHandleList = new ArrayList<>();
 
-                try (final DBOptions dbOptions = new DBOptions();
-                     final RocksDB db = RocksDB.openReadOnly(dbOptions, snapshotPath,
-                                                             columnFamilyDescriptorList,
-                                                             columnFamilyHandleList)) {
-                    for (ColumnFamilyHandle handle : columnFamilyHandleList) {
-                        if (handle == null) {
-                            log.error("verifySnapshot some ColumnFamilyHandle is null in {}",
-                                      snapshotPath);
-                            return false;
+                try (final DBOptions dbOptions = new DBOptions()) {
+                    RocksDB db = null;
+                    try {
+                        db = RocksDB.openReadOnly(dbOptions, snapshotPath,
+                                                 columnFamilyDescriptorList,
+                                                 columnFamilyHandleList);
+                        for (ColumnFamilyHandle handle : columnFamilyHandleList) {
+                            if (handle == null) {
+                                log.error("verifySnapshot some ColumnFamilyHandle is null in {}",
+                                          snapshotPath);
+                                return false;
+                            }
+                        }
+                    } finally {
+                        for (ColumnFamilyHandle handle : columnFamilyHandleList) {
+                            if (handle != null) {
+                                handle.close();
+                            }
+                        }
+                        if (db != null) {
+                            db.close();
                         }
                     }
                 }
