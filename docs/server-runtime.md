@@ -39,7 +39,9 @@ rebuilds a transport, including after a PD or Store restart during a Gremlin req
 Gremlin cannot set or clear these system properties. It also cannot change the separate
 JDK security property `networkaddress.cache.ttl` through `java.security.Security.setProperty`.
 Trusted code outside Gremlin can still configure these settings. Sensitive system
-properties such as `user.home` remain unreadable from Gremlin.
+properties such as `user.home` remain unreadable from Gremlin. The allocator flag is read
+on every allocator invocation. Its whitelist entry permits direct script reads of this
+exact property, but does not permit other gRPC properties or bulk property enumeration.
 
 HStore constructs each target's lazy channel and stub pools on the calling thread so
 initialization retains the caller's Gremlin security context. The client publishes
