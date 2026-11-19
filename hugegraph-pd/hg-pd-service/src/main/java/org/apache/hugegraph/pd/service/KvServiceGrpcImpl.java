@@ -158,6 +158,12 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
         KResponse response;
         KResponse.Builder builder = KResponse.newBuilder();
         try {
+            /*
+             * A leader elected a moment ago may not have applied every committed write yet,
+             * and a Server that read such a value would cache schema older than a revision it
+             * acknowledged: read after a ReadIndex barrier.
+             */
+            RaftEngine.getInstance().waitReadIndex();
             String value = this.kvService.get(request.getKey());
             builder.setHeader(getResponseHeader());
             if (value != null) {
@@ -260,6 +266,8 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
         ScanPrefixResponse response;
         ScanPrefixResponse.Builder builder = ScanPrefixResponse.newBuilder();
         try {
+            // After a ReadIndex barrier, as in get
+            RaftEngine.getInstance().waitReadIndex();
             Map kvs = this.kvService.scanWithPrefix(request.getKey());
             response = builder.setHeader(getResponseHeader()).putAllKvs(kvs).build();
         } catch (PDException e) {
