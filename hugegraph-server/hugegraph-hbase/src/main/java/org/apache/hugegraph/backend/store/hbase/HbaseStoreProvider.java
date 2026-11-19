@@ -50,6 +50,11 @@ public class HbaseStoreProvider extends AbstractBackendStoreProvider {
     }
 
     @Override
+    public String serializerName() {
+        return "hbase";
+    }
+
+    @Override
     public String driverVersion() {
         /*
          * Versions history:

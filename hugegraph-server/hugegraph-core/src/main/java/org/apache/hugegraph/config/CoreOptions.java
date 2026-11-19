@@ -73,12 +73,21 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "g"
             );
+    /**
+     * Legacy: the backend chooses its serializer (BackendStoreProvider
+     * .serializerName()), so a graph config no longer needs this option. It
+     * is still read as an explicit override for the backends that accept
+     * one. TODO: remove the option and the selection logic in
+     * SerializerFactory / StandardHugeGraph.serializer() once no shipped
+     * config or test sets it (apache/hugegraph#3225).
+     */
     public static final ConfigOption<String> SERIALIZER =
             new ConfigOption<>(
                     "serializer",
-                    "The serializer for backend store, like: text/binary.",
-                    disallowEmpty(),
-                    "text"
+                    "Legacy: the serializer for the backend store (text/binary). " +
+                    "The backend's own serializer is used when unset.",
+                    null,
+                    ""
             );
     public static final ConfigOption<Integer> SERIALIZER_BUFFER_MAX_CAPACITY =
             new ConfigOption<>(
