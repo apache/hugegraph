@@ -38,6 +38,7 @@ jobs:
       java_versions: ${{ steps.java.outputs.versions }}
       server: ${{ steps.select.outputs.server }}
       commons: ${{ steps.select.outputs.commons }}
+      ranger: ${{ steps.select.outputs.ranger }}
       struct: ${{ steps.select.outputs.struct }}
       pd: ${{ steps.select.outputs.pd }}
       store: ${{ steps.select.outputs.store }}
@@ -147,6 +148,14 @@ jobs:
     needs: preflight
     if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.commons == 'true' }}
     uses: ./.github/workflows/commons-ci.yml
+    with:
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+    secrets: inherit
+
+  ranger:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.ranger == 'true' }}
+    uses: ./.github/workflows/ranger-plugin-ci.yml
     with:
       java-versions: ${{ needs.preflight.outputs.java_versions }}
     secrets: inherit
