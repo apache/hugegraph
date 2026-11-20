@@ -22,7 +22,7 @@ Run commands from the repository root.
 
 ```bash
 # Build the server and its dependencies without running tests
-mvn clean install -pl hugegraph-server -am -DskipTests
+mvn clean install -pl hugegraph-server/hugegraph-dist -am -DskipTests
 
 # Before pushing code, format and compile
 mvn editorconfig:format
