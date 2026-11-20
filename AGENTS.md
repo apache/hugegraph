@@ -45,7 +45,7 @@ versions come from [pom.xml](pom.xml), including `${revision}`.
 
 ```bash
 mvn clean install -DskipTests
-mvn clean install -pl hugegraph-server -am -DskipTests
+mvn clean install -pl hugegraph-server/hugegraph-dist -am -DskipTests
 ```
 
 For separate distributed-module builds, install `hugegraph-struct` first,
