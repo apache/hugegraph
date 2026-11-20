@@ -92,12 +92,17 @@ working directory can itself introduce a problem character that was not in
 the original value.
 
 When `-c` points at an external conf directory, keep `graphs` in
-`rest-server.properties` and `ssl.keystore_file` (when `restserver.url` is
-`https`) as absolute paths, or under that `-c` directory. Both are otherwise
-resolved by the JVM against the working directory (`$TOP`), not against `-c`,
-so a relative value there silently keeps using the packaged copy instead of
-yours; the launcher refuses to start in that case and names the property and
-file to fix.
+`rest-server.properties`, `ssl.keystore_file` (when `restserver.url` is
+`https`), and `tokens` under `gremlin-server.yaml`'s `config:` block (written
+by `enable-auth.sh`) as absolute paths, or under that `-c` directory. All
+three are otherwise resolved by the JVM against the working directory
+(`$TOP`).
+
+The Cypher endpoint's `conf/remote-objects.yaml` (the Gremlin host/port it
+connects to) is resolved from the `-c` conf dir when set, instead of always
+reading the packaged copy relative to `$TOP`; otherwise a second instance
+started with its own `-c`/Gremlin port would still have its Cypher queries
+routed to the first instance's Gremlin server.
 
 ### Launcher GC options
 

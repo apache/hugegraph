@@ -74,5 +74,20 @@ CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q"
 # key for /opt/hg matches a crontab line for /data/opt/hg), causing a
 # false-positive "already installed" here and a wrong-job removal in
 # stop-monitor.sh.
+MONITOR_KEY="$MONITOR_Q"
 MONITOR_LEGACY_KEY="&& $MONITOR_RAW"
-crontab_append "$CRONTAB_JOB" "$MONITOR_Q" "$MONITOR_LEGACY_KEY"
+
+# Both keys additionally depend only on $TOP, so two instances of one install
+# with different -i pid files would otherwise be indistinguishable.
+# Only disambiguate by pid file when -i is explicitly set: this is the
+# multi-instance case, and leaving the common single-instance (no -i) job and
+# key byte-for-byte unchanged keeps recognizing jobs installed by older,
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    PID_FILE_Q="$(cron_quote "$PID_FILE_OVERRIDE" "pid file (-i)")" || exit 1
+    # The trailing "# pidfile:..." is a shell comment (ignored by sh -c at
+    # execution), carried purely so the line can be matched per pid file.
+    CRONTAB_JOB="$CRONTAB_JOB # pidfile:$PID_FILE_Q"
+    MONITOR_KEY="$MONITOR_Q # pidfile:$PID_FILE_Q"
+    MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:$PID_FILE_OVERRIDE"
+fi
+crontab_append "$CRONTAB_JOB" "$MONITOR_KEY" "$MONITOR_LEGACY_KEY"

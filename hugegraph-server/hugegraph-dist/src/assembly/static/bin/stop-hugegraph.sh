@@ -54,6 +54,8 @@ PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE" nocreate)" || exit 1
 PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 SERVER_SHUTDOWN_TIMEOUT_S=10
 
+export PID_FILE_OVERRIDE
+
 if [ "$CLOSE_MONITOR" == "true" ]; then
     if ! "$BIN"/stop-monitor.sh; then
         # TODO: If remove monitor failed, should continue kill process?

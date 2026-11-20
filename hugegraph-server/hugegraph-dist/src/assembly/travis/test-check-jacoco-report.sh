@@ -519,6 +519,7 @@ assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml",
     "TEST-org.apache.hugegraph.store.node.controller.ArthasSecurityTest.xml",
+    "TEST-org.apache.hugegraph.store.node.listener.PdConfigureListenerYamlTest.xml",
 }
 assert not reports_for_option(store_job, "--require-suite-report")
 assert values_for_option(store_job, "--require-session") == (selected_profiles(store_job, "store") | {"store-node-test"})

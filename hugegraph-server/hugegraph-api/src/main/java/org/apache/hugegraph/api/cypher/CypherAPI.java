@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api.cypher;
 
+import java.io.File;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -64,7 +65,16 @@ public class CypherAPI extends API {
 
     private static final Logger LOG = Log.logger(CypherAPI.class);
     private static final Charset UTF8 = StandardCharsets.UTF_8;
-    private static final String CLIENT_CONF = "conf/remote-objects.yaml";
+    private static final String CLIENT_CONF_NAME = "remote-objects.yaml";
+    // The stock relative path is read by CypherManager relative to the working
+    // directory, which the start scripts set to $TOP -- not relative to the
+    // conf dir the file itself lives in. start-hugegraph.sh exports
+    // CONF_OVERRIDE (the resolved, absolute -c value) into the server's
+    // environment, so prefer that when present to keep Cypher's Gremlin
+    // host/port in sync with the conf dir actually in effect for this
+    // instance, the same way PdConfigureListener resolves Store's
+    // application-pd.yml from spring.config.location instead of a fixed path.
+    private static final String CLIENT_CONF = resolveClientConf();
     private static final ObjectReader REQUEST_READER = new ObjectMapper()
             .readerFor(Object.class)
             .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -73,6 +83,14 @@ public class CypherAPI extends API {
     private final String bearer = "Bearer ";
 
     private CypherManager cypherManager;
+
+    private static String resolveClientConf() {
+        String confOverride = System.getenv("CONF_OVERRIDE");
+        if (confOverride != null && !confOverride.trim().isEmpty()) {
+            return confOverride + File.separator + CLIENT_CONF_NAME;
+        }
+        return "conf" + File.separator + CLIENT_CONF_NAME;
+    }
 
     private CypherManager cypherManager() {
         if (this.cypherManager == null) {

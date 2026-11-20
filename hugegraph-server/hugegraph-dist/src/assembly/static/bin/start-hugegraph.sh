@@ -124,6 +124,29 @@ REST_SERVER_URL=$(read_property "$CONF/rest-server.properties" "restserver.url")
 GRAPHS_DIR=$(read_property "$CONF/rest-server.properties" "graphs")
 reject_relative_conf_path "$GRAPHS_DIR" "graphs" "$CONF/rest-server.properties" || exit 1
 
+# enable-auth.sh writes 'config: {tokens: conf/rest-server.properties}' into
+# gremlin-server.yaml. Like 'graphs' above, HugeAuthenticator.setup opens that
+# path relative to the working directory ($TOP below), not relative to
+# $CONF, so under -c a relative value silently keeps reading the packaged
+# rest-server.properties (and the auth graph(s) it points at).
+#
+# We parse the single-line inline-flow form ('config: {...}' closed on
+# the same line) that enable-auth.sh writes. A multi-line/block-style YAML
+# 'config:' mapping (or an inline '{' left open across lines) is NOT parsed.
+CONFIG_LINE=$(grep -E '^[[:blank:]]*config:' "$CONF/gremlin-server.yaml" | tail -1)
+if [ -n "$CONFIG_LINE" ] && \
+   ! echo "$CONFIG_LINE" | grep -qE '^[[:blank:]]*config:[[:blank:]]*\{[^{}]*\}[[:blank:]]*$'; then
+    echo "ERROR: '$CONF/gremlin-server.yaml' has a 'config:' entry that is not" \
+         "a single-line inline mapping (e.g. 'config: {tokens: conf/rest-server.properties}')." >&2
+    exit 1
+fi
+
+# Only match a 'tokens:' key nested under 'config:' (the auth-handler config block), not an unrelated top-level key
+# of the same name. '[[:blank:]]' (space or tab) tolerates tab-indented YAML.
+TOKENS_FILE=$(sed -n -e 's/^[[:blank:]]*config:.*tokens:[[:blank:]]*\([^,}[:blank:]]*\).*/\1/p' \
+                      "$CONF/gremlin-server.yaml" | tail -1)
+reject_relative_conf_path "$TOKENS_FILE" "tokens" "$CONF/gremlin-server.yaml" || exit 1
+
 check_port "$GREMLIN_SERVER_URL"
 check_port "$REST_SERVER_URL"
 
