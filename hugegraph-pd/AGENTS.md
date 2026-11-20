@@ -24,6 +24,12 @@ mvn test -pl hugegraph-pd/hg-pd-test -am
 - Test profiles in the [parent POM](pom.xml) activate matching Surefire executions;
   suite selection is configured in the [test POM](hg-pd-test/pom.xml).
 - Service setup: [PD/Store CI](../.github/workflows/pd-store-ci.yml).
+- `start-hugegraph-pd.sh`/`stop-hugegraph-pd.sh` share the `-c/-l/-o/-i` launcher
+  guards and crontab helpers with Server; run Server's
+  `bash hugegraph-server/hugegraph-dist/src/test/shell/test-cron-quote.sh` and
+  `test-override-guards.sh` locally after changing this module's
+  `hg-pd-dist/.../bin/util.sh`, since they also validate PD's copy. Server's CI
+  already runs both for every PR (see [server-tests.yml](../.github/workflows/server-tests.yml)).
 
 ## Cross-module traps
 

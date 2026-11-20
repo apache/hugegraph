@@ -979,7 +979,7 @@ TELEMETRY_TOOL_OPTIONS=$(cat "${TELEMETRY_CAPTURE}.tool-options")
     fail "telemetry agent setup dropped the crash-file defaults"
 [[ "$TELEMETRY_TOOL_OPTIONS" == *" -XX:ErrorFile=/operator/hs_err.log "* ]] ||
     fail "telemetry agent setup dropped the operator's JAVA_TOOL_OPTIONS"
-[[ "$TELEMETRY_TOOL_OPTIONS" =~ \ -javaagent:[^\ ]*/opentelemetry-javaagent\.jar$ ]] ||
+[[ "$TELEMETRY_TOOL_OPTIONS" =~ \ [\'\"]?-javaagent:.*/opentelemetry-javaagent\.jar[\'\"]?$ ]] ||
     fail "telemetry agent was not added to JAVA_TOOL_OPTIONS"
 
 JDK21_CAPTURE="${TEMP_DIR}/jdk21.args"

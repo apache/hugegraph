@@ -161,6 +161,17 @@ jobs:
           fi
           echo "can_run=true" >> "$GITHUB_OUTPUT"
 
+      - name: Run path-override guard and quoting unit tests
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          # Pure bash harnesses: no JVM/cluster/real crontab needed (crontab is
+          # stubbed).
+          SHELL_TEST_DIR=hugegraph-server/hugegraph-dist/src/test/shell
+          bash "$SHELL_TEST_DIR/test-canonicalize.sh"
+          bash "$SHELL_TEST_DIR/test-cron-quote.sh"
+          bash "$SHELL_TEST_DIR/test-override-guards.sh"
+          bash "$SHELL_TEST_DIR/test-launcher-argv.sh"
+
       - name: Run start-hugegraph.sh foreground mode tests
         if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'true' }}
         run: |

@@ -34,12 +34,12 @@ fi
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
 LIB="$TOP/lib"
 EXT="$TOP/ext"
-PLUGINS="$TOP/plugins"
-LOGS="$TOP/logs"
-OUTPUT=${LOGS}/hugegraph-server.log
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+OUTPUT="${LOGS}/hugegraph-server.log"
 GITHUB="https://github.com"
 
 # Launcher errors and warnings go to ${OUTPUT} (hugegraph-server.log) when it can
@@ -93,7 +93,7 @@ CP="$CP":$(find -L $LIB -name '*.jar' \
 # Add the jars in ext (at any subdirectory depth)
 CP="$CP":$(find -L $EXT -name '*.jar' | sort | tr '\n' ':')
 # Add the jars in plugins (at any subdirectory depth), check "javaagent" related jars carefully
-CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find -L "$PLUGINS" -name '*.jar' | sort | tr '\n' ':')
 
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
@@ -106,9 +106,9 @@ cd "${TOP}" || exit 1
 
 # Find java & enable server option
 if [ "$JAVA_HOME" = "" ]; then
-    JAVA="java -server"
+    JAVA=("java" "-server")
 else
-    JAVA="$JAVA_HOME/bin/java -server"
+    JAVA=("$JAVA_HOME/bin/java" "-server")
 fi
 
 # Pick the JVM banner line explicitly, anchored to its "java version"/"openjdk
@@ -117,7 +117,7 @@ fi
 # loaded that way may print its own banner containing 'version "..."' (an APM
 # agent, for example), so matching any line with 'version "' can read the
 # agent version instead of the runtime version.
-JAVA_VERSION=$($JAVA -version 2>&1 |
+JAVA_VERSION=$("${JAVA[@]}" -version 2>&1 |
                awk -F'"' '/^(java|openjdk) version "/ {print $2; exit}' |
                sed 's/^1\.//' | cut -d'.' -f1)
 # Drop any pre-release suffix, e.g. "24-ea" -> "24"
@@ -132,18 +132,40 @@ if [[ ! -r ${JVM_MODULE_OPTIONS} ]]; then
     exit 1
 fi
 
-# Set Java options
-if [ "$JAVA_OPTIONS" = "" ]; then
+# Set Java options.
+# Script-generated options are kept in arrays so that overridden paths
+# containing spaces (CONF/LOGS/PLUGINS) remain a single argument when passed to
+# java. User-supplied strings ($JAVA_OPTIONS / $USER_OPTION) keep the historical
+# whitespace-splitting contract. Built in JAVA_OPTIONS_ARR (not JAVA_OPTIONS)
+# so the exported scalar JAVA_OPTIONS stays intact for any child inheriting
+# this environment -- Bash arrays cannot be exported.
+JAVA_OPTIONS_ENV="${JAVA_OPTIONS}"
+JAVA_OPTIONS_ARR=()
+if [ "$JAVA_OPTIONS_ENV" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
     if [ $? -ne 0 ]; then
         report_error "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory"
         exit 1
     fi
-    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${USER_OPTION}"
+    JAVA_OPTIONS_ARR=("-Xms${MIN_MEM}m" "-Xmx${XMX}m")
+
+    # Split user-supplied options on whitespace (legacy behaviour).
+    # Use NUL (not newline) as the read delimiter so multi-line values
+    # (e.g. Helm javaOpts/Compose `|` blocks) are not silently truncated
+    # at the first line.
+    USER_OPTIONS=()
+    read -r -d '' -a USER_OPTIONS <<< "${USER_OPTION}"$'\0' || true
+    JAVA_OPTIONS_ARR+=(${USER_OPTIONS[@]+"${USER_OPTIONS[@]}"})
 
     # Rolling out detailed GC logs
-    #JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseGCLogFileRotation -XX:GCLogFileSize=10M -XX:NumberOfGCLogFiles=3 \
-    #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
+    # If enabling this: first add
+    #   reject_unsafe_path "$LOGS" "-l logs dir (GC log)" xlog || exit 1
+    # before it. $LOGS is not currently guarded against ':' -- the JVM's
+    # -Xlog grammar also delimits on ':', so an embedded one desyncs the
+    # parser and the JVM refuses to start (see start-hugegraph-store.sh).
+    #JAVA_OPTIONS_ARR+=("-Xlog:gc=info:file=${LOGS}/gc.log:time,uptime,level,tags:filecount=3,filesize=100m")
+else
+    read -r -d '' -a JAVA_OPTIONS_ARR <<< "${JAVA_OPTIONS_ENV}"$'\0' || true
 fi
 
 # Keep JVM/caller GC selection by default; explicitly select G1 when requested.
@@ -151,27 +173,33 @@ case "$GC_OPTION" in
     ""|g1|G1)
         if [[ "$GC_OPTION" == g1 || "$GC_OPTION" == G1 ]]; then
             echo "Using G1GC"
-            JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseG1GC"
+            JAVA_OPTIONS_ARR+=("-XX:+UseG1GC")
         else
             echo "Using JVM garbage collector configuration"
         fi
-        JAVA_OPTIONS="-XX:+ParallelRefProcEnabled -XX:InitiatingHeapOccupancyPercent=50 \
-                      -XX:G1RSetUpdatingPauseTimePercent=5 ${JAVA_OPTIONS}"
+        JAVA_OPTIONS_ARR=("-XX:+ParallelRefProcEnabled" "-XX:InitiatingHeapOccupancyPercent=50"
+                      "-XX:G1RSetUpdatingPauseTimePercent=5"
+                      ${JAVA_OPTIONS_ARR[@]+"${JAVA_OPTIONS_ARR[@]}"})
         ;;
     zgc|ZGC)
         echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
-        JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseZGC -XX:+UnlockExperimentalVMOptions \
-                                      -XX:ConcGCThreads=2 -XX:ParallelGCThreads=6 \
-                                      -XX:ZCollectionInterval=120 -XX:ZAllocationSpikeTolerance=5 \
-                                      -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
+        JAVA_OPTIONS_ARR+=("-XX:+UseZGC" "-XX:+UnlockExperimentalVMOptions"
+                       "-XX:ConcGCThreads=2" "-XX:ParallelGCThreads=6"
+                       "-XX:ZCollectionInterval=120" "-XX:ZAllocationSpikeTolerance=5"
+                       "-XX:+UnlockDiagnosticVMOptions" "-XX:-ZProactive")
         ;;
     *)
         report_error "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC"
         exit 1
 esac
 
-JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml"
-SECURITY_MANAGER_OPTION=""
+JVM_OPTIONS=("-Dlog4j.configurationFile=${CONF}/log4j2.xml"
+             "-Dlogging.config=${CONF}/log4j2.xml"
+             "-DLOG_PATH=${LOGS}"
+             "-Dbolt.log.path=${LOGS}"
+             "-Dlogging.path=${LOGS}")
+
+SECURITY_MANAGER_OPTION=()
 if [[ ${OPEN_SECURITY_CHECK} == "true" ]]; then
     if [[ ${JAVA_VERSION} -gt ${MAX_SECURITY_JAVA_VERSION} ]]; then
         SECURITY_UNSUPPORTED_MSG=$(cat <<EOF
@@ -195,7 +223,10 @@ EOF
         # loads to, so the bootstrap stays the single validator and mirrors its
         # rejection into the server log (see hugegraph.bootstrap.error.log below).
         SECURITY_PROPERTIES_OVERRIDDEN="false"
-        for OPTION in ${JAVA_OPTIONS} ${_JAVA_OPTIONS:-}; do
+        JAVA_OPTIONS_ENV_WORDS=()
+        read -r -d '' -a JAVA_OPTIONS_ENV_WORDS <<< "${_JAVA_OPTIONS:-}"$'\0' || true
+        for OPTION in ${JAVA_OPTIONS_ARR[@]+"${JAVA_OPTIONS_ARR[@]}"} \
+                      ${JAVA_OPTIONS_ENV_WORDS[@]+"${JAVA_OPTIONS_ENV_WORDS[@]}"}; do
             case "${OPTION}" in
                 -Djava.security.properties=)
                     SECURITY_PROPERTIES_OVERRIDDEN="false" ;;
@@ -214,11 +245,10 @@ An upgraded deployment that reuses an older conf/ directory must add this file,
 or supply its own -Djava.security.properties=<file> setting a finite positive
 networkaddress.cache.ttl."
     fi
-    JVM_OPTIONS="${JVM_OPTIONS} \
-                 -Djava.security.properties=${SECURITY_PROPERTIES}"
+    JVM_OPTIONS+=("-Djava.security.properties=${SECURITY_PROPERTIES}")
     if [[ ${JAVA_VERSION} -ge 18 ]]; then
         # Required to install HugeSecurityManager programmatically on JDK 18+.
-        SECURITY_MANAGER_OPTION="-Djava.security.manager=allow"
+        SECURITY_MANAGER_OPTION=("-Djava.security.manager=allow")
     fi
 fi
 
@@ -237,7 +267,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
         fi
     fi
 
-    # Note: remember update it if we change the jar 
+    # Note: remember update it if we change the jar
     expected_md5="e3bcbbe8ed9b6d840fa4c333b36f369f"
     actual_md5=$(md5sum "${OT_JAR_PATH}" | awk '{print $1}')
 
@@ -250,7 +280,19 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     # Note: check carefully if multi "javeagent" params are set
     # Append, so the operator's JAVA_TOOL_OPTIONS stays; the crash-file defaults
     # are put in front of all of it below.
-    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
+    # The JVM splits JAVA_TOOL_OPTIONS on whitespace, so an overridden $PLUGINS
+    # containing a space would turn the agent option into two arguments and fail
+    # the launch. The JVM does honour quoted options, so wrap the option in a
+    # quote character the path itself does not contain.
+    if [[ ${OT_JAR_PATH} != *"'"* ]]; then
+        AGENT_QUOTE="'"
+    elif [[ ${OT_JAR_PATH} != *\"* ]]; then
+        AGENT_QUOTE='"'
+    else
+        report_error "## Error: ${OT_JAR_PATH} contains both quote characters, which JAVA_TOOL_OPTIONS cannot carry."
+        exit 1
+    fi
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }${AGENT_QUOTE}-javaagent:${OT_JAR_PATH}${AGENT_QUOTE}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
     export OTEL_LOGS_EXPORTER=none
@@ -267,7 +309,7 @@ fi
 # stderr only reaches hugegraph-server-stdout.log; in STDOUT_MODE it reaches the
 # container log, which keeps a single earlier generation, so the file copy is
 # what survives a crash loop on a mounted logs volume.
-JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
+JVM_OPTIONS+=("-Dhugegraph.bootstrap.error.log=${OUTPUT}")
 
 # Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
 # defaults come first in JAVA_TOOL_OPTIONS, ahead of the operator's own value. The
@@ -363,14 +405,16 @@ esac
 
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
+    exec "${JAVA[@]}" @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" \
+        "${JVM_OPTIONS[@]}" ${JAVA_OPTIONS_ARR[@]+"${JAVA_OPTIONS_ARR[@]}"} \
+        ${SECURITY_MANAGER_OPTION[@]+"${SECURITY_MANAGER_OPTION[@]}"} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
-        ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
+        "${OPEN_SECURITY_CHECK}" "${GREMLIN_SERVER_CONF}" "${REST_SERVER_CONF}"
 else
-    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
+    exec "${JAVA[@]}" @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" \
+        "${JVM_OPTIONS[@]}" ${JAVA_OPTIONS_ARR[@]+"${JAVA_OPTIONS_ARR[@]}"} \
+        ${SECURITY_MANAGER_OPTION[@]+"${SECURITY_MANAGER_OPTION[@]}"} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
-        ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
-        >> ${LOGS}/hugegraph-server-stdout.log 2>&1
+        "${OPEN_SECURITY_CHECK}" "${GREMLIN_SERVER_CONF}" "${REST_SERVER_CONF}" \
+        >> "${LOGS}/hugegraph-server-stdout.log" 2>&1
 fi
