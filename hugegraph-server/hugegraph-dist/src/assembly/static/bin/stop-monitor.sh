@@ -45,19 +45,23 @@ MONITOR_Q="$(shell_quote "$MONITOR_RAW")"
 # also match as a SUBSTRING of a different install's longer path (e.g. the
 # key for /opt/hg matches a crontab line for /data/opt/hg), removing the
 # wrong install's job.
-MONITOR_KEY="$MONITOR_Q"
-MONITOR_LEGACY_KEY="&& $MONITOR_RAW"
-
-# Both keys additionally depend only on $TOP, so two instances of one install
-# with different -i pid files would otherwise be indistinguishable.
-# Only disambiguate by pid file when -i is explicitly set (stop-hugegraph.sh
-# exports PID_FILE_OVERRIDE before calling this script in that case): the
-# default single-instance (no -i) key and job stay byte-for-byte unchanged so
-# jobs installed by older, pre-this-fix versions are still removed on upgrade.
-# Must stay in sync with start-monitor.sh's keys.
+#
+# Every key is tagged with a trailing "# pidfile:..." comment, matching what
+# start-monitor.sh writes. The default (no -i) case is tagged
+# "# pidfile:default" rather than left bare: a bare "$MONITOR_Q" key is a
+# literal substring of every "-i" job's key ("$MONITOR_Q # pidfile:<path>"),
+# so grep -F would match those too -- making stop-hugegraph.sh without -i
+# remove every instance's monitor job. Must stay in sync with
+# start-monitor.sh's keys.
+PID_TAG="default"
 if [ -n "$PID_FILE_OVERRIDE" ]; then
     PID_FILE_Q="$(shell_quote "$PID_FILE_OVERRIDE")"
-    MONITOR_KEY="$MONITOR_Q # pidfile:$PID_FILE_Q"
+    PID_TAG="$PID_FILE_Q"
+fi
+MONITOR_KEY="$MONITOR_Q # pidfile:$PID_TAG"
+if [ -n "$PID_FILE_OVERRIDE" ]; then
     MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:$PID_FILE_OVERRIDE"
+else
+    MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:default"
 fi
 crontab_remove "$MONITOR_KEY" "$MONITOR_LEGACY_KEY"

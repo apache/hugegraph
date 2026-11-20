@@ -62,8 +62,6 @@ if [ -n "$PLUGINS_OVERRIDE" ]; then
     PLUGINS_Q="$(cron_quote "$PLUGINS_OVERRIDE" "PLUGINS_OVERRIDE")" || exit 1
     CRONTAB_JOB="$CRONTAB_JOB export PLUGINS_OVERRIDE=$PLUGINS_Q &&"
 fi
-CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q"
-
 # Keys cover both the current quoted form and the legacy unquoted form (older
 # start-monitor.sh versions wrote "... && $TOP/bin/monitor-hugegraph.sh"
 # without quoting), so an in-place upgrade detects an existing job as a
@@ -74,20 +72,25 @@ CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q"
 # key for /opt/hg matches a crontab line for /data/opt/hg), causing a
 # false-positive "already installed" here and a wrong-job removal in
 # stop-monitor.sh.
-MONITOR_KEY="$MONITOR_Q"
-MONITOR_LEGACY_KEY="&& $MONITOR_RAW"
-
-# Both keys additionally depend only on $TOP, so two instances of one install
-# with different -i pid files would otherwise be indistinguishable.
-# Only disambiguate by pid file when -i is explicitly set: this is the
-# multi-instance case, and leaving the common single-instance (no -i) job and
-# key byte-for-byte unchanged keeps recognizing jobs installed by older,
+#
+# Every job/key is tagged with a trailing "# pidfile:..." comment (ignored by
+# sh -c at execution) so it can be matched per pid file. The default
+# (no -i) case is tagged "# pidfile:default" rather than left bare: a bare
+# "$MONITOR_Q" key would be a literal substring of every "-i" job's key
+# (which is "$MONITOR_Q # pidfile:<path>"), so grep -F would match it too --
+# making stop-hugegraph.sh without -i remove every instance's monitor job,
+# and start-monitor.sh without -i treat any existing -i job as "already
+# installed" and skip installing the default one.
+PID_TAG="default"
 if [ -n "$PID_FILE_OVERRIDE" ]; then
     PID_FILE_Q="$(cron_quote "$PID_FILE_OVERRIDE" "pid file (-i)")" || exit 1
-    # The trailing "# pidfile:..." is a shell comment (ignored by sh -c at
-    # execution), carried purely so the line can be matched per pid file.
-    CRONTAB_JOB="$CRONTAB_JOB # pidfile:$PID_FILE_Q"
-    MONITOR_KEY="$MONITOR_Q # pidfile:$PID_FILE_Q"
+    PID_TAG="$PID_FILE_Q"
+fi
+CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q # pidfile:$PID_TAG"
+MONITOR_KEY="$MONITOR_Q # pidfile:$PID_TAG"
+if [ -n "$PID_FILE_OVERRIDE" ]; then
     MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:$PID_FILE_OVERRIDE"
+else
+    MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:default"
 fi
 crontab_append "$CRONTAB_JOB" "$MONITOR_KEY" "$MONITOR_LEGACY_KEY"
