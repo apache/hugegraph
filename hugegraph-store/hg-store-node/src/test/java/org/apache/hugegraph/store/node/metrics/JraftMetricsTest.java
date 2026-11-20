@@ -21,7 +21,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hugegraph.store.node.util.HgRegexUtil;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 /**
  * 2022/3/7

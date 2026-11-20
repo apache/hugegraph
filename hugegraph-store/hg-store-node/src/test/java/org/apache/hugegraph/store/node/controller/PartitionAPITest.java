@@ -29,8 +29,8 @@ import org.apache.hugegraph.store.HgStoreEngine;
 import org.apache.hugegraph.store.PartitionEngine;
 import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.node.grpc.HgStoreNodeService;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.conf.Configuration;
@@ -51,19 +51,19 @@ public class PartitionAPITest {
         List<PartitionAPI.Raft> rafts =
                 (List<PartitionAPI.Raft>) api.getPartitions("").get("partitions");
 
-        Assert.assertEquals(2, rafts.size());
+        Assertions.assertEquals(2, rafts.size());
         PartitionAPI.Raft followerRaft = rafts.get(0);
-        Assert.assertEquals(1, followerRaft.getGroupId());
-        Assert.assertEquals(State.STATE_FOLLOWER.name(), followerRaft.getRole());
-        Assert.assertNull(followerRaft.getConf());
-        Assert.assertNull(followerRaft.getPeers());
-        Assert.assertNull(followerRaft.getLearners());
+        Assertions.assertEquals(1, followerRaft.getGroupId());
+        Assertions.assertEquals(State.STATE_FOLLOWER.name(), followerRaft.getRole());
+        Assertions.assertNull(followerRaft.getConf());
+        Assertions.assertNull(followerRaft.getPeers());
+        Assertions.assertNull(followerRaft.getLearners());
 
         PartitionAPI.Raft leaderRaft = rafts.get(1);
-        Assert.assertEquals(2, leaderRaft.getGroupId());
-        Assert.assertEquals(State.STATE_LEADER.name(), leaderRaft.getRole());
-        Assert.assertEquals("127.0.0.1:8510", leaderRaft.getConf());
-        Assert.assertEquals(Collections.singletonList(PeerId.parsePeer("127.0.0.1:8510")),
+        Assertions.assertEquals(2, leaderRaft.getGroupId());
+        Assertions.assertEquals(State.STATE_LEADER.name(), leaderRaft.getRole());
+        Assertions.assertEquals("127.0.0.1:8510", leaderRaft.getConf());
+        Assertions.assertEquals(Collections.singletonList(PeerId.parsePeer("127.0.0.1:8510")),
                             leaderRaft.getPeers());
     }
 
@@ -77,12 +77,12 @@ public class PartitionAPITest {
         List<PartitionAPI.Raft> rafts =
                 (List<PartitionAPI.Raft>) api.getPartitions("").get("partitions");
 
-        Assert.assertEquals(1, rafts.size());
+        Assertions.assertEquals(1, rafts.size());
         PartitionAPI.Raft raft = rafts.get(0);
-        Assert.assertEquals(1, raft.getGroupId());
-        Assert.assertNull(raft.getConf());
-        Assert.assertNull(raft.getPeers());
-        Assert.assertNull(raft.getLearners());
+        Assertions.assertEquals(1, raft.getGroupId());
+        Assertions.assertNull(raft.getConf());
+        Assertions.assertNull(raft.getPeers());
+        Assertions.assertNull(raft.getLearners());
     }
 
     private static PartitionAPI newApi(PartitionEngine... engines) {

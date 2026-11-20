@@ -22,6 +22,7 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.CONF_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.JVM_MODULE_OPTIONS_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.JAVA_CMD;
 import static org.apache.hugegraph.ct.base.ClusterConstant.LOG4J_FILE;
+import static org.apache.hugegraph.ct.base.ClusterConstant.ROCKSDB_JAR_PREFIX;
 import static org.apache.hugegraph.ct.base.ClusterConstant.STORE_JAR_PREFIX;
 import static org.apache.hugegraph.ct.base.ClusterConstant.STORE_LIB_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.STORE_TEMPLATE_PATH;
@@ -70,6 +71,13 @@ public class StoreNodeWrapper extends AbstractNodeWrapper {
                                            .resolve(BIN_DIR).resolve(JVM_MODULE_OPTIONS_FILE)));
 
             String storeNodeJarPath = getFileInDir(workPath, STORE_JAR_PREFIX);
+            // Mirror start-hugegraph-store.sh: RocksDB JNI event callbacks run on native
+            // threads and resolve org.rocksdb.* via the system classloader, so rocksdbjni
+            // must be on the launcher classpath, not only inside BOOT-INF/lib.
+            String rocksdbJarPath = getFileInDir(workPath, ROCKSDB_JAR_PREFIX);
+            if (rocksdbJarPath.isEmpty()) {
+                throw new AssertionError("No rocksdbjni jar found in " + workPath);
+            }
             startCmd.addAll(Arrays.asList(
                     "-Dname=HugeGraphStore" + this.index,
                     "-Dlog4j.configurationFile=" + configPath + CONF_DIR
@@ -84,7 +92,8 @@ public class StoreNodeWrapper extends AbstractNodeWrapper {
                     "-XX:HeapDumpPath=" + configPath + "logs",
                     "-Dspring.config.location=" + configPath + CONF_DIR
                     + File.separator + "application.yml",
-                    "-jar", storeNodeJarPath));
+                    "-cp", rocksdbJarPath + File.pathSeparator + storeNodeJarPath,
+                    "org.springframework.boot.loader.JarLauncher"));
             ProcessBuilder processBuilder = runCmd(startCmd, stdoutFile);
             this.instance = processBuilder.start();
         } catch (IOException ex) {

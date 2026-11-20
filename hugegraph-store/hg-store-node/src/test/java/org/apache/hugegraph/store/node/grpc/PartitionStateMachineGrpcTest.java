@@ -17,9 +17,9 @@
 
 package org.apache.hugegraph.store.node.grpc;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -48,7 +48,7 @@ import org.apache.hugegraph.store.raft.DefaultRaftClosure;
 import org.apache.hugegraph.store.raft.PartitionStateMachine;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.alipay.sofa.jraft.Iterator;
 import com.alipay.sofa.jraft.Status;
@@ -116,8 +116,8 @@ public class PartitionStateMachineGrpcTest {
 
             stateMachine.onApply(iterator);
 
-            assertNotNull("handler must retain the typed response for op " + methods[i],
-                          response.getResult());
+            assertNotNull(response.getResult(),
+                          "handler must retain the typed response for op " + methods[i]);
             assertEquals(ResCode.RES_CODE_OK, response.getResult().getStatus().getCode());
             assertEquals(1, callbacks.get());
             assertTrue(callbackStatus.get().isOk());
