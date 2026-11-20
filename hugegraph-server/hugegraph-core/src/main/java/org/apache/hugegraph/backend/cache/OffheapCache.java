@@ -254,8 +254,8 @@ public class OffheapCache extends AbstractCache<Id, Object> {
         public ByteBuffer asBuffer() {
             if (this.svalue == null) {
                 int listSize = 1;
-                if (this.value instanceof List) {
-                    listSize = ((List<?>) this.value).size();
+                if (this.value instanceof List<?> list) {
+                    listSize = list.size();
                 }
 
                 BytesBuffer buffer = BytesBuffer.allocate(64 * listSize);

@@ -242,10 +242,10 @@ public class CachedBackendStore implements BackendStore {
 
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof QueryId)) {
+            if (!(other instanceof QueryId queryId)) {
                 return false;
             }
-            return this.query.equals(((QueryId) other).query);
+            return this.query.equals(queryId.query);
         }
 
         @Override

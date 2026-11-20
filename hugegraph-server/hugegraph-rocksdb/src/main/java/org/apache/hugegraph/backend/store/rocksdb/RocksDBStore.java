@@ -518,16 +518,37 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
             Set<Id> olapPks = query.olapPks();
             if (this.isGraphStore && !olapPks.isEmpty()) {
                 List<Iterator<BackendEntry>> iterators = new ArrayList<>();
-                for (Id pk : olapPks) {
-                    Query q = query.copy();
-                    table = this.table(this.olapTableName(pk));
-                    iterators.add(table.query(this.session(HugeType.OLAP), q));
+                try {
+                    for (Id pk : olapPks) {
+                        Query q = query.copy();
+                        table = this.table(this.olapTableName(pk));
+                        iterators.add(table.query(this.session(HugeType.OLAP), q));
+                    }
+                } catch (Throwable failure) {
+                    // Ownership passes to MergeIterator only after all queries succeed.
+                    for (Iterator<BackendEntry> iterator : iterators) {
+                        closeAfterQueryFailure(iterator, failure);
+                    }
+                    closeAfterQueryFailure(entries, failure);
+                    throw failure;
                 }
                 entries = new MergeIterator<>(entries, iterators, BackendEntry::mergeable);
             }
             return entries;
         } finally {
             readLock.unlock();
+        }
+    }
+
+    private static void closeAfterQueryFailure(Iterator<?> iterator, Throwable failure) {
+        if (iterator instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Throwable closeFailure) {
+                if (failure != closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
         }
     }
 

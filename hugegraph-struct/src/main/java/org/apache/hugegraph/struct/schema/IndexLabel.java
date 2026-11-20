@@ -203,16 +203,16 @@ public class IndexLabel extends SchemaElement {
         SchemaLabel label;
         switch (baseType) {
             case VERTEX_LABEL:
-                if (baseValue instanceof String) {
-                    label = graph.vertexLabel((String) baseValue);
+                if (baseValue instanceof String name) {
+                    label = graph.vertexLabel(name);
                 } else {
                     assert baseValue instanceof Id;
                     label = graph.vertexLabel((Id) baseValue);
                 }
                 break;
             case EDGE_LABEL:
-                if (baseValue instanceof String) {
-                    label = graph.edgeLabel((String) baseValue);
+                if (baseValue instanceof String name) {
+                    label = graph.edgeLabel(name);
                 } else {
                     assert baseValue instanceof Id;
                     label = graph.edgeLabel((Id) baseValue);

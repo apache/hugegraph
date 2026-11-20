@@ -20,15 +20,28 @@ templates:
   - vermeer-admin-secret.yaml
   - vermeer-statefulset.yaml
 set:
+  bootstrap.pdReplicas: 3
+  bootstrap.storeReplicas: 3
+  bootstrap.initialStoreCount: 3
   vermeer.enabled: true
 kubernetesProvider:
   scheme:
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     "v1/Secret":
       gvr:
         version: v1
         resource: secrets
       namespaced: true
   objects:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: unrelated-data
+        namespace: NAMESPACE
     - apiVersion: v1
       kind: Secret
       metadata:

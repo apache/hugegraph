@@ -88,7 +88,7 @@ public abstract class WrappedIterator<R> implements CIter<R> {
             try {
                 ((AutoCloseable) iterator).close();
             } catch (Exception e) {
-                throw new IllegalStateException("Failed to close iterator");
+                throw new IllegalStateException("Failed to close iterator", e);
             }
         }
     }

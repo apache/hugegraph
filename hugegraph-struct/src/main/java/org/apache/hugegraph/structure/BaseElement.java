@@ -368,8 +368,8 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable, 
         for (BaseProperty<?> p : this.properties.values()) {
             size++;
             if (p.propertyKey().cardinality() != Cardinality.SINGLE &&
-                p.value() instanceof Collection) {
-                size += ((Collection<?>) p.value()).size();
+                p.value() instanceof Collection<?> values) {
+                size += values.size();
             }
         }
         return size;

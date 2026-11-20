@@ -716,8 +716,8 @@ public class IndexLabelBuilder extends AbstractBuilder
 
     private boolean allStringIndex(List<?> fields) {
         for (Object field : fields) {
-            PropertyKey pk = field instanceof Id ?
-                             this.graph().propertyKey((Id) field) :
+            PropertyKey pk = field instanceof Id id ?
+                             this.graph().propertyKey(id) :
                              this.graph().propertyKey((String) field);
             DataType dataType = pk.dataType();
             if (dataType.isNumber() || dataType.isDate()) {

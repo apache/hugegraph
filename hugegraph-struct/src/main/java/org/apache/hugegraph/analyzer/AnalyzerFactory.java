@@ -71,6 +71,8 @@ public class AnalyzerFactory {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static void register(String name, String classPath) {
+        // analyzer() looks names up in lower case
+        name = name.toLowerCase();
         ClassLoader classLoader = AnalyzerFactory.class.getClassLoader();
         Class<?> clazz;
         try {

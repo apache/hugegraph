@@ -167,8 +167,8 @@ public final class CypherTemporalFunctions {
         Map<String, Object> explainable = new LinkedHashMap<>(parameters);
         for (Map.Entry<String, Object> entry : explainable.entrySet()) {
             if (entry.getKey().startsWith(SYNTHETIC_PREFIX) &&
-                entry.getValue() instanceof Date) {
-                entry.setValue(new GroovyDate((Date) entry.getValue()));
+                entry.getValue() instanceof Date date) {
+                entry.setValue(new GroovyDate(date));
             }
         }
         return explainable;

@@ -110,8 +110,8 @@ public final class QueryList<R> implements AutoCloseable {
     public void close() throws Exception {
         List<Object> resources = new ArrayList<>();
         for (FlattenQuery<R> query : this.queries) {
-            if (query instanceof QueryList.IndexQuery) {
-                resources.addAll(((IndexQuery) query).holders);
+            if (query instanceof IndexQuery indexQuery) {
+                resources.addAll(indexQuery.holders);
             }
         }
         QueryBatch.closeAll(resources.toArray());

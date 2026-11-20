@@ -19,6 +19,7 @@ package org.apache.hugegraph.traversal.algorithm;
 
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,7 +72,7 @@ public class CustomizedCrosspointsTraverser extends HugeTraverser {
         Collection<Id> intersection = null;
         for (List<Id> ends : endVertices.values()) {
             if (intersection == null) {
-                intersection = ends;
+                intersection = new LinkedHashSet<>(ends);
             } else {
                 intersection = CollectionUtil.intersect(intersection, ends);
             }
@@ -83,7 +84,8 @@ public class CustomizedCrosspointsTraverser extends HugeTraverser {
         // Limit intersection number to limit crosspoints vertices in result
         int size = intersection.size();
         if (limit != NO_LIMIT && size > limit) {
-            intersection = newList(intersection).subList(0, size - 1);
+            intersection = new LinkedHashSet<>(
+                           newList(intersection).subList(0, (int) limit));
         }
 
         // Filter intersection paths

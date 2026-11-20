@@ -34,6 +34,13 @@ use `latest` images; pin component `image.digest` values when needed.
 The source installation and configuration examples below assume a repository
 checkout and commands run from its root.
 
+The [stable bootstrap configuration](docs/operations.md#stable-bootstrap-topology)
+always records initialization inputs separately from node replicas. Use a PD
+image with separate bootstrap and runtime quorum checks. PD membership changes,
+Store admission and safe retirement remain manual operations. Growing from one
+Store to three does not change existing data from RF=1 to RF=3; replica policy
+is configured independently with `pd.partition.defaultShardCount`.
+
 ## Install from source and open Hubble
 
 ```bash
@@ -181,6 +188,9 @@ PD/Store data between persistent and temporary storage.
 Vermeer adds separate Master and Worker data claims: two in standalone mode,
 or one Master claim plus one per Worker in cluster mode. Its storage flags
 inherit `persistence.enabled`; see [Vermeer storage](docs/vermeer.md#storage-and-recovery).
+
+Hubble persists its Text2GQL master key alongside H2. Existing releases may
+need a one-time API-key re-entry; see [Text2GQL credentials](docs/operations.md#hubble-text2gql-credentials).
 
 ### PD metadata namespace
 

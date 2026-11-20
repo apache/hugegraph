@@ -34,6 +34,7 @@ import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
+import org.apache.hugegraph.backend.serializer.MergeIterator;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.testutil.Assert;
@@ -475,6 +476,106 @@ public class QueryResultsTest {
         Assert.assertSame(filter, context.resultsFilter());
         Assert.assertNotSame(context.resultsFilter(),
                              new QueryResultContext(other).resultsFilter());
+    }
+
+    @Test
+    public void testMergeIteratorCloseClosesOriginIterator() throws Exception {
+        CountingIterator origin = new CountingIterator(1L, 2L);
+        CountingIterator other = new CountingIterator(1L);
+        MergeIterator<TestIdfiable, TestIdfiable> merged = new MergeIterator<>(
+                origin, ImmutableList.<Iterator<TestIdfiable>>of(other),
+                (element, merging) -> false);
+
+        Assert.assertTrue(merged.hasNext());
+        merged.next();
+        merged.close();
+
+        Assert.assertEquals(1, other.closed);
+        Assert.assertEquals(1, origin.closed);
+    }
+
+    @Test
+    public void testMergeIteratorCloseContinuesAfterFailures() {
+        CountingIterator origin = new CountingIterator(1L);
+        CountingIterator first = new CountingIterator(1L);
+        CountingIterator second = new CountingIterator(1L);
+        CountingIterator third = new CountingIterator(1L);
+        first.closeFailure = new IllegalStateException("first");
+        third.closeFailure = new IllegalStateException("third");
+        origin.closeFailure = new IllegalStateException("origin");
+        MergeIterator<TestIdfiable, TestIdfiable> merged = new MergeIterator<>(
+                origin, ImmutableList.<Iterator<TestIdfiable>>of(first, second, third),
+                (element, merging) -> false);
+
+        Throwable failure = Assert.assertThrows(IllegalStateException.class, () -> {
+            merged.close();
+        });
+        Assert.assertSame(first.closeFailure, failure);
+        Assert.assertEquals(1, first.closed);
+        Assert.assertEquals(1, second.closed);
+        Assert.assertEquals(1, third.closed);
+        Assert.assertEquals(1, origin.closed);
+        Assert.assertEquals(2, failure.getSuppressed().length);
+        Assert.assertSame(third.closeFailure, failure.getSuppressed()[0]);
+        Assert.assertSame(origin.closeFailure, failure.getSuppressed()[1]);
+    }
+
+    @Test
+    public void testMergeIteratorCloseClosesEmptyIterator() throws Exception {
+        CountingIterator origin = new CountingIterator(1L);
+        CountingIterator empty = new CountingIterator();
+        CountingIterator other = new CountingIterator(1L);
+        MergeIterator<TestIdfiable, TestIdfiable> merged = new MergeIterator<>(
+                origin, ImmutableList.<Iterator<TestIdfiable>>of(empty, other),
+                (element, merging) -> false);
+
+        Assert.assertTrue(merged.hasNext());
+        merged.next();
+        merged.close();
+        Assert.assertEquals(1, empty.closed);
+        Assert.assertEquals(1, other.closed);
+        Assert.assertEquals(1, origin.closed);
+    }
+
+    @Test
+    public void testMergeIteratorClosesInputsWhenHasNextFails() {
+        this.assertMergeIteratorClosesInputsOnConstructionFailure(false);
+    }
+
+    @Test
+    public void testMergeIteratorClosesInputsWhenNextFails() {
+        this.assertMergeIteratorClosesInputsOnConstructionFailure(true);
+    }
+
+    private void assertMergeIteratorClosesInputsOnConstructionFailure(boolean failNext) {
+        CountingIterator origin = new CountingIterator(1L);
+        CountingIterator first = new CountingIterator(1L);
+        CountingIterator second = new CountingIterator(1L);
+        CountingIterator unvisited = new CountingIterator(1L);
+        RuntimeException failure = new IllegalStateException("iteration failure");
+        if (failNext) {
+            second.nextFailure = failure;
+        } else {
+            second.hasNextFailure = failure;
+        }
+        first.closeFailure = new IllegalStateException("child close failure");
+        origin.closeFailure = new IllegalStateException("origin close failure");
+
+        Throwable thrown = Assert.assertThrows(IllegalStateException.class, () -> {
+            new MergeIterator<>(origin,
+                                ImmutableList.<Iterator<TestIdfiable>>of(first, second,
+                                                                        unvisited),
+                                (element, merging) -> false);
+        });
+        Assert.assertSame(failure, thrown);
+        Assert.assertEquals(1, first.closed);
+        Assert.assertEquals(1, second.closed);
+        Assert.assertEquals(1, unvisited.closed);
+        Assert.assertEquals(1, origin.closed);
+        Assert.assertEquals(1, thrown.getSuppressed().length);
+        Assert.assertSame(first.closeFailure, thrown.getSuppressed()[0]);
+        Assert.assertEquals(1, first.closeFailure.getSuppressed().length);
+        Assert.assertSame(origin.closeFailure, first.closeFailure.getSuppressed()[0]);
     }
 
     private static QueryResults<TestIdfiable> resultsOf(List<Long> input,

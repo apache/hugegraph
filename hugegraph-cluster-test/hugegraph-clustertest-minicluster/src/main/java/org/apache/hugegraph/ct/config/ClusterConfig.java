@@ -92,7 +92,7 @@ public class ClusterConfig {
     public List<String> getPDRestAddrs() {
         List<String> addrs = new ArrayList<>();
         for (PDConfig pdConfig : pdConfigs) {
-            addrs.add(pdConfig.getRaftAddress());
+            addrs.add("127.0.0.1" + ":" + pdConfig.getRestPort());
         }
         return addrs;
     }

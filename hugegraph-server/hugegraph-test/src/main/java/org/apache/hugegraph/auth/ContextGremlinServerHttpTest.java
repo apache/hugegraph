@@ -28,15 +28,20 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.hugegraph.dist.HugeGremlinServer;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.server.HugeGraphWsAndHttpChannelizer;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.gremlin.driver.Client;
 import org.apache.tinkerpop.gremlin.driver.Cluster;
+import org.apache.tinkerpop.gremlin.server.GremlinServer;
 import org.apache.tinkerpop.gremlin.server.Settings;
 import org.apache.tinkerpop.gremlin.server.channel.WebSocketChannelizer;
 import org.apache.tinkerpop.gremlin.server.channel.WsAndHttpChannelizer;
@@ -44,10 +49,72 @@ import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 import org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV3;
 import org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV1;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import io.netty.channel.Channel;
 
 public class ContextGremlinServerHttpTest {
+
+    @Test
+    public void testStartFailureKeepsCause() throws Exception {
+        GremlinServer server = Mockito.mock(GremlinServer.class);
+        RuntimeException failure = new RuntimeException("Address already in use");
+        Mockito.when(server.start())
+               .thenReturn(CompletableFuture.failedFuture(failure));
+        Mockito.when(server.stop())
+               .thenReturn(CompletableFuture.completedFuture(null));
+
+        Assert.assertThrows(CompletionException.class, () -> {
+            HugeGremlinServer.startPrepared(server);
+        }, e -> {
+            Assert.assertInstanceOf(HugeException.class, e.getCause());
+            Assert.assertEquals("Failed to start Gremlin Server",
+                                e.getCause().getMessage());
+            Assert.assertSame(failure, e.getCause().getCause());
+        });
+        Mockito.verify(server).stop();
+    }
+
+    @Test
+    public void testStartAndStopFailureKeepBothCauses() throws Exception {
+        GremlinServer server = Mockito.mock(GremlinServer.class);
+        RuntimeException startFailure = new RuntimeException("Start failure");
+        RuntimeException stopFailure = new RuntimeException("Stop failure");
+        Mockito.when(server.start())
+               .thenReturn(CompletableFuture.failedFuture(startFailure));
+        Mockito.when(server.stop())
+               .thenReturn(CompletableFuture.failedFuture(stopFailure));
+
+        Assert.assertThrows(CompletionException.class, () -> {
+            HugeGremlinServer.startPrepared(server);
+        }, e -> {
+            Assert.assertInstanceOf(HugeException.class, e.getCause());
+            Assert.assertSame(startFailure, e.getCause().getCause());
+            Assert.assertEquals(1, e.getCause().getSuppressed().length);
+            Assert.assertSame(stopFailure, e.getCause().getSuppressed()[0].getCause());
+        });
+        Mockito.verify(server).stop();
+    }
+
+    @Test
+    public void testStartAndSynchronousStopFailureKeepBothCauses() throws Exception {
+        GremlinServer server = Mockito.mock(GremlinServer.class);
+        RuntimeException startFailure = new RuntimeException("Start failure");
+        RuntimeException stopFailure = new RuntimeException("Stop failure");
+        Mockito.when(server.start())
+               .thenReturn(CompletableFuture.failedFuture(startFailure));
+        Mockito.when(server.stop()).thenThrow(stopFailure);
+
+        Assert.assertThrows(CompletionException.class, () -> {
+            HugeGremlinServer.startPrepared(server);
+        }, e -> {
+            Assert.assertInstanceOf(HugeException.class, e.getCause());
+            Assert.assertSame(startFailure, e.getCause().getCause());
+            Assert.assertEquals(1, e.getCause().getSuppressed().length);
+            Assert.assertSame(stopFailure, e.getCause().getSuppressed()[0]);
+        });
+        Mockito.verify(server).stop();
+    }
 
     @Test
     public void testOnlyStandardChannelizerIsAdapted() {

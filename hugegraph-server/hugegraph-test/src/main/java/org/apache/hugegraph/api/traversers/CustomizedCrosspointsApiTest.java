@@ -62,4 +62,26 @@ public class CustomizedCrosspointsApiTest extends BaseApiTest {
         List<Object> paths = assertJsonContains(content, "paths");
         Assert.assertEquals(2, paths.size());
     }
+
+    @Test
+    public void testLimitCountsDistinctCrosspoints() {
+        String markoId = listAllVertexName2Ids().get("marko");
+        int[] limits = {1, 2, 3, -1};
+        int[] expected = {1, 2, 2, 2};
+        for (int i = 0; i < limits.length; i++) {
+            String reqBody = String.format(
+                    "{\"sources\":{\"ids\":[\"%s\"]}," +
+                    "\"path_patterns\":[" +
+                    "{\"steps\":[{\"direction\":\"BOTH\",\"labels\":[],\"degree\":-1}]}," +
+                    "{\"steps\":[{\"direction\":\"BOTH\",\"labels\":[],\"degree\":-1}]}]," +
+                    "\"with_path\":true,\"capacity\":-1,\"limit\":%d}",
+                    markoId, limits[i]);
+            Response response = client().post(path, reqBody);
+            String content = assertResponseStatus(200, response);
+            List<Object> crosspoints = assertJsonContains(content, "crosspoints");
+            List<Object> paths = assertJsonContains(content, "paths");
+            Assert.assertEquals(expected[i], crosspoints.size());
+            Assert.assertEquals(expected[i] * 2, paths.size());
+        }
+    }
 }

@@ -57,6 +57,9 @@ public class MapUnionIterator<T, E> implements ScanIterator {
 
     @Override
     public <T> T next() {
+        if (!this.flag) {
+            this.proc();
+        }
         return (T) this.iterator.next();
     }
 

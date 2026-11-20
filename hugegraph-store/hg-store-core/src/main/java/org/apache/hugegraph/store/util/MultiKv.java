@@ -41,7 +41,7 @@ public class MultiKv implements Comparable<MultiKv>, Serializable {
 
     @Override
     public int compareTo(MultiKv o) {
-        if (keys == null && o == null) {
+        if (keys == null && o.keys == null) {
             return 0;
         }
         if (keys == null) {

@@ -73,10 +73,6 @@ public abstract class AbstractConfig {
     }
 
     protected void setProperty(String propertyName, String value) {
-        if (properties.containsKey(propertyName)) {
-            properties.replace(propertyName, value);
-        } else {
-            properties.put(propertyName, value);
-        }
+        properties.put(propertyName, value);
     }
 }

@@ -175,12 +175,12 @@ public class PdRegister implements IServiceRegister {
 
         try {
             if (file.canRead()) {
-                FileReader reader = new FileReader(file);
-                BufferedReader bufferedReader = new BufferedReader(reader);
-                String namespace = bufferedReader.readLine();
-                namespace = namespace.trim();
-                result = namespace;
-                bufferedReader.close();
+                try (BufferedReader bufferedReader =
+                             new BufferedReader(new FileReader(file))) {
+                    String namespace = bufferedReader.readLine();
+                    namespace = namespace.trim();
+                    result = namespace;
+                }
             } else {
                 System.out.println("Cannot read namespace file");
             }
@@ -202,12 +202,12 @@ public class PdRegister implements IServiceRegister {
 
         try {
             if (file.canRead()) {
-                FileReader reader = new FileReader(file);
-                BufferedReader bufferedReader = new BufferedReader(reader);
-                String namespace = bufferedReader.readLine();
-                namespace = namespace.trim();
-                result = namespace;
-                bufferedReader.close();
+                try (BufferedReader bufferedReader =
+                             new BufferedReader(new FileReader(file))) {
+                    String namespace = bufferedReader.readLine();
+                    namespace = namespace.trim();
+                    result = namespace;
+                }
             } else {
                 System.out.println("Cannot read namespace file");
             }

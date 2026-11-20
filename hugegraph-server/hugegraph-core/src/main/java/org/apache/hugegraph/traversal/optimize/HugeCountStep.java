@@ -45,7 +45,7 @@ public final class HugeCountStep<S extends Element>
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof HugeCountStep)) {
+        if (!(obj instanceof HugeCountStep<?> other)) {
             return false;
         }
 
@@ -53,7 +53,6 @@ public final class HugeCountStep<S extends Element>
             return false;
         }
 
-        HugeCountStep other = (HugeCountStep) obj;
         return Objects.equals(this.originGraphStep,
                               other.originGraphStep);
     }

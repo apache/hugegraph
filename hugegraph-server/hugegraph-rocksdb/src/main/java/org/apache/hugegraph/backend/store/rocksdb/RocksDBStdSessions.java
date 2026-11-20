@@ -602,7 +602,10 @@ public class RocksDBStdSessions extends RocksDBSessions {
     public static Set<String> listCFs(String path) throws RocksDBException {
         Set<String> cfs = new HashSet<>();
 
-        List<byte[]> oldCFs = RocksDB.listColumnFamilies(new Options(), path);
+        List<byte[]> oldCFs;
+        try (Options options = new Options()) {
+            oldCFs = RocksDB.listColumnFamilies(options, path);
+        }
         if (oldCFs.isEmpty()) {
             cfs.add("default");
         } else {

@@ -27,8 +27,22 @@ templates:
   - store-statefulset.yaml
 # The fake objects spell numbers as strings: the fake client cannot deep
 # copy Go ints, and the guards convert through `int` either way.
+set:
+  bootstrap.pdReplicas: 3
+  bootstrap.storeReplicas: 3
+  bootstrap.initialStoreCount: 3
 kubernetesProvider:
   scheme:
+    v1/ConfigMap:
+      gvr:
+        version: v1
+        resource: configmaps
+      namespaced: true
+    v1/PersistentVolumeClaim:
+      gvr:
+        version: v1
+        resource: persistentvolumeclaims
+      namespaced: true
     "apps/v1/StatefulSet":
       gvr:
         group: apps
@@ -36,6 +50,23 @@ kubernetesProvider:
         resource: statefulsets
       namespaced: true
   objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: RELEASE-NAME-hugegraph-bootstrap
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: RELEASE-NAME
+      data:
+        schemaVersion: "1"
+        pdReplicas: "3"
+        storeReplicas: "3"
+        initialStoreCount: "3"
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: unrelated-data
+        namespace: NAMESPACE
     - apiVersion: apps/v1
       kind: StatefulSet
       metadata:
@@ -184,6 +215,7 @@ tests:
       upgrade: false
     set:
       fullnameOverride: fresh
+      bootstrap.pdReplicas: 1
       pd.replicas: 1
       pd.ports.raft: 8611
       store.ports.raft: 8511

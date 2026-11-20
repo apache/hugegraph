@@ -54,7 +54,8 @@ public class ObjectIntMappingFactory {
             for (int i = 1; i > 0; i <<= 1) {
                 for (int j = 0; j < MAX_OFFSET; j++) {
                     if (code <= 0) {
-                        if (code == 0) {
+                        // -Integer.MIN_VALUE is still negative
+                        if (code == 0 || code == Integer.MIN_VALUE) {
                             code = 1;
                         } else {
                             code = -code;

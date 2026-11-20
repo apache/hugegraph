@@ -44,24 +44,67 @@ public class MergeIterator<T, R> extends WrappedIterator<T> {
                                        "MergeIterator can't be null");
         this.originIterator = originIterator;
         this.headElements = new ArrayList<>();
-
-        for (Iterator<R> iterator : iterators) {
-            if (iterator.hasNext()) {
-                this.iterators.add(iterator);
-                this.headElements.add(iterator.next());
-            }
-        }
-
+        this.iterators.addAll(iterators);
         this.merger = merger;
+
+        try {
+            for (Iterator<R> iterator : this.iterators) {
+                if (iterator.hasNext()) {
+                    this.headElements.add(iterator.next());
+                } else {
+                    this.headElements.add(none());
+                }
+            }
+        } catch (Throwable failure) {
+            try {
+                this.closeInputs();
+            } catch (Throwable cleanupFailure) {
+                if (failure != cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            throw failure;
+        }
     }
 
     @Override
     public void close() throws Exception {
+        this.closeInputs();
+    }
+
+    private void closeInputs() throws Exception {
+        Throwable failure = null;
         for (Iterator<R> iter : this.iterators) {
             if (iter instanceof AutoCloseable autoCloseable) {
-                autoCloseable.close();
+                try {
+                    autoCloseable.close();
+                } catch (Throwable e) {
+                    failure = mergeFailure(failure, e);
+                }
             }
         }
+        try {
+            super.close();
+        } catch (Throwable e) {
+            failure = mergeFailure(failure, e);
+        }
+        if (failure instanceof Exception exception) {
+            throw exception;
+        } else if (failure instanceof Error error) {
+            throw error;
+        } else if (failure != null) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static Throwable mergeFailure(Throwable first, Throwable next) {
+        if (first == null) {
+            return next;
+        }
+        if (first != next) {
+            first.addSuppressed(next);
+        }
+        return first;
     }
 
     @Override

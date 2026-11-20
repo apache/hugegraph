@@ -127,6 +127,15 @@ public class SortShuffleTest {
         assertEquals(0, this.folder.getRoot().list().length);
     }
 
+    @Test
+    public void testMultiKvWithNullKeysComparesEqualBothWays() {
+        MultiKv left = MultiKv.of(null, List.of(1));
+        MultiKv right = MultiKv.of(null, List.of(2));
+        assertEquals(0, left.compareTo(right));
+        assertEquals(0, right.compareTo(left));
+        assertTrue(left.compareTo(MultiKv.of(List.of(1), null)) < 0);
+    }
+
     private static SortShuffle<BackendColumn> newShuffle() {
         return new SortShuffle<>((left, right) -> Arrays.compare(left.name, right.name),
                                  SortShuffleSerializer.ofBackendColumnSerializer());

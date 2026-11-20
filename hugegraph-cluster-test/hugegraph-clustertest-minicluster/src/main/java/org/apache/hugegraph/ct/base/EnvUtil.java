@@ -39,9 +39,9 @@ public class EnvUtil {
         try {
             int port = -1;
             while (port < 0 || ports.contains(port)) {
-                ServerSocket socket = new ServerSocket(0);
-                port = socket.getLocalPort();
-                socket.close();
+                try (ServerSocket socket = new ServerSocket(0)) {
+                    port = socket.getLocalPort();
+                }
             }
             ports.add(port);
             return port;

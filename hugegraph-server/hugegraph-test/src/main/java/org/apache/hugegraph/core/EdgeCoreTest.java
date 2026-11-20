@@ -3739,6 +3739,22 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryOutVerticesWithRangesSeparatedByBarrier() {
+        HugeGraph graph = graph();
+        init100LookEdges();
+
+        Vertex louise = vertex("person", "name", "Louise");
+
+        List<Vertex> vertices = graph.traversal().V(louise.id())
+                                     .out("look")
+                                     .range(2, 3)
+                                     .barrier()
+                                     .range(0, 1)
+                                     .toList();
+        Assert.assertEquals(1, vertices.size());
+    }
+
+    @Test
     public void testQueryEdgesByNonEqLabelAndIndexedPropertyAcrossBarrier() {
         HugeGraph graph = graph();
         initEdgeLabelQueryEdges();

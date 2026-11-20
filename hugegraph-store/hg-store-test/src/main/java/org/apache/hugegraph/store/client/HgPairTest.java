@@ -61,6 +61,15 @@ public class HgPairTest {
     }
 
     @Test
+    public void testHashCodeWithNullKey() {
+        HgPair<String, String> nullKey = new HgPair<>(null, "value");
+        assertEquals(new HgPair<>(null, "value"), nullKey);
+        assertEquals("value".hashCode(), nullKey.hashCode());
+        assertEquals(new HgPair<>(null, "value").hashCode(), nullKey.hashCode());
+        assertEquals("key".hashCode() * 13 + "value".hashCode(), pair.hashCode());
+    }
+
+    @Test
     public void testBits() {
         byte[] buf = new byte[4];
         Bits.putInt(buf, 0, 3);

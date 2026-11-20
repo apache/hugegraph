@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.options;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -81,43 +82,50 @@ final class CgroupMemoryLimit {
             if (!v2 && !("," + parts[1] + ",").contains(",memory,")) {
                 continue;
             }
-            List<String[]> mounts = v2 ? v2Mounts : v1Mounts;
-            boolean matched = false;
-            boolean fullView = false;
             long lineLimit = -1L;
-            for (String[] mount : mounts) {
-                if (!contains(mount[0], parts[2])) {
-                    // A mount of another subtree says nothing about this cgroup
-                    continue;
-                }
-                matched = true;
-                Path point = Paths.get(mount[1]);
-                String relative = rebase(parts[2], mount[0]);
-                // A full-hierarchy mount only covers the ancestors if this process's own
-                // directory is reachable through it
-                fullView |= mount[0].equals("/") && visible(point, relative);
-                lineLimit = lowest(lineLimit, v2 ? v2Limit(point, relative) :
-                                              v1Limit(point, relative));
-            }
-            if (!matched && !mounts.isEmpty()) {
-                // In a cgroup namespace /proc/self/cgroup says "/" while a mount made outside
-                // it has a root such as "/..", so the process's own cgroup can't be located.
-                // The limits at the mount roots still bound it
-                incomplete = true;
+            try {
+                List<String[]> mounts = v2 ? v2Mounts : v1Mounts;
+                boolean matched = false;
+                boolean fullView = false;
                 for (String[] mount : mounts) {
+                    if (!contains(mount[0], parts[2])) {
+                        // A mount of another subtree says nothing about this cgroup
+                        continue;
+                    }
+                    matched = true;
                     Path point = Paths.get(mount[1]);
-                    lineLimit = lowest(lineLimit, v2 ? readLimit(point.resolve("memory.max")) :
-                                                  v1Limit(point, ""));
+                    String relative = rebase(parts[2], mount[0]);
+                    // A full-hierarchy mount only covers the ancestors if this process's own
+                    // directory is reachable through it
+                    fullView |= mount[0].equals("/") && visible(point, relative);
+                    lineLimit = lowest(lineLimit, v2 ? v2Limit(point, relative) :
+                                                  v1Limit(point, relative));
                 }
-            } else if (!matched) {
-                String relative = rebase(parts[2], "/");
-                lineLimit = v2 ? v2Limit(defaultRoot, relative) :
-                            v1Limit(defaultRoot.resolve("memory"), relative);
-            } else if (v2 && (!fullView || parts[2].equals("/"))) {
-                // Only subtree mounts such as /kubepods, or the process sits at the root it
-                // can see, which inside a private cgroup namespace is the namespace root: a
-                // memory.max above is hidden. v1's hierarchical limit has no such gap
+                if (!matched && !mounts.isEmpty()) {
+                    // In a cgroup namespace /proc/self/cgroup says "/" while a mount made outside
+                    // it has a root such as "/..", so the process's own cgroup can't be located.
+                    // The limits at the mount roots still bound it
+                    incomplete = true;
+                    for (String[] mount : mounts) {
+                        Path point = Paths.get(mount[1]);
+                        lineLimit = lowest(lineLimit, v2 ? readLimit(point.resolve("memory.max")) :
+                                                      v1Limit(point, ""));
+                    }
+                } else if (!matched) {
+                    String relative = rebase(parts[2], "/");
+                    lineLimit = v2 ? v2Limit(defaultRoot, relative) :
+                                v1Limit(defaultRoot.resolve("memory"), relative);
+                } else if (v2 && (!fullView || parts[2].equals("/"))) {
+                    // Only subtree mounts such as /kubepods, or the process sits at the root it
+                    // can see, which inside a private cgroup namespace is the namespace root: a
+                    // memory.max above is hidden. v1's hierarchical limit has no such gap
+                    incomplete = true;
+                }
+            } catch (InvalidPathException e) {
+                // A path the JVM can't represent, such as a NUL from a \000 escape, hides
+                // this line's limits; say so rather than fail the Store's start
                 incomplete = true;
+                continue;
             }
             if (lineLimit > 0 && (limit <= 0 || lineLimit < limit)) {
                 limit = lineLimit;

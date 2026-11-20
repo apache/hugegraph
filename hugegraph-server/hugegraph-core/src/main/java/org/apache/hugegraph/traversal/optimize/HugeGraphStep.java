@@ -200,7 +200,7 @@ public final class HugeGraphStep<S, E extends Element>
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof HugeGraphStep)) {
+        if (!(obj instanceof HugeGraphStep<?, ?> other)) {
             return false;
         }
 
@@ -208,7 +208,6 @@ public final class HugeGraphStep<S, E extends Element>
             return false;
         }
 
-        HugeGraphStep other = (HugeGraphStep) obj;
         return this.hasContainers.equals(other.hasContainers) &&
                this.queryInfo.equals(other.queryInfo);
     }

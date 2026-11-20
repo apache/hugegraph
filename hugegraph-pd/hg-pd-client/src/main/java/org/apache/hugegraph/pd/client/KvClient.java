@@ -53,6 +53,7 @@ import org.apache.hugegraph.pd.grpc.kv.WatchEvent;
 import org.apache.hugegraph.pd.grpc.kv.WatchKv;
 import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
 import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
+import org.apache.hugegraph.pd.grpc.kv.WatchState;
 import org.apache.hugegraph.pd.grpc.kv.WatchType;
 
 import io.grpc.Channel;
@@ -209,8 +210,18 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         return new StreamObserver<WatchResponse>() {
             @Override
             public void onNext(WatchResponse value) {
-                if (!acceptFirstFrame(subscription, this)) {
+                FrameOrder order = acceptFrame(subscription, this, value.getState());
+                if (order == FrameOrder.STALE) {
                     return;
+                }
+                if (order == FrameOrder.FIRST) {
+                    /*
+                     * Starting/Started confirms registration. Alive may arrive
+                     * before PD has registered the watch key. Anything committed
+                     * while the watch was down was never delivered: tell the
+                     * subscriber before any later frame is handled.
+                     */
+                    notifyWatchStarted(subscription);
                 }
                 switch (value.getState()) {
                     case Starting:
@@ -258,6 +269,24 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         listen(key, consumer, errorConsumer, false);
     }
 
+    /**
+     * Watch a key and get told each time the watch becomes live.
+     *
+     * @param startedCallback runs on the watch thread when the watch starts and
+     *                        every time it starts again after a disconnect or a
+     *                        PD leader change. Events committed while the watch
+     *                        was down are not replayed, so a subscriber that
+     *                        keeps state derived from them must rebuild it here.
+     *                        It runs before any event of the new watch is
+     *                        delivered and must not block.
+     */
+    public void listen(String key, Consumer<T> consumer,
+                       Consumer<Throwable> errorConsumer,
+                       Runnable startedCallback) throws PDException {
+        Objects.requireNonNull(startedCallback, "startedCallback");
+        listen(key, consumer, errorConsumer, startedCallback, false);
+    }
+
     public void listenPrefix(String prefix, Consumer<T> consumer) throws PDException {
         listen(prefix, consumer, throwable -> { }, true);
     }
@@ -270,11 +299,19 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     private void listen(String key, Consumer<T> consumer,
                         Consumer<Throwable> errorConsumer,
                         boolean prefix) throws PDException {
+        listen(key, consumer, errorConsumer, null, prefix);
+    }
+
+    private void listen(String key, Consumer<T> consumer,
+                        Consumer<Throwable> errorConsumer,
+                        Runnable startedCallback,
+                        boolean prefix) throws PDException {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(consumer, "consumer");
         Objects.requireNonNull(errorConsumer, "errorConsumer");
         WatchSubscription subscription =
-                new WatchSubscription(key, consumer, errorConsumer, prefix);
+                new WatchSubscription(key, consumer, errorConsumer,
+                                      startedCallback, prefix);
         subscriptions.add(subscription);
         try {
             if (!startWatch(subscription)) {
@@ -318,6 +355,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                     return true;
                 }
                 subscription.firstFrameReceived = false;
+                subscription.watchStarted = false;
                 subscription.attemptChannel = null;
                 subscription.observer.set(observer);
             }
@@ -358,15 +396,37 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
     }
 
-    private boolean acceptFirstFrame(WatchSubscription subscription,
-                                     StreamObserver<WatchResponse> sourceObserver) {
+    private FrameOrder acceptFrame(WatchSubscription subscription,
+                                   StreamObserver<WatchResponse> sourceObserver,
+                                   WatchState state) {
         synchronized (subscription) {
             if (subscription.observer.get() != sourceObserver) {
-                return false;
+                return FrameOrder.STALE;
             }
-            subscription.firstFrameReceived = true;
-            cancelStartTimeout(subscription);
-            return true;
+            // For registration-aware watches, Alive does not prove readiness.
+            if (subscription.startedCallback == null ||
+                state == WatchState.Starting || state == WatchState.Started) {
+                subscription.firstFrameReceived = true;
+                cancelStartTimeout(subscription);
+            }
+            if (!subscription.watchStarted &&
+                (state == WatchState.Starting || state == WatchState.Started)) {
+                subscription.watchStarted = true;
+                return FrameOrder.FIRST;
+            }
+            return FrameOrder.LATER;
+        }
+    }
+
+    private void notifyWatchStarted(WatchSubscription subscription) {
+        Runnable callback = subscription.startedCallback;
+        if (callback == null) {
+            return;
+        }
+        try {
+            callback.run();
+        } catch (RuntimeException e) {
+            log.warn("The watch-started callback for key {} failed", subscription.key, e);
         }
     }
 
@@ -403,7 +463,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                 return;
             }
         }
-        log.warn("Watch for key {} did not receive its first response in {} ms",
+        log.warn("Watch for key {} did not become ready in {} ms",
                  subscription.key, WATCH_START_TIMEOUT_MS);
         requestReconnect(subscription, sourceObserver, true, true);
     }
@@ -728,11 +788,19 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         super.close();
     }
 
+    /** FIRST is the first frame confirming registration, not a heartbeat. */
+    private enum FrameOrder {
+        STALE,
+        FIRST,
+        LATER
+    }
+
     private final class WatchSubscription {
 
         private final String key;
         private final Consumer<T> consumer;
         private final Consumer<Throwable> errorConsumer;
+        private final Runnable startedCallback;
         private final boolean prefix;
         private final AtomicReference<StreamObserver<WatchResponse>> observer;
         private final AtomicBoolean reconnectScheduled;
@@ -740,16 +808,19 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         private final AtomicLong clientId;
         private final AtomicReference<ScheduledFuture<?>> startTimeout;
         private boolean firstFrameReceived;
+        private boolean watchStarted;
         private Channel attemptChannel;
         private boolean rotateTransport;
         private Channel reconnectChannel;
 
         private WatchSubscription(String key, Consumer<T> consumer,
                                   Consumer<Throwable> errorConsumer,
+                                  Runnable startedCallback,
                                   boolean prefix) {
             this.key = key;
             this.consumer = consumer;
             this.errorConsumer = errorConsumer;
+            this.startedCallback = startedCallback;
             this.prefix = prefix;
             this.observer = new AtomicReference<>();
             this.reconnectScheduled = new AtomicBoolean(false);

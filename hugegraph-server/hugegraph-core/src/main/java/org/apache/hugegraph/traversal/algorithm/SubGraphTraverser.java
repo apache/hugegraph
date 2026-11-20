@@ -122,11 +122,11 @@ public class SubGraphTraverser extends HugeTraverser {
          */
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof RingPath)) {
+            if (!(other instanceof RingPath otherPath)) {
                 return false;
             }
             List<Id> vertices = this.vertices();
-            List<Id> otherVertices = ((Path) other).vertices();
+            List<Id> otherVertices = otherPath.vertices();
 
             if (vertices.equals(otherVertices)) {
                 return true;

@@ -3082,6 +3082,18 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryAllWithRangesSeparatedByBarrier() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        List<Vertex> vertices = graph.traversal().V().range(2, 3).barrier().range(0, 1).toList();
+        Assert.assertEquals(1, vertices.size());
+
+        vertices = graph.traversal().V().range(1, 6).barrier().range(3, 8).toList();
+        Assert.assertEquals(2, vertices.size());
+    }
+
+    @Test
     public void testQueryAllWithIllegalOffsetOrLimit() {
         HugeGraph graph = graph();
         this.init10VerticesAndCommit();

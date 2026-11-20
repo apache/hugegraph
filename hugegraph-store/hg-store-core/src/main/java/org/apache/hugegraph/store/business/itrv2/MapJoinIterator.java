@@ -70,6 +70,9 @@ public class MapJoinIterator<T, E> implements ScanIterator {
 
     @Override
     public <T> T next() {
+        if (!flag) {
+            proc();
+        }
         return (T) this.iterator.next();
     }
 

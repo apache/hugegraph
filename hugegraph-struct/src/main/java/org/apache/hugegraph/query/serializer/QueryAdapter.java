@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.query.Condition;
 import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.LegacyClassNames;
 
 import com.google.common.collect.ImmutableMap;
@@ -110,8 +111,10 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                         }
                     }
 
-                } else if (valueElement.isJsonPrimitive() &&
+                } else if (relation.key() == HugeKeys.DIRECTION &&
+                           valueElement.isJsonPrimitive() &&
                            valueElement.getAsJsonPrimitive().isString()) {
+                    // Gson writes Directions as its name, so only the direction key maps back
                     switch ((String) relation.value()) {
                         case "OUT":
                             relation.value(Directions.OUT);
@@ -145,7 +148,8 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                            new JsonPrimitive(
                                    relation.value().getClass().getName()));
             } else if (valueElement.isJsonArray()) {
-                if (relation.value() instanceof List<?> values) {
+                // An empty IN list has no element to take a class from
+                if (relation.value() instanceof List<?> values && !values.isEmpty()) {
                     String valueCls = values.get(0).getClass().getName();
                     object.get("el").getAsJsonObject().add("valuecls", new JsonPrimitive(valueCls));
                 }

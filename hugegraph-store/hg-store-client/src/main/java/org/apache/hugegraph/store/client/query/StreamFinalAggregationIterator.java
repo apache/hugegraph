@@ -73,6 +73,9 @@ public class StreamFinalAggregationIterator<E> implements HgKvIterator<E> {
 
     @Override
     public boolean hasNext() {
+        if (data != null) {
+            return true;
+        }
 
         while (iterator.hasNext()) {
             var next = (KvElement) iterator.next();

@@ -31,6 +31,8 @@ import org.apache.hugegraph.id.IdGenerator.LongId;
 import org.apache.hugegraph.id.IdGenerator.StringId;
 import org.apache.hugegraph.id.IdGenerator.UuidId;
 import org.apache.hugegraph.io.HugeGraphIoRegistry;
+import org.apache.hugegraph.space.GraphSpace;
+import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -44,6 +46,77 @@ import org.apache.tinkerpop.gremlin.structure.io.graphson.TypeInfo;
 import org.junit.Test;
 
 public class HugeGraphSONModuleTest extends BaseUnitTest {
+
+    @Test
+    public void testNullableGraphSpaceStringsRoundTrip() {
+        GraphSpace space = new GraphSpace("test");
+        space.description(null);
+        space.oltpNamespace(null);
+        space.olapNamespace("null");
+        GraphSpace restored = JsonUtil.fromJson(JsonUtil.toJson(space), GraphSpace.class);
+        Assert.assertNull(restored.description());
+        Assert.assertNull(restored.oltpNamespace());
+        Assert.assertEquals("null", restored.olapNamespace());
+
+        Map<String, Object> nullableFields = space.info();
+        nullableFields.put("nickname", null);
+        nullableFields.put("storage_namespace", null);
+        nullableFields.put("operator_image_path", null);
+        nullableFields.put("creator", null);
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), GraphSpace.class);
+        Assert.assertNull(restored.nickname());
+        Assert.assertNull(restored.storageNamespace());
+        Assert.assertNull(restored.operatorImagePath());
+        Assert.assertNull(restored.creator());
+
+        nullableFields.put("nickname", "null");
+        nullableFields.put("storage_namespace", "null");
+        nullableFields.put("operator_image_path", "null");
+        nullableFields.put("creator", "null");
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), GraphSpace.class);
+        Assert.assertEquals("null", restored.nickname());
+        Assert.assertEquals("null", restored.storageNamespace());
+        Assert.assertEquals("null", restored.operatorImagePath());
+        Assert.assertEquals("null", restored.creator());
+
+        space.description("null");
+        Assert.assertEquals("null", JsonUtil.fromJson(JsonUtil.toJson(space),
+                                                       GraphSpace.class).description());
+        Map<String, Object> fields = space.info();
+        fields.remove("description");
+        Assert.assertNull(JsonUtil.fromJson(JsonUtil.toJson(fields),
+                                            GraphSpace.class).description());
+    }
+
+    @Test
+    public void testNullableServiceStringsRoundTrip() {
+        Service service = new Service("test", null, Service.ServiceType.OLTP,
+                                      Service.DeploymentType.K8S);
+        Service restored = JsonUtil.fromJson(JsonUtil.toJson(service), Service.class);
+        Assert.assertNull(restored.description());
+        Assert.assertNull(restored.serviceId());
+        Assert.assertNull(restored.pdServiceId());
+        Map<String, Object> nullableFields = service.info();
+        nullableFields.put("route_type", null);
+        nullableFields.put("creator", null);
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), Service.class);
+        Assert.assertNull(restored.routeType());
+        Assert.assertNull(restored.creator());
+
+        nullableFields.put("route_type", "null");
+        nullableFields.put("creator", "null");
+        restored = JsonUtil.fromJson(JsonUtil.toJson(nullableFields), Service.class);
+        Assert.assertEquals("null", restored.routeType());
+        Assert.assertEquals("null", restored.creator());
+        service.description("null");
+        service.serviceId("null");
+        restored = JsonUtil.fromJson(JsonUtil.toJson(service), Service.class);
+        Assert.assertEquals("null", restored.description());
+        Assert.assertEquals("null", restored.serviceId());
+        Assert.assertNull(JsonUtil.fromJson("{\"name\":\"test\",\"type\":\"OLTP\"," +
+                                            "\"deployment_type\":\"K8S\"}",
+                                            Service.class).description());
+    }
 
     @Test
     public void testSerializeFileWithGraphSONTypeInfo() throws IOException {

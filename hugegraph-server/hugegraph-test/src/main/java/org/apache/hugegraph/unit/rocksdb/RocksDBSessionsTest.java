@@ -20,6 +20,8 @@ package org.apache.hugegraph.unit.rocksdb;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -28,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBTable;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBMetrics;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBSessions;
@@ -37,6 +41,9 @@ import org.apache.hugegraph.backend.store.rocksdb.RocksDBStore;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBStoreProvider;
 import org.apache.hugegraph.backend.store.rocksdbsst.RocksDBSstSessions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
@@ -55,6 +62,83 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
+
+    @Test
+    public void testQueryClosesAcquiredIteratorsWhenOlapQueryFails() {
+        RuntimeException queryFailure = new RuntimeException("OLAP query failed");
+        RuntimeException childFailure = new RuntimeException("child close failed");
+        RuntimeException originFailure = new RuntimeException("origin close failed");
+        QueryIterator origin = new QueryIterator(originFailure);
+        QueryIterator child = new QueryIterator(childFailure);
+        Id first = IdGenerator.of(1L);
+        Id second = IdGenerator.of(2L);
+        AtomicInteger queries = new AtomicInteger();
+        RocksDBTable vertex = new RocksDBTable("db", "vertex") {
+            @Override
+            public Iterator<BackendEntry> query(RocksDBSessions.Session session, Query query) {
+                return origin;
+            }
+        };
+        RocksDBTable olap = new RocksDBTable("db", "olap") {
+            @Override
+            public Iterator<BackendEntry> query(RocksDBSessions.Session session, Query query) {
+                if (queries.getAndIncrement() == 0) {
+                    return child;
+                }
+                throw queryFailure;
+            }
+        };
+        RocksDBStore store = new RocksDBStore.RocksDBGraphStore(null, "db", "graph") {
+            {
+                this.registerTableManager(HugeType.VERTEX, vertex);
+                this.registerTableManager(this.olapTableName(first), olap);
+                this.registerTableManager(this.olapTableName(second), olap);
+            }
+
+            @Override
+            protected RocksDBSessions.Session session(HugeType type) {
+                return null;
+            }
+        };
+        Whitebox.setInternalState(store, "isGraphStore", true);
+        Query query = new Query(HugeType.VERTEX);
+        query.olapPk(first);
+        query.olapPk(second);
+
+        Throwable failure = Assert.assertThrows(RuntimeException.class, () -> store.query(query));
+        Assert.assertSame(queryFailure, failure);
+        Assert.assertTrue(origin.closed);
+        Assert.assertTrue(child.closed);
+        Assert.assertEquals(2, failure.getSuppressed().length);
+        Assert.assertSame(childFailure, failure.getSuppressed()[0]);
+        Assert.assertSame(originFailure, failure.getSuppressed()[1]);
+    }
+
+    private static final class QueryIterator implements Iterator<BackendEntry>, AutoCloseable {
+
+        private final RuntimeException closeFailure;
+        private boolean closed;
+
+        private QueryIterator(RuntimeException closeFailure) {
+            this.closeFailure = closeFailure;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return false;
+        }
+
+        @Override
+        public BackendEntry next() {
+            throw new NoSuchElementException();
+        }
+
+        @Override
+        public void close() {
+            this.closed = true;
+            throw this.closeFailure;
+        }
+    }
 
     @Test
     public void testResetWaitsForNativeCloseAndSkipsRetainedClosedSession() throws Exception {

@@ -17,9 +17,6 @@
 
 package org.apache.hugegraph.type;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import org.apache.hugegraph.type.define.SerialEnum;
 
 public enum HugeTableType implements SerialEnum {
@@ -35,13 +32,8 @@ public enum HugeTableType implements SerialEnum {
     OLAP_TABLE(6, "OLAP"), // OLAP table
     SERVER_INFO_TABLE(7, "SERVER"); // Server Information Table
 
-    private static final Map<String, HugeTableType> ALL_NAME = new HashMap<>();
-
     static {
         SerialEnum.register(HugeTableType.class);
-        for (HugeTableType type : values()) {
-            ALL_NAME.put(type.name, type);
-        }
     }
 
     private byte type = 0;

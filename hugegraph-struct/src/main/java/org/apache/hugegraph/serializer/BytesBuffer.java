@@ -1057,8 +1057,8 @@ public class BytesBuffer extends OutputStream {
         int start = this.buffer.position();
          // OLAP {PropertyKey}{VertexId}
         if (isOlap) {
-            // Read olap property id first
-            Id pkId = this.readId();
+            // Skip the olap property id first
+            this.readId();
         }
         Id id = this.readId();
         int end = this.buffer.position();

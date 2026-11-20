@@ -144,7 +144,10 @@ class SeaTunnelChartTest(unittest.TestCase):
             chart = Path(directory) / "chart"
             shutil.copytree(CHART, chart)
             (chart / "values.yaml").write_bytes((CHART / "testdata/values-pre-hardening.yaml").read_bytes())
-            for arguments in ([], ["--is-upgrade"], ["--set", "global.imageRegistry=registry.example.com"]):
+            for arguments in ([], ["--is-upgrade", "--set", "bootstrap.pdReplicas=3",
+                                   "--set", "bootstrap.storeReplicas=3", "--set",
+                                   "bootstrap.initialStoreCount=3"],
+                              ["--set", "global.imageRegistry=registry.example.com"]):
                 with self.subTest(arguments=arguments):
                     result = self.run_helm(["template", "legacy", str(chart), *arguments],
                                            HELM_TEMPLATE_TIMEOUT_SECONDS)

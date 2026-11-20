@@ -109,6 +109,7 @@ Fail before dereferencing missing blocks; keep values.yaml the sole defaults sou
 {{- $budget := add (int $server.storageWaitTimeoutSeconds) 150 -}}
 {{- $_ := set $startup "failureThreshold" (add (div (add (sub $budget 1) $period) $period) 1) -}}
 {{- end -}}
+{{- include "hugegraph.bootstrap.resolve" . -}}
 {{- end -}}
 {{- end }}
 
@@ -439,7 +440,7 @@ Uses short headless DNS (cluster.local optional) resolvable inside the namespace
 */}}
 {{- define "hugegraph.pd.raftPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.raft -}}
@@ -454,7 +455,7 @@ PD gRPC peers for Store/Server.
 */}}
 {{- define "hugegraph.pd.grpcPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.grpc -}}
@@ -469,7 +470,7 @@ PD REST endpoints for Server storage-readiness checks.
 */}}
 {{- define "hugegraph.pd.restPeersList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.pd.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.pdReplicas -}}
 {{- $name := include "hugegraph.pd.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.pd.ports.rest -}}
@@ -523,7 +524,7 @@ Initial store list for PD bootstrap: store-0.svc.ns.svc:8500,...
 */}}
 {{- define "hugegraph.store.initialStoreList" -}}
 {{- $peers := list -}}
-{{- $replicas := int .Values.store.replicas -}}
+{{- $replicas := int .Values.__hugegraphBootstrap.storeReplicas -}}
 {{- $name := include "hugegraph.store.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $port := int .Values.store.ports.grpc -}}
@@ -590,6 +591,11 @@ Quorum size: floor(replicas/2)+1
 */}}
 {{- define "hugegraph.pd.quorum" -}}
 {{- add (div (int .Values.pd.replicas) 2) 1 -}}
+{{- end }}
+
+{{/* The static seed wait is independent of the current voting/PDB majority. */}}
+{{- define "hugegraph.pd.bootstrapQuorum" -}}
+{{- add (div (int .Values.__hugegraphBootstrap.pdReplicas) 2) 1 -}}
 {{- end }}
 
 {{/*
@@ -679,7 +685,7 @@ well, which is what a leader election waited on.
 {{- $flags := list -}}
 {{- $shardCount := include "hugegraph.optionalScalar" (get $partition "defaultShardCount") -}}
 {{- if eq $shardCount "" -}}
-{{- $shardCount = ternary "3" "1" (ge (int .Values.store.replicas) 3) -}}
+{{- $shardCount = ternary "3" "1" (ge (int .Values.__hugegraphBootstrap.storeReplicas) 3) -}}
 {{- end -}}
 {{- $flags = append $flags (printf "-Dpartition.default-shard-count=%s" $shardCount) -}}
 {{- $maxShard := include "hugegraph.optionalScalar" (get $partition "storeMaxShardCount") -}}
@@ -872,8 +878,8 @@ the chart renders reaches it only as NodeOptions.setInitialConf, which jraft
 applies when bootstrapping a node that has no configuration of its own. On an
 initialized group, adding Pods adds non-voting strangers: the extra PD starts,
 the peer list changes, and the voting configuration does not. PD exposes the
-change through RaftEngine.changePeerList, reachable from the PD client API but
-from no REST route, so the chart cannot perform it and does not pretend to.
+change through RaftEngine.changePeerList and its REST management route, but
+the chart does not coordinate node preparation, catch-up and member completion.
 Growing Store is ordinary scale-out and stays allowed.
 */}}
 {{- if and (eq $comp "pd") (gt $liveReplicas 0) (gt $desired $liveReplicas) -}}
@@ -1020,7 +1026,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "PD_CLUSTER" "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
       "server" (list "HG_SERVER_CLUSTER" "POD_IP" "HG_SERVER_SERVICE_ID" "HG_SERVER_GRAPHSPACE" "SERVICE_ID" "GRAPH_SPACE" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_DEPLOY_IN_K8S" "HG_SERVER_STARTUP_TIMEOUT_S" "WAIT_STORAGE_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
-      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "SPRING_DATASOURCE_URL") -}}
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "HG_HUBBLE_VERMEER_URL" "HG_HUBBLE_VERMEER_TOKEN_FILE" "HG_HUBBLE_TEXT2GQL_MASTER_KEY_FILE" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
 {{- range $entry := get $componentValues "extraEnv" | default list -}}
