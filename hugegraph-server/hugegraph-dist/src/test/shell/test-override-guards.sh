@@ -442,6 +442,37 @@ for pair in "$STORE_BIN/start-hugegraph-store.sh:$STORE_BIN/util.sh" \
         || bad "$n: JAVA_OPTIONS split into the launch array (got: $OUT)"
 done
 
+echo "== 12. behavioural: stock gremlin-server.yaml's config: blocks are not rejected =="
+
+# The shipped conf/gremlin-server.yaml has no 'tokens:' key, but ends with
+# several multi-line serializer 'config: {' blocks (closed on a later line).
+# Matching every 'config:' line (instead of only lines that also carry
+# 'tokens:') would reject this stock file and refuse to start.
+STOCK_GREMLIN_YAML="$ROOT/hugegraph-server/hugegraph-dist/src/assembly/static/conf/gremlin-server.yaml"
+SEC12="$TMP/sec12"; mkdir -p "$SEC12/bin" "$SEC12/conf"
+cp "$SERVER_BIN/start-hugegraph.sh" "$SEC12/bin/"
+cp "$SERVER_BIN/util.sh" "$SEC12/bin/"
+printf '\ncheck_port() {\n    :\n}\n' >> "$SEC12/bin/util.sh"
+printf '#!/bin/bash\nexit 1\n' > "$SEC12/bin/hugegraph-server.sh"
+chmod +x "$SEC12/bin"/*.sh
+
+cp "$STOCK_GREMLIN_YAML" "$SEC12/conf/gremlin-server.yaml"
+mkdir -p "$SEC12/conf/graphs"
+cat > "$SEC12/conf/rest-server.properties" <<EOF
+restserver.url=http://127.0.0.1:18080
+gremlinserver.url=http://127.0.0.1:18182
+graphs=$SEC12/conf/graphs
+EOF
+
+OUT="$(timeout 10 bash "$SEC12/bin/start-hugegraph.sh" \
+    -c "$SEC12/conf" -l "$SEC12/logs" -i "$SEC12/bin/pid" -d true -m false -t 2 2>&1)"
+echo "$OUT" | grep -q "not a single-line inline mapping" \
+    && bad "start-hugegraph.sh: stock gremlin-server.yaml wrongly rejected" \
+    || ok "start-hugegraph.sh: stock gremlin-server.yaml's config: blocks accepted"
+
+[ -s "$SEC12/bin/pid" ] && kill "$(cat "$SEC12/bin/pid")" 2>/dev/null
+rm -rf "$SEC12"
+
 echo
 echo "===================================="
 echo "PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"

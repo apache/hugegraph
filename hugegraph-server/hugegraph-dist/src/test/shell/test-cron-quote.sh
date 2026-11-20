@@ -403,7 +403,7 @@ if [ -f "$SM" ] && [ -f "$STOPM" ]; then
 exit 0
 EOF
     chmod +x "$RTOP/bin/monitor-hugegraph.sh"
-    LEGACY_REAL="*/1 * * * * export JAVA_HOME=/usr && $RTOP/bin/monitor-hugegraph.sh"
+    LEGACY_REAL="*/1 * * * * export JAVA_HOME=/usr && $RTOP/bin/monitor-hugegraph.sh # pidfile:default"
     printf '%s\n' "$LEGACY_REAL" > "$CRON_FILE"
 
     JAVA_HOME=/usr bash "$RTOP/bin/start-monitor.sh" >/dev/null 2>&1
