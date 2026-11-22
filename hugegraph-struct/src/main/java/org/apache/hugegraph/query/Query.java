@@ -69,6 +69,7 @@ public class Query implements Cloneable {
     private long actualStoreOffset;
     private long limit;
     private long skipDegree;
+    private long batchSizeHint = NO_LIMIT;
     private String page;
     private long capacity;
     private boolean showHidden;
@@ -132,6 +133,7 @@ public class Query implements Cloneable {
         this.offset = query.offset();
         this.limit = query.limit();
         this.skipDegree = query.skipDegree();
+        this.batchSizeHint = query.batchSizeHint();
         this.page = query.page();
         this.capacity = query.capacity();
         this.showHidden = query.showHidden();
@@ -318,6 +320,22 @@ public class Query implements Cloneable {
         E.checkArgument(limit >= 0L || limit == NO_LIMIT,
                         "Invalid limit %s", limit);
         this.limit = limit;
+    }
+
+    /**
+     * The number of results the caller expects to need, for a query whose
+     * limit can't be pushed down (e.g. results are filtered after reading).
+     * Backends and caches reading in batches may read less at first, so that
+     * a caller stopping early reads less. It never limits the results.
+     */
+    public long batchSizeHint() {
+        return this.batchSizeHint;
+    }
+
+    public void batchSizeHint(long batchSizeHint) {
+        E.checkArgument(batchSizeHint > 0L,
+                        "Invalid batch size hint %s", batchSizeHint);
+        this.batchSizeHint = batchSizeHint;
     }
 
     public boolean noLimit() {

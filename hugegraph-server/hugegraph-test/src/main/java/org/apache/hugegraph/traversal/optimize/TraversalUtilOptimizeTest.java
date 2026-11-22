@@ -31,9 +31,11 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.BaseVertex;
@@ -69,6 +71,8 @@ import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 import org.junit.Test;
 import org.mockito.Mockito;
+
+import com.google.common.collect.ImmutableList;
 
 public class TraversalUtilOptimizeTest {
 
@@ -608,6 +612,76 @@ public class TraversalUtilOptimizeTest {
         Assert.assertTrue(newStep.getHasContainers().isEmpty());
         Assert.assertTrue(hasStepExists(traversal, "age"));
         Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testVertexStepStrategyHintsExistenceCheck() {
+        HugeGraph graph = vertexStepStrategyGraph();
+        long one = 1L;
+
+        Assert.assertEquals(ImmutableList.of(one),
+                            batchSizeHints(__.V().not(__.out("knows")), graph));
+        Assert.assertEquals(ImmutableList.of(one),
+                            batchSizeHints(__.V().not(__.out("knows").has("age", 18)),
+                                           graph));
+        Assert.assertEquals(ImmutableList.of(one),
+                            batchSizeHints(__.V().not(__.outE("knows")), graph));
+        Assert.assertEquals(ImmutableList.of(one),
+                            batchSizeHints(__.V().filter(__.out("knows").has("age", 18)),
+                                           graph));
+        Assert.assertEquals(ImmutableList.of(one),
+                            batchSizeHints(__.V().where(__.out("knows")), graph));
+        Assert.assertEquals(ImmutableList.of(one, one),
+                            batchSizeHints(__.V().and(__.out("knows"), __.in("created")),
+                                           graph));
+        Assert.assertEquals(ImmutableList.of(one, one),
+                            batchSizeHints(__.V().or(__.out("knows"), __.in("created")),
+                                           graph));
+
+        // Only the last step of the child traversal, the first one maps
+        Assert.assertEquals(ImmutableList.of(Query.NO_LIMIT, one),
+                            batchSizeHints(__.V().not(__.out("knows").out("created")),
+                                           graph));
+    }
+
+    @Test
+    public void testVertexStepStrategyNotHintAllResultsNeeded() {
+        HugeGraph graph = vertexStepStrategyGraph();
+        List<Long> none = ImmutableList.of(Query.NO_LIMIT);
+
+        Assert.assertEquals(none, batchSizeHints(__.V().out("knows"), graph));
+        Assert.assertEquals(none, batchSizeHints(__.V().out("knows").has("age", 18),
+                                                 graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().not(__.out("knows").count().is(0)), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().filter(__.out("knows").path()), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().filter(__.out("knows").tree()), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().filter(__.out("knows").order().by("age")), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().filter(__.out("knows").range(2, 3)), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().local(__.out("knows")), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().optional(__.out("knows")), graph));
+        Assert.assertEquals(none, batchSizeHints(
+                __.V().as("a").where(__.out("knows").as("a")), graph));
+    }
+
+    @Test
+    public void testVertexStepStrategyKeepsLimitWithHint() {
+        HugeGraph graph = vertexStepStrategyGraph();
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().not(__.out("knows").limit(3)), graph);
+        applyVertexStepStrategy(traversal, graph);
+
+        List<HugeVertexStep<?>> steps = vertexSteps(traversal);
+        Assert.assertEquals(1, steps.size());
+        Query query = steps.get(0).queryInfo();
+        Assert.assertEquals(3L, query.limit());
+        Assert.assertEquals(Query.NO_LIMIT, query.batchSizeHint());
     }
 
     @Test
@@ -1398,6 +1472,41 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertFalse(hasMarkedLocalChild(traversal, AndStep.class));
         Assert.assertFalse(hasMarkedLocalChild(traversal, OrStep.class));
+    }
+
+    private static HugeGraph vertexStepStrategyGraph() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("age"))
+               .thenReturn(propertyKey(1L, "age", DataType.INT));
+        Mockito.when(graph.backendStoreFeatures())
+               .thenReturn(Mockito.mock(BackendFeatures.class));
+        return graph;
+    }
+
+    private static void applyVertexStepStrategy(Traversal.Admin<?, ?> traversal,
+                                                HugeGraph graph) {
+        TraversalHelper.applyTraversalRecursively(child -> {
+            child.setGraph(graph);
+            HugeVertexStepStrategy.instance().apply(child);
+        }, traversal);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static List<HugeVertexStep<?>> vertexSteps(Traversal.Admin<?, ?> traversal) {
+        List steps = TraversalHelper.getStepsOfAssignableClassRecursively(
+                HugeVertexStep.class, traversal);
+        return (List<HugeVertexStep<?>>) steps;
+    }
+
+    private static List<Long> batchSizeHints(GraphTraversal<?, ?> traversal,
+                                             HugeGraph graph) {
+        Traversal.Admin<?, ?> admin = traversal(traversal, graph);
+        applyVertexStepStrategy(admin, graph);
+        List<Long> hints = new ArrayList<>();
+        for (HugeVertexStep<?> step : vertexSteps(admin)) {
+            hints.add(step.queryInfo().batchSizeHint());
+        }
+        return hints;
     }
 
     private static PropertyKey propertyKey(long id, String name,

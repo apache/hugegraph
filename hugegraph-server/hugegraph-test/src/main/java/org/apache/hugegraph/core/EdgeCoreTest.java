@@ -55,6 +55,7 @@ import org.apache.hugegraph.testutil.FakeObjects;
 import org.apache.hugegraph.testutil.Utils;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.traversal.optimize.ConditionP;
+import org.apache.hugegraph.traversal.optimize.HugeVertexStep;
 import org.apache.hugegraph.traversal.optimize.Text;
 import org.apache.hugegraph.traversal.optimize.TraversalUtil;
 import org.apache.hugegraph.type.HugeType;
@@ -67,6 +68,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.T;
@@ -5730,6 +5732,66 @@ public class EdgeCoreTest extends BaseCoreTest {
             Assert.assertEquals("limit " + limit, total, count);
             Assert.assertEquals("limit " + limit, total, ids.size());
         }
+    }
+
+    @Test
+    @SuppressWarnings("rawtypes")
+    public void testQueryExistenceOfAdjacentVerticesOverBatchSize() {
+        HugeGraph graph = graph();
+        // More edges than BackendEntryIterator.INLINE_BATCH_SIZE (500)
+        int total = 600;
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        for (int i = 0; i < total; i++) {
+            Vertex book = graph.addVertex(T.label, "book", "name", "java-" + i);
+            louise.addEdge("look", book, "time", String.format("2017-%04d", i));
+        }
+        graph.tx().commit();
+
+        GraphTraversalSource g = graph.traversal();
+        String last = "java-" + (total - 1);
+
+        // The only matched neighbor is the last one, after the first batches
+        Assert.assertEquals(0L, g.V(louise).not(__.out("look").has("name", last))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).not(__.out("look").has("name", "none"))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).filter(__.out("look").has("name", "java-0"))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).where(__.out("look").has("name", last))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).and(__.out("look").has("name", "java-1"),
+                                                __.out("look").has("name", last))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).or(__.out("look").has("name", "none"),
+                                               __.out("look").has("name", last))
+                                 .count().next());
+        Assert.assertEquals(0L, g.V(louise).not(__.outE("look").has("time", "2017-0599"))
+                                 .count().next());
+        Assert.assertEquals(1L, g.V(louise).not(__.outE("look").has("time", "2017-0600"))
+                                 .count().next());
+
+        // A limit after filtering still reads the matched results
+        Assert.assertEquals(2L, g.V(louise).out("look")
+                                 .has("name", P.within("java-3", "java-555", last))
+                                 .limit(2).count().next());
+        Assert.assertEquals(total, g.V(louise).out("look").toList().size());
+
+        // Only an existence check reads a small first batch
+        GraphTraversal<Vertex, Vertex> exists = g.V(louise).not(
+                __.out("look").has("name", last));
+        exists.asAdmin().applyStrategies();
+        List<HugeVertexStep> steps = TraversalHelper.getStepsOfAssignableClassRecursively(
+                HugeVertexStep.class, exists.asAdmin());
+        Assert.assertEquals(1, steps.size());
+        Assert.assertEquals(1L, steps.get(0).queryInfo().batchSizeHint());
+
+        GraphTraversal<Vertex, Vertex> all = g.V(louise).out("look").has("name", last);
+        all.asAdmin().applyStrategies();
+        steps = TraversalHelper.getStepsOfAssignableClassRecursively(
+                HugeVertexStep.class, all.asAdmin());
+        Assert.assertEquals(1, steps.size());
+        Assert.assertEquals(Query.NO_LIMIT, steps.get(0).queryInfo().batchSizeHint());
     }
 
     @Test

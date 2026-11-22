@@ -783,6 +783,40 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
+    public void testHintedEdgeBatchProbesOnlyHintedEdgesForCache() {
+        List<Id> ids = this.persistEdges(3);
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params, store);
+        try {
+            transaction.clearCache(null, false);
+            IdQuery hinted = new IdQuery(HugeType.EDGE, new LinkedHashSet<>(ids));
+            hinted.batchSizeHint(1L);
+            // All edges are returned, but no more than one is read to fill the cache
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, hinted));
+            Mockito.clearInvocations(store);
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, hinted));
+            Mockito.verify(store, Mockito.times(1)).query(Mockito.any(Query.class));
+
+            // A hinted query still hits the edges cached by a query without hint
+            IdQuery unhinted = new IdQuery(HugeType.EDGE, new LinkedHashSet<>(ids));
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, unhinted));
+            Mockito.clearInvocations(store);
+            this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, hinted));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+
+            // The edges are cached if all of them have been read by the probe
+            IdQuery single = new IdQuery(HugeType.EDGE, new LinkedHashSet<>(ids.subList(0, 1)));
+            single.batchSizeHint(1L);
+            this.assertEdgeIds(ids.subList(0, 1), this.fetchEdgeIds(transaction, single));
+            Mockito.clearInvocations(store);
+            this.assertEdgeIds(ids.subList(0, 1), this.fetchEdgeIds(transaction, single));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
+        }
+    }
+
+    @Test
     public void testEdgeCacheKeepsDistinctBatchesWithinTotalCandidateLimit() {
         List<Id> ids = this.persistEdges(101);
         ConditionQuery root = this.edgeCacheRequest();
