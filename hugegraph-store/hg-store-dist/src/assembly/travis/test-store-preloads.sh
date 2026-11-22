@@ -52,7 +52,14 @@ run_launcher() {
     mkdir -p "$top/bin" "$top/conf" "$top/lib" "$top/topling"
     cp "$SOURCE_BIN/start-hugegraph-store.sh" "$SOURCE_BIN/jvm-module.options" "$top/bin/"
     cp "$SHARED_BIN/preload-topling.sh" "$top/bin/"
-    cat > "$top/bin/util.sh" <<'MOCK'
+    # Source the real util.sh so reject_unsafe_path/canonicalize_dir/
+    # canonicalize_file/ensure_file_readable/reject_relative_conf_path (all
+    # invoked by start-hugegraph-store.sh before preload-topling.sh runs)
+    # behave exactly as in production. Only ensure_path_writable and
+    # download_and_verify are stubbed below, so no real network access or
+    # unexpected directory creation is needed.
+    cp "$SOURCE_BIN/util.sh" "$top/bin/util.sh"
+    cat >> "$top/bin/util.sh" <<'MOCK'
 # Substitute only utility calls needed by this launcher fixture.
 ensure_path_writable() { mkdir -p "$1"; }
 download_and_verify() {

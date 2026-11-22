@@ -25,11 +25,43 @@ function abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
-BIN=`abs_path`
-TOP="$(cd $BIN/../ && pwd)"
+BIN="$(abs_path)"
+TOP="$(cd "$BIN"/../ && pwd)"
 
-. $BIN/util.sh
+. "$BIN"/util.sh
 
-CRONTAB_JOB="$TOP/bin/monitor-hugegraph.sh"
+# Must match the serialized form start-monitor.sh saves (one quoted shell word).
+# shell_quote (not cron_quote) so removal is not blocked by validation.
+MONITOR_RAW="$TOP/bin/monitor-hugegraph.sh"
+MONITOR_Q="$(shell_quote "$MONITOR_RAW")"
 
-crontab_remove "$CRONTAB_JOB"
+# Match both the current quoted form and the legacy unquoted form (older
+# start-monitor.sh versions wrote "... && $TOP/bin/monitor-hugegraph.sh"
+# without quoting). Otherwise a job installed before this quoting fix survives
+# an in-place upgrade: grep -F never matches it, removal silently no-ops, and
+# the stale cron entry can restart the server within a minute.
+# The legacy key is anchored with the literal "&& " prefix (not just the bare
+# path): grep -F does substring matching, so an unanchored bare path would
+# also match as a SUBSTRING of a different install's longer path (e.g. the
+# key for /opt/hg matches a crontab line for /data/opt/hg), removing the
+# wrong install's job.
+#
+# Every key is tagged with a trailing "# pidfile:..." comment, matching what
+# start-monitor.sh writes. The default (no -i) case is tagged
+# "# pidfile:default" rather than left bare: a bare "$MONITOR_Q" key is a
+# literal substring of every "-i" job's key ("$MONITOR_Q # pidfile:<path>"),
+# so grep -F would match those too -- making stop-hugegraph.sh without -i
+# remove every instance's monitor job. Must stay in sync with
+# start-monitor.sh's keys.
+PID_TAG="default"
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    PID_FILE_Q="$(shell_quote "$PID_FILE_OVERRIDE")"
+    PID_TAG="$PID_FILE_Q"
+fi
+MONITOR_KEY="$MONITOR_Q # pidfile:$PID_TAG"
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:$PID_FILE_OVERRIDE"
+else
+    MONITOR_LEGACY_KEY="&& $MONITOR_RAW # pidfile:default"
+fi
+crontab_remove "$MONITOR_KEY" "$MONITOR_LEGACY_KEY"

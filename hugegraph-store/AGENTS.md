@@ -27,6 +27,12 @@ mvn test -pl hugegraph-store/hg-store-test -am
   singleton state closed. Preserve `reuseForks=false` in the core test execution.
 - Test prerequisites: [PD/Store CI](../.github/workflows/pd-store-ci.yml).
   Cluster setup: [Docker guide](../docker/README.md).
+- `start-hugegraph-store.sh`/`stop-hugegraph-store.sh`/`restart-hugegraph-store.sh` share
+  the `-c/-l/-o/-i` launcher guards and crontab helpers with Server; run Server's
+  `bash hugegraph-server/hugegraph-dist/src/test/shell/test-cron-quote.sh` and
+  `test-override-guards.sh` locally after changing this module's
+  `hg-store-dist/.../bin/util.sh`, since they also validate Store's copy. Server's
+  CI already runs both for every PR (see [server-tests.yml](../.github/workflows/server-tests.yml)).
 
 ## Cross-module traps
 

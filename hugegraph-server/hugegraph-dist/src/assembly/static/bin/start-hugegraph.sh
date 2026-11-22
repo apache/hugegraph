@@ -39,29 +39,67 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
-LOGS="$TOP/logs"
 SCRIPTS="$TOP/scripts"
-PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
 
 # Note: keep ':' in the end of the string to indicate the option needs a value
-while getopts "d:g:m:p:s:j:t:y:" arg; do
-    case ${arg} in
-        d) DAEMON="$OPTARG" ;;
-        g) GC_OPTION="$OPTARG" ;;
-        m) OPEN_MONITOR="$OPTARG" ;;
-        p) PRELOAD="$OPTARG" ;;
-        s) OPEN_SECURITY_CHECK="$OPTARG" ;;
-        j) USER_OPTION="$OPTARG" ;;
-        t) SERVER_STARTUP_TIMEOUT_S="$OPTARG" ;;
-        # Telemetry is used to collect metrics, traces and logs
-        y) OPEN_TELEMETRY="$OPTARG" ;;
-        # Note: update usage info when the params changed
-        ?) exit_with_usage_help ;;
-    esac
+while getopts "c:d:g:i:j:l:m:o:p:s:t:y:" arg; do
+     case ${arg} in
+         c) CONF_OVERRIDE="$OPTARG" ;;
+         d) DAEMON="$OPTARG" ;;
+         g) GC_OPTION="$OPTARG" ;;
+         i) PID_FILE_OVERRIDE="$OPTARG" ;;
+         j) USER_OPTION="$OPTARG" ;;
+         l) LOGS_OVERRIDE="$OPTARG" ;;
+         m) OPEN_MONITOR="$OPTARG" ;;
+         o) PLUGINS_OVERRIDE="$OPTARG" ;;
+         p) PRELOAD="$OPTARG" ;;
+         s) OPEN_SECURITY_CHECK="$OPTARG" ;;
+         t) SERVER_STARTUP_TIMEOUT_S="$OPTARG" ;;
+         # Telemetry is used to collect metrics, traces and logs
+         y) OPEN_TELEMETRY="$OPTARG" ;;
+         # Note: update usage info when the params changed
+         ?) exit_with_usage_help ;;
+     esac
 done
+
+reject_unsafe_path "$CONF_OVERRIDE" "-c conf dir" crlf || exit 1
+reject_unsafe_path "$LOGS_OVERRIDE" "-l logs dir" crlf || exit 1
+reject_unsafe_path "$PID_FILE_OVERRIDE" "-i pid file" crlf || exit 1
+# The plugins dir is joined into ':'-separated classpath/agent settings
+reject_unsafe_path "$PLUGINS_OVERRIDE" "-o plugins dir" classpath || exit 1
+
+# Canonicalize relative path overrides to absolute paths.
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE" nocreate)" || exit 1
+LOGS_OVERRIDE="$(canonicalize_dir "$LOGS_OVERRIDE")" || exit 1
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")" || exit 1
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE")" || exit 1
+
+# Re-validate the *effective*, canonicalized plugins path: cd/pwd resolves a
+# relative override against the current working directory, which can
+# introduce a ':' (or other unsafe char) that wasn't present in the raw value
+# (e.g. launching from a directory such as "/tmp/work:one").
+reject_unsafe_path "$PLUGINS_OVERRIDE" "-o plugins dir (resolved)" classpath || exit 1
+
+# The monitor persists these values into a crontab line, where '%' is special to cron
+if [ "$OPEN_MONITOR" == "true" ]; then
+    reject_unsafe_path "$CONF_OVERRIDE" "conf dir (-c)" cron || exit 1
+    reject_unsafe_path "$LOGS_OVERRIDE" "logs dir (-l)" cron || exit 1
+    reject_unsafe_path "$PLUGINS_OVERRIDE" "plugins dir (-o)" cron || exit 1
+    reject_unsafe_path "$PID_FILE_OVERRIDE" "pid file (-i)" cron || exit 1
+    reject_unsafe_path "$JAVA_HOME" "JAVA_HOME" cron || exit 1
+    reject_unsafe_path "$TOP" "install directory" cron || exit 1
+fi
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+
+ensure_path_writable "$(dirname "$PID_FILE")"
+
+export CONF_OVERRIDE LOGS_OVERRIDE PID_FILE_OVERRIDE PLUGINS_OVERRIDE
 
 if [[ "$OPEN_MONITOR" != "true" && "$OPEN_MONITOR" != "false" ]]; then
     exit_with_usage_help
@@ -71,18 +109,74 @@ if [[ "$OPEN_SECURITY_CHECK" != "true" && "$OPEN_SECURITY_CHECK" != "false" ]]; 
     exit_with_usage_help
 fi
 
+# Verify the config files exist before reading them
+ensure_file_readable "$CONF/rest-server.properties" "REST server config" || exit 1
+ensure_file_readable "$CONF/gremlin-server.yaml" "Gremlin server config" || exit 1
+
 GREMLIN_SERVER_URL=$(read_property "$CONF/rest-server.properties" "gremlinserver.url")
 if [ -z "$GREMLIN_SERVER_URL" ]; then
     GREMLIN_SERVER_URL="http://127.0.0.1:8182"
 fi
 REST_SERVER_URL=$(read_property "$CONF/rest-server.properties" "restserver.url")
 
+# 'graphs' is read by HugeGraphServer/GraphManager relative to the working
+# directory (set to $TOP below), not relative to $CONF.
+GRAPHS_DIR=$(read_property "$CONF/rest-server.properties" "graphs")
+reject_relative_conf_path "$GRAPHS_DIR" "graphs" "$CONF/rest-server.properties" || exit 1
+
+# enable-auth.sh writes 'config: {tokens: conf/rest-server.properties}' into
+# gremlin-server.yaml. Like 'graphs' above, HugeAuthenticator.setup opens that
+# path relative to the working directory ($TOP below), not relative to
+# $CONF, so under -c a relative value silently keeps reading the packaged
+# rest-server.properties (and the auth graph(s) it points at).
+#
+# We parse the single-line inline-flow form ('config: {...}' closed on
+# the same line) that enable-auth.sh writes. A multi-line/block-style YAML
+# 'config:' mapping (or an inline '{' left open across lines) is NOT parsed.
+#
+# Only look at 'config:' lines that also carry a 'tokens:' key on the same
+# line: that is the only form this check (and the TOKENS_FILE parse below)
+# cares about.
+CONFIG_LINE=$(grep -E '^[[:blank:]]*config:.*tokens:' "$CONF/gremlin-server.yaml" | tail -1)
+if [ -n "$CONFIG_LINE" ] && \
+   ! echo "$CONFIG_LINE" | grep -qE '^[[:blank:]]*config:[[:blank:]]*\{[^{}]*\}[[:blank:]]*$'; then
+    echo "ERROR: '$CONF/gremlin-server.yaml' has a 'config:' entry with a" \
+         "'tokens:' key that is not a single-line inline mapping" \
+         "(e.g. 'config: {tokens: conf/rest-server.properties}')." >&2
+    exit 1
+fi
+
+# Only match a 'tokens:' key nested under 'config:' (the auth-handler config block), not an unrelated top-level key
+# of the same name. '[[:blank:]]' (space or tab) tolerates tab-indented YAML.
+TOKENS_FILE=$(sed -n -e 's/^[[:blank:]]*config:.*tokens:[[:blank:]]*\([^,}[:blank:]]*\).*/\1/p' \
+                      "$CONF/gremlin-server.yaml" | tail -1)
+reject_relative_conf_path "$TOKENS_FILE" "tokens" "$CONF/gremlin-server.yaml" || exit 1
+
 check_port "$GREMLIN_SERVER_URL"
 check_port "$REST_SERVER_URL"
 
-# Note: Only download hugegraph-server.keystore when we config https (check the conf file)
-if [[ $REST_SERVER_URL == https* && ! -e "${CONF}/hugegraph-server.keystore" ]]; then
-    download "${CONF}" "https://github.com/apache/hugegraph-doc/raw/binary-1.5/dist/server/hugegraph-server.keystore"
+# Note: Only check/download hugegraph-server.keystore when we config https.
+# 'ssl.keystore_file' (ServerOptions.SSL_KEYSTORE_FILE) defaults to the
+# relative 'conf/hugegraph-server.keystore' and, like 'graphs' above, is
+# opened by RestServer/Grizzly's SSLContextConfigurator relative to the
+# working directory ($TOP below), not relative to $CONF. So under -c this
+# must be rejected the same way, and the download must target the path the
+# JVM will actually open rather than unconditionally ${CONF}.
+if [[ $REST_SERVER_URL == https* ]]; then
+    KEYSTORE_FILE=$(read_property "$CONF/rest-server.properties" "ssl.keystore_file")
+    if [ -z "$KEYSTORE_FILE" ]; then
+        KEYSTORE_FILE="conf/hugegraph-server.keystore"
+    fi
+    reject_relative_conf_path "$KEYSTORE_FILE" "ssl.keystore_file" "$CONF/rest-server.properties" || exit 1
+
+    case "$KEYSTORE_FILE" in
+        /*) KEYSTORE_PATH="$KEYSTORE_FILE" ;;
+        *) KEYSTORE_PATH="$TOP/$KEYSTORE_FILE" ;;
+    esac
+
+    if [ ! -e "$KEYSTORE_PATH" ]; then
+        download "$(dirname "$KEYSTORE_PATH")" "https://github.com/apache/hugegraph-doc/raw/binary-1.5/dist/server/hugegraph-server.keystore"
+    fi
 fi
 
 if [ ! -d "$LOGS" ]; then
