@@ -33,6 +33,9 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     protected BackendEntry next;
 
+    // Records to merge into the next entry, grows up to INLINE_BATCH_SIZE
+    private long batchSize;
+
     public BinaryEntryIterator(BackendIterator<Elem> results, Query query,
                                BiFunction<BackendEntry, Elem, BackendEntry> m) {
         super(query);
@@ -43,6 +46,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
         this.results = results;
         this.merger = m;
         this.next = null;
+        this.batchSize = initBatchSize(query);
 
         if (query.paging()) {
             assert query.offset() == 0L;
@@ -69,7 +73,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
         while (this.results.hasNext()) {
             Elem elem = this.results.next();
             if (this.current != null &&
-                this.sizeOf(this.current) >= INLINE_BATCH_SIZE) {
+                this.sizeOf(this.current) >= this.batchSize) {
                 /*
                  * The current entry already holds a full batch: start the
                  * next entry with this record instead of appending it.
@@ -81,6 +85,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
                  */
                 assert this.next == null;
                 this.next = this.merger.apply(null, elem);
+                this.batchSize = Math.min(this.batchSize * 2, INLINE_BATCH_SIZE);
                 break;
             }
             BackendEntry merged = this.merger.apply(this.current, elem);
@@ -135,6 +140,18 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
     private void removeLastRecord() {
         int lastOne = this.current.columnsSize() - 1;
         ((BinaryBackendEntry) this.current).removeColumn(lastOne);
+    }
+
+    private static long initBatchSize(Query query) {
+        /*
+         * Start with a small batch if the caller expects few results, e.g. an
+         * existence check like not(out().has(k, v)) stops at the first match
+         */
+        long hint = query.batchSizeHint();
+        if (hint > 0L && hint < INLINE_BATCH_SIZE) {
+            return hint;
+        }
+        return INLINE_BATCH_SIZE;
     }
 
     public static long sizeOfEntry(BackendEntry entry) {

@@ -412,11 +412,16 @@ public final class CachedGraphTransaction extends GraphTransaction {
         return fetched.mapBatches(batch -> {
             Iterator<HugeEdge> source = batch.results();
             List<HugeEdge> candidates = new ArrayList<>(MAX_CACHE_EDGES_PER_QUERY + 1);
+            /*
+             * Don't read more edges than the caller expects to fill the cache,
+             * e.g. not(out().has(k, v)) only needs the first matched edge
+             */
+            long probe = Math.min(query.batchSizeHint(), MAX_CACHE_EDGES_PER_QUERY + 1L);
             // Limit probing to this batch; never request another batch to fill the cache.
-            while (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY && source.hasNext()) {
+            while (candidates.size() < probe && source.hasNext()) {
                 candidates.add(source.next());
             }
-            if (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY) {
+            if (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY && !source.hasNext()) {
                 this.cacheEdgeBatch(cacheKey, batchLabel, candidates);
             }
             return new QueryBatch<>(

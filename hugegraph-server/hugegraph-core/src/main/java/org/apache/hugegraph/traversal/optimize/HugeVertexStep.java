@@ -176,7 +176,13 @@ public class HugeVertexStep<E extends Element>
             org.apache.hugegraph.util.E.checkArgument(!this.queryInfo().paging(),
                                                       "Can't query by paging " +
                                                       "and filtering");
-            this.queryInfo().limit(Query.NO_LIMIT);
+            Query queryInfo = this.queryInfo();
+            if (!queryInfo.noLimit() && queryInfo.limit() > 0L) {
+                // The limit may still be reached early, so read a small batch first
+                queryInfo.batchSizeHint(Math.min(queryInfo.batchSizeHint(),
+                                                 queryInfo.limit()));
+            }
+            queryInfo.limit(Query.NO_LIMIT);
         }
 
         query = this.injectQueryInfo(query);

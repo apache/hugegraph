@@ -17,8 +17,16 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.backend.serializer.BinaryEntryIterator;
 import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
+import org.apache.hugegraph.backend.store.BackendEntryIterator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -110,5 +118,51 @@ public class BinaryBackendEntryTest extends BaseUnitTest {
         Assert.assertNotEquals(entry, entry3);
         Assert.assertNotEquals(entry, entry4);
         Assert.assertEquals(entry, entry5);
+    }
+
+    @Test
+    public void testEntryIteratorReadsSmallBatchesFirstWithHint() {
+        List<BackendColumn> columns = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            columns.add(BackendColumn.of(new byte[]{1, 2, (byte) i},
+                                         new byte[]{(byte) i}));
+        }
+
+        Query query = new Query(HugeType.EDGE);
+        Assert.assertEquals(ImmutableList.of(10), entrySizes(columns, query));
+
+        query.batchSizeHint(1L);
+        Assert.assertEquals(ImmutableList.of(1, 2, 4, 3),
+                            entrySizes(columns, query));
+
+        query.batchSizeHint(BackendEntryIterator.INLINE_BATCH_SIZE + 1L);
+        Assert.assertEquals(ImmutableList.of(10), entrySizes(columns, query));
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            query.batchSizeHint(0L);
+        });
+    }
+
+    private static List<Integer> entrySizes(List<BackendColumn> columns,
+                                            Query query) {
+        BackendColumnIterator results = BackendColumnIterator.wrap(
+                                        columns.iterator());
+        BinaryEntryIterator<BackendColumn> entries = new BinaryEntryIterator<>(
+                results, query, (entry, col) -> {
+            if (entry == null || !entry.belongToMe(col)) {
+                entry = new BinaryBackendEntry(query.resultType(), new byte[]{1, 2});
+            }
+            entry.columns(col);
+            return entry;
+        });
+        List<Integer> sizes = new ArrayList<>();
+        List<BackendColumn> read = new ArrayList<>();
+        while (entries.hasNext()) {
+            BackendEntry entry = entries.next();
+            sizes.add(entry.columnsSize());
+            read.addAll(entry.columns());
+        }
+        Assert.assertEquals(columns, read);
+        return sizes;
     }
 }
