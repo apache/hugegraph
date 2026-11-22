@@ -20,9 +20,13 @@ package org.apache.hugegraph.traversal.optimize;
 import java.util.List;
 
 import org.apache.hugegraph.HugeGraph;
+import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy.ProviderOptimizationStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.ConnectiveStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PathStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.TreeStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
@@ -87,7 +91,36 @@ public final class HugeVertexStepStrategy
             TraversalUtil.extractRange(newStep, traversal, true);
 
             TraversalUtil.extractCount(newStep, traversal);
+
+            if (onlyTestsExistence(newStep, traversal)) {
+                // The first result is enough, e.g. not(out().has(k, v))
+                newStep.queryInfo().batchSizeHint(1L);
+            }
         }
+    }
+
+    /**
+     * Whether the results of a step are only used to test if any exists:
+     * the step ends a child traversal of not(), filter(), where(traversal),
+     * and() or or(), which only call hasNext() on the child traversal
+     *
+     * @param step      the step to check
+     * @param traversal the traversal which the step belongs to
+     * @return true if one result is enough for the step
+     */
+    protected static boolean onlyTestsExistence(Step<?, ?> step,
+                                                Traversal.Admin<?, ?> traversal) {
+        if (step != traversal.getEndStep()) {
+            // Like not(out().count().is(0)), all results of the step matter
+            return false;
+        }
+        TraversalParent parent = traversal.getParent();
+        if (!(parent instanceof NotStep || parent instanceof TraversalFilterStep ||
+              parent instanceof ConnectiveStep)) {
+            return false;
+        }
+        return parent.getLocalChildren().stream()
+                     .anyMatch(child -> child == traversal);
     }
 
     /**
