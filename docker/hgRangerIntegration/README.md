@@ -98,9 +98,19 @@ docker compose -f docker/hgRangerIntegration/docker-compose.yml ps
 3. Ranger Admin starts and configures Solr as the audit backend
 4. HugeGraph starts and loads the Ranger plugin
 
+Until Step 4b creates the `hugegraph` service in Ranger Admin, the plugin's policy poll
+logs `Error getting policies; service not found` (HTTP 404) and `cache file does not
+exist` every 30 seconds. This is expected on a fresh stack and stops on the first poll
+after Step 4b.
+
 If any container fails, check logs with `docker compose logs <service>`.
 
 ---
+
+> **Automated run:** once all four containers are healthy,
+> `docker/hgRangerIntegration/scripts/e2e-verify.sh` runs Steps 4–9 below and prints a
+> PASS/FAIL line per check. It also verifies that `GET /graphspaces/DEFAULT/graphs` hides
+> graphs Ranger denies. It is safe to re-run, and Step 8 stops and restarts `ranger`.
 
 ## Step 4 — Register the HugeGraph Service in Ranger Admin
 
@@ -554,7 +564,7 @@ curl -s --compressed -u alice:alicepass \
   http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/graph/vertices
 ```
 
-Expected: `{"vertices":[]}`
+Expected: a `vertices` array containing `p1` and `s1` from the Setup step.
 
 ### Test 5 — Unknown user is rejected ❌
 
@@ -618,8 +628,9 @@ docker compose -f docker/hgRangerIntegration/docker-compose.yml start ranger
 Verify that a policy change in Ranger Admin takes effect without restarting HugeGraph.
 
 Because Ranger rejects overlapping resource patterns, all users share one policy
-(`hugegraph-access`, id=22 from Step 7). To add write access for bob, update that
-policy via `PUT` rather than creating a new one.
+(`hugegraph-access`, created in Step 6). To add write access for bob, update that
+policy via `PUT` rather than creating a new one. Its id differs between runs, so the
+commands below look it up by name.
 
 ```bash
 # 1. Confirm bob currently cannot write schema
@@ -808,17 +819,16 @@ switches it to a Java 17 runtime; it does not touch audit configuration.
 
 ### 2. HugeGraph plugin audit (ranger-hugegraph-security.xml)
 
-The HugeGraph Ranger plugin is configured to log audit events to a local file:
+The HugeGraph Ranger plugin writes each audit event to both destinations:
 - `xasecure.audit.is.enabled=true` — enables audit logging
-- `xasecure.audit.destination.file=true` — audit to file
-- `xasecure.audit.destination.solr=false` — disable Solr
+- `xasecure.audit.destination.file=true` — audit to a local file
 - `xasecure.audit.destination.file.dir=/var/log/ranger/audit` — log directory
+- `xasecure.audit.destination.solr=true` — audit to the `ranger_audits` core on
+  `ranger-solr`, which is what the Ranger Admin UI Audit tab and
+  `/service/assets/accessAudit` read
 
-**Why this approach:**
-- No Solr container needed — simpler deployment for testing.
-- Ranger Admin audits to PostgreSQL database; HugeGraph plugin audits to file.
-- Both audit trails are preserved without external dependencies.
-- Ranger Admin audits to Solr (`ranger-solr`); the HugeGraph plugin audits to file.
+Solr delivery is asynchronous, so an event can take several seconds to appear in Ranger
+Admin; the local file is the quicker place to check while testing.
 
 ---
 

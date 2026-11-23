@@ -1083,6 +1083,16 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         verifyPermission(HugePermission.READ, ResourceType.NONE);
     }
 
+    /**
+     * Verify the current user can read this graph, consulting the external
+     * authorizer (e.g. Ranger) if registered.
+     *
+     * @throws ForbiddenException if access is denied
+     */
+    public void verifyReadPermission() {
+        this.verifyAnyPermission();
+    }
+
     private void verifyPermission(HugePermission actionPerm,
                                   ResourceType resType) {
         /*
