@@ -71,6 +71,7 @@ import org.apache.hugegraph.unit.cache.CacheManagerTest;
 import org.apache.hugegraph.unit.cache.CacheTest;
 import org.apache.hugegraph.unit.cache.CachedGraphTransactionTest;
 import org.apache.hugegraph.unit.cache.CachedSchemaTransactionTest;
+import org.apache.hugegraph.unit.cache.CachedSchemaTransactionV2Test;
 import org.apache.hugegraph.unit.cache.RamTableTest;
 import org.apache.hugegraph.unit.cache.RequestCacheLifetimeTest;
 import org.apache.hugegraph.unit.cmd.InitStoreConfigTest;
@@ -206,6 +207,7 @@ import org.junit.runners.Suite;
         CacheTest.OffheapCacheTest.class,
         CacheTest.LevelCacheTest.class,
         CachedSchemaTransactionTest.class,
+        CachedSchemaTransactionV2Test.class,
         MetaManagerSchemaCacheClearEventTest.class,
         EtcdMetaDriverTest.class,
         CachedGraphTransactionTest.class,
