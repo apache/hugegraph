@@ -21,6 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory.LiveSstFile;
 import org.junit.jupiter.api.Test;
 
 public class CloudSyncTrackerTest {
@@ -74,6 +77,23 @@ public class CloudSyncTrackerTest {
         assertTrue(tracker.isConfirmedInEpoch("0", path, newEpoch));
         assertFalse(tracker.isConfirmedInEpoch("0", path, oldEpoch));
         assertFalse(tracker.isConfirmedInEpoch("0", "0/CURRENT", newEpoch));
+    }
+
+    @Test
+    public void allConfirmedInEpoch_matchesOnlyTheEpochThatConfirmed() {
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        List<LiveSstFile> live = List.of(new LiveSstFile("0/000042.sst", "default"));
+        long oldEpoch = tracker.currentEpoch("0");
+        assertTrue(tracker.markConfirmedIfEpoch("0", "0/000042.sst", oldEpoch));
+        assertTrue(tracker.allConfirmedInEpoch("0", live, oldEpoch));
+
+        tracker.clearDb("0");
+        long newEpoch = tracker.currentEpoch("0");
+        assertTrue(tracker.markConfirmedIfEpoch("0", "1/000042.sst", newEpoch));
+        assertFalse(tracker.allConfirmedInEpoch("0", live, oldEpoch),
+                    "a number confirmed by the reopened DB is not the old epoch's");
+        assertTrue(tracker.allConfirmedInEpoch("0", live, newEpoch));
+        assertTrue(tracker.allConfirmedInEpoch("0", List.of(), oldEpoch));
     }
 
     @Test

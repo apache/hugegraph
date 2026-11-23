@@ -887,6 +887,132 @@ public class CloudStorageEventListenerTest {
         }
     }
 
+    @Test
+    public void deleteGuard_liveSetReadBeforeReopenAtNewDir_isNotConfirmedUnderNewEpoch()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-guard-reopen");
+        Path dirA = tmpRoot.resolve("db_0");
+        Path dirB = tmpRoot.resolve("db_1");
+        Files.createDirectories(dirA);
+        Files.createDirectories(dirB);
+        Path oldLive = dirA.resolve("000010.sst");
+        Files.write(oldLive, "old".getBytes());
+        Path oldInput = dirA.resolve("000009.sst");
+
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, tracker, null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS) {
+            @Override
+            List<LiveSstFile> currentLiveSstFiles(String dbName) {
+                // The name reopens at a new dir right after the old dir's live set is read.
+                List<LiveSstFile> live = List.of(new LiveSstFile(oldLive.toString(), "default"));
+                onDBOpening("db0", dirB.toString());
+                return live;
+            }
+
+            @Override
+            boolean syncMetadataSnapshotInline(CloudStorageProvider p, String dbName) {
+                return true;
+            }
+        };
+
+        try {
+            l.onDBOpening("db0", dirA.toString());
+            l.onTableFileDeleted("db0", "default", oldInput.toString());
+            l.processDeferredSstDeletes();
+
+            assertTrue(provider.deletes.isEmpty(),
+                       "Delete must be held when the live set was read for a previous dir");
+            assertFalse(tracker.isConfirmed("db0", dirB.resolve("000010.sst").toString()),
+                        "old-dir live SST must not be confirmed under the reopened DB's epoch");
+            assertEquals(0L, tracker.confirmedCount("db0"));
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void ensureLiveSetUploaded_staleEpoch_holdsEvenWhenNumbersConfirmedByReopenedDb()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-guard-stale-epoch");
+        Path dirA = tmpRoot.resolve("db_0");
+        Files.createDirectories(dirA);
+        Path oldLive = dirA.resolve("000010.sst");
+        Files.write(oldLive, "old".getBytes());
+
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(provider,
+                List.of(tmpRoot.toString()), false, 0L, null, tracker);
+        List<LiveSstFile> live = List.of(new LiveSstFile(oldLive.toString(), "default"));
+
+        try {
+            long oldEpoch = tracker.currentEpoch("db0");
+            tracker.clearDb("db0");
+            // The reopened DB confirmed an SST with the same file number (a different object).
+            tracker.markConfirmed("db0", tmpRoot.resolve("db_1").resolve("000010.sst").toString());
+
+            assertFalse(l.ensureLiveSetUploaded(provider, "db0", live, oldEpoch),
+                        "a live set pinned to a previous epoch must hold the delete (fast path)");
+            assertTrue(provider.uploads.isEmpty(), "no upload for a stale epoch");
+            assertTrue(l.ensureLiveSetUploaded(provider, "db0", live,
+                                               tracker.currentEpoch("db0")),
+                       "the current epoch's own confirmation still passes");
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void onTableFileCreated_supersededDirEvent_isNotConfirmedUnderReopenedEpoch()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-superseded-dir");
+        Path dirA = tmpRoot.resolve("db_0");
+        Path dirB = tmpRoot.resolve("db_1");
+        Files.createDirectories(dirA);
+        Files.createDirectories(dirB);
+        Path oldSst = dirA.resolve("000010.sst");
+        Path newSst = dirB.resolve("000011.sst");
+        Files.write(oldSst, "old".getBytes());
+        Files.write(newSst, "new".getBytes());
+
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        CapturingProvider provider = new CapturingProvider();
+        AtomicInteger dirty = new AtomicInteger();
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, tracker, null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS) {
+            @Override
+            void markMetadataDirty(String dbName) {
+                dirty.incrementAndGet();
+            }
+        };
+
+        try {
+            l.onDBOpening("db0", dirA.toString());
+            l.onDBOpening("db0", dirB.toString());
+
+            // A late native event of the superseded dir (old session still draining).
+            l.onTableFileCreated(dirA.toString(), "default", oldSst.toString(), 3L);
+            waitForCondition(() -> dirty.get() == 1, "old-dir upload did not finish");
+            assertEquals(1, provider.uploads.size(),
+                         "the superseded dir's SST is still uploaded under its own prefix");
+            assertFalse(tracker.isConfirmed("db0", dirB.resolve("000010.sst").toString()),
+                        "old-dir SST must not be confirmed under the reopened DB's epoch");
+            assertEquals(0L, tracker.confirmedCount("db0"));
+
+            // The current dir's events are unaffected.
+            l.onTableFileCreated(dirB.toString(), "default", newSst.toString(), 3L);
+            waitForCondition(() -> dirty.get() == 2, "new-dir upload did not finish");
+            assertTrue(tracker.isConfirmed("db0", newSst.toString()));
+            assertEquals(1L, tracker.confirmedCount("db0"));
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
     /** Listener whose metadata capture returns {@code next} and whose upload always succeeds. */
     private static CloudStorageEventListener metadataListener(Path root, CloudSyncTracker tracker,
                                                               AtomicReference<MetadataSnapshot> next) {

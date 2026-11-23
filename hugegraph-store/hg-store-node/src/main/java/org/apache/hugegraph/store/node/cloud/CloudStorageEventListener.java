@@ -188,6 +188,12 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
 
     /** Resolved DB directory -> logical DB name, so {@link #onCompacted} resolves path events. */
     private final Map<String, String> dbNameByDir = new ConcurrentHashMap<>();
+    /**
+     * The directory each DB name was last opened at (set by {@link #onDBOpening}). Unlike
+     * {@link #dbNameByDir}, which keeps superseded dirs so their native events still resolve, this
+     * identifies the one dir whose SSTs may be confirmed under the name's current tracker epoch.
+     */
+    private final Map<String, String> activeDirByDb = new ConcurrentHashMap<>();
 
     /** Per-DB mutexes to serialize metadata capture/publication/pruning. */
     private final Map<String, Object> metadataSyncLocks = new ConcurrentHashMap<>();
@@ -609,6 +615,9 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         // A name reopened at a NEW dir (snapshot install, destroy-then-recreate) must not inherit
         // upload confirmations or the published generation of the previous directory. This runs
         // before recordDb and preHydrateDbFiles, which seed the tracker for the new dir.
+        // The active dir is switched before the reset bumps the epoch: an old-dir event that reads
+        // the new epoch is then guaranteed to see its dir as superseded (see onTableFileCreated).
+        activeDirByDb.put(dbName, normaliseDir(dbPath));
         resetStateIfDbMovedDir(dbName, dbPath);
         // Register the dir -> logical-name mapping first: native events that arrive before
         // onDBCreated (or on a disabled-hydration node) must resolve to the logical name.
@@ -900,6 +909,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     public void onDBDeleted(String dbName, String dbPath) {
         String deletedDir = normaliseDir(dbPath);
         dbNameByDir.remove(deletedDir);
+        activeDirByDb.remove(dbName, deletedDir);
         if (dbNameByDir.containsValue(dbName)) {
             // The same logical DB is live at another directory (it was re-created there while this
             // one awaited destruction). Its name-keyed state belongs to the live copy, so only
@@ -916,6 +926,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
             readMissAttemptTs.entrySet().removeIf(e -> e.getKey().startsWith(dbName + "::"));
             dbNameByDir.values().removeIf(dbName::equals);
             metadataSyncLocks.remove(dbName);
+            activeDirByDb.remove(dbName);
             lastPublishedMetadataGeneration.remove(dbName);
             deferredSstDeletes.removeIf(t -> dbName.equals(t.dbName));
             // Remove per-DB meters so meter cardinality does not grow without bound as DBs churn.
@@ -1322,14 +1333,26 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     public void onTableFileCreated(String dbNameOrPath, String cfName,
                                    String filePath, long fileSize) {
         String dbName = resolveDbName(dbNameOrPath, filePath);
-        recordDb(dbName, parentDir(filePath));
+        String fileDir = parentDir(filePath);
+        // Read before the superseded check (onDBOpening switches the dir before bumping the epoch):
+        // either the epoch is the old one and the guard drops the confirmation, or the dir is seen
+        // as superseded.
+        long currentEpoch = syncTracker.currentEpoch(dbName);
+        // A late native event from a superseded dir (the name has since reopened elsewhere) must
+        // neither re-map the name to that dir nor be confirmed under the new dir's epoch.
+        boolean supersededDir = isSupersededDir(dbName, fileDir);
+        if (!supersededDir) {
+            recordDb(dbName, fileDir);
+        }
         CloudStorageMetrics.registerDatabaseMetrics(dbName);
         String remoteKey = toRelativeKey(filePath);
 
         // Capture the epoch before we hand off to a background thread.  The async callback
         // uses markConfirmedIfEpoch so a late confirmation after clearDb() + DB recreation
         // with reused file numbers is silently dropped instead of producing stale durability state.
-        long uploadEpoch = syncTracker.currentEpoch(dbName);
+        // Epoch 0 never matches a live epoch (they start at 1): the superseded dir's SST is still
+        // uploaded under its own prefix but never confirmed for the new dir.
+        long uploadEpoch = supersededDir ? 0L : currentEpoch;
 
 
         Path pinned;
@@ -1679,7 +1702,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
      * and the delete is held.
      */
     private boolean ensureLiveSetUploaded(CloudStorageProvider provider, String dbName) {
-        return !ensureLiveSetUploaded(provider, dbName, currentLiveSstFiles(dbName));
+        // Pinned before the live set is read: a reset between the read and the confirmations below
+        // would otherwise confirm old-dir SST numbers under the new epoch.
+        long epoch = syncTracker.currentEpoch(dbName);
+        return !ensureLiveSetUploaded(provider, dbName, currentLiveSstFiles(dbName), epoch);
     }
 
     /**
@@ -1695,8 +1721,18 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     /** Testable seam: caller supplies the live-file set instead of reading the RocksDB singleton. */
     boolean ensureLiveSetUploaded(CloudStorageProvider provider, String dbName,
                                   List<LiveSstFile> liveFiles) {
+        return ensureLiveSetUploaded(provider, dbName, liveFiles, syncTracker.currentEpoch(dbName));
+    }
+
+    /**
+     * As above, with every confirmation check and write pinned to {@code epoch} (captured before
+     * {@code liveFiles} was read). If the DB name is reset/reopened meanwhile the live set belongs
+     * to a previous dir, so this fails safe (returns {@code false}: the delete is held).
+     */
+    boolean ensureLiveSetUploaded(CloudStorageProvider provider, String dbName,
+                                  List<LiveSstFile> liveFiles, long epoch) {
         // Fast path: single lock acquisition, zero cloud I/O — the common case.
-        if (syncTracker.allConfirmed(dbName, liveFiles)) {
+        if (syncTracker.allConfirmedInEpoch(dbName, liveFiles, epoch)) {
             return true;
         }
 
@@ -1708,13 +1744,17 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
 
         for (LiveSstFile live : liveFiles) {
             String localPath = live.getAbsolutePath();
-            if (syncTracker.isConfirmed(dbName, localPath)) {
+            if (syncTracker.isConfirmedInEpoch(dbName, localPath, epoch)) {
                 continue;
+            }
+            if (syncTracker.currentEpoch(dbName) != epoch) {
+                // The DB was reset/reopened: this live set is from the previous dir.
+                log.warn("Delete guard: stale live-set check aborted, db={}, epoch={}", dbName, epoch);
+                return false;
             }
             unconfirmedFiles.add(localPath);
             Path localFile = Paths.get(localPath);
             String remoteKey = toRelativeKey(localPath);
-            long uploadEpoch = syncTracker.currentEpoch(dbName);
             if (!Files.exists(localFile)) {
                 // File absent locally and absent from bitmap. Startup hydration (preHydrateDbFiles)
                 // seeds the bitmap from the cloud listing, so reaching here means this file is
@@ -1727,10 +1767,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
             try {
                 // Upload directly — no fileExists probe (idempotent PUT is cheaper than a probe).
                 provider.uploadFile(localPath, remoteKey);
-                if (!syncTracker.markConfirmedIfEpoch(dbName, localPath, uploadEpoch)) {
+                if (!syncTracker.markConfirmedIfEpoch(dbName, localPath, epoch)) {
                     allDurable = false;
                     log.warn("Delete guard: stale live-file confirmation dropped by epoch guard: "
-                             + "db={}, filePath={}, epoch={}", dbName, localPath, uploadEpoch);
+                             + "db={}, filePath={}, epoch={}", dbName, localPath, epoch);
                 }
             } catch (Exception e) {
                 allDurable = false;
@@ -1741,7 +1781,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                     // callback (plain submit() uses epoch 0 → dropped, so the file would never be
                     // marked durable and the delete guard would keep re-uploading it).
                     retryQueue.submit(dbName, live.getCfName(), localPath, remoteKey,
-                                      uploadEpoch, e);
+                                      epoch, e);
                 }
             }
         }
@@ -1758,7 +1798,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
             }
         }
 
-        return allDurable;
+        // Confirmations seen before a reset above are not re-checked per file; fail safe once here.
+        return allDurable && syncTracker.currentEpoch(dbName) == epoch;
     }
 
     /**
@@ -1800,6 +1841,12 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                 return;
             }
         }
+    }
+
+    /** Whether {@code dbDir} is not the dir {@code dbName} was last opened at (false if unknown). */
+    private boolean isSupersededDir(String dbName, String dbDir) {
+        String active = activeDirByDb.get(dbName);
+        return active != null && dbDir != null && !active.equals(dbDir);
     }
 
     /** Records the resolved DB directory for a logical DB name (idempotent). */

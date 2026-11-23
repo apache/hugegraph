@@ -236,6 +236,31 @@ public final class CloudSyncTracker {
     }
 
     /**
+     * Like {@link #allConfirmed} but true only while the DB is still at {@code epoch}. A live set
+     * read for an old epoch must not be judged against numbers confirmed by a reopened DB.
+     */
+    public boolean allConfirmedInEpoch(String dbName, List<LiveSstFile> liveFiles, long epoch) {
+        if (liveFiles.isEmpty()) {
+            return true;
+        }
+        boolean[] allPresent = {false};
+        stateByDb.computeIfPresent(dbName, (k, state) -> {
+            if (state.epoch != epoch) {
+                return state;
+            }
+            for (LiveSstFile live : liveFiles) {
+                long num = parseSstFileNumber(live.getAbsolutePath());
+                if (num >= 0 && !state.confirmed.contains(num)) {
+                    return state;  // allPresent stays false — short-circuit
+                }
+            }
+            allPresent[0] = true;
+            return state;
+        });
+        return allPresent[0];
+    }
+
+    /**
      * Removes all confirmed-sync state for the named database and advances the epoch.
      *
      * <p>After this call any in-flight upload callbacks that call {@link #markConfirmedIfEpoch}
