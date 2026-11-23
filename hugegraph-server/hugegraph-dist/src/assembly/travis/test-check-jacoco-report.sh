@@ -488,7 +488,7 @@ assert required_modules(pd_job) == {
 assert_order(store_job, [
     "mvn clean package",
     "mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp",
-    "-Dtest=StoredRowIngressTest,ArthasSecurityTest",
+    "-Dtest='org/apache/hugegraph/store/node/**/*Test,StoredRowIngressTest'",
     "-P store-common-test -Djacoco.sessionId=store-common-test",
     "-P store-client-test -Djacoco.sessionId=store-client-test",
     "-P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test",

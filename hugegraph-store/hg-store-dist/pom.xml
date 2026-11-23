@@ -51,6 +51,11 @@
             <classifier>exec</classifier>
             <scope>runtime</scope>
         </dependency>
+        <dependency>
+            <groupId>org.rocksdb</groupId>
+            <artifactId>rocksdbjni</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

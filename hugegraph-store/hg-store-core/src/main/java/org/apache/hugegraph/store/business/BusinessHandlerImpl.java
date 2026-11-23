@@ -1113,7 +1113,12 @@ public class BusinessHandlerImpl implements BusinessHandler {
     }
 
     /**
-     * Clear map data
+     * Clear one graph's data within a partition.
+     *
+     * <p>A partition's RocksDB instance is shared by every graph mapped to that partition, so this
+     * clears only {@code graphName}'s key range via {@code deleteRange}. The range-tombstoned SSTs
+     * produced here converge in cloud through the normal
+     * {@code onTableFileCreated}/{@code onTableFileDeleted} mirroring.
      */
     @Override
     public void truncate(String graphName, int partId) throws HgStoreException {
