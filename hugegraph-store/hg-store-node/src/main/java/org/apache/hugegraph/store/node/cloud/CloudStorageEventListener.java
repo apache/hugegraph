@@ -235,8 +235,24 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         }
     }
 
-    /** Last successfully published RocksDB generation per DB. */
-    private final Map<String, Long> lastPublishedMetadataGeneration = new ConcurrentHashMap<>();
+    /**
+     * Last successfully published RocksDB generation per DB, tagged with the tracker epoch it was
+     * published under. A RocksDB sequence number is not comparable across dirs, so a record from
+     * another epoch (a previous incarnation of the DB name) is ignored.
+     */
+    private final Map<String, PublishedGeneration> lastPublishedMetadataGeneration =
+            new ConcurrentHashMap<>();
+
+    private static final class PublishedGeneration {
+
+        final long epoch;
+        final long generation;
+
+        PublishedGeneration(long epoch, long generation) {
+            this.epoch = epoch;
+            this.generation = generation;
+        }
+    }
 
     /**
      * Suffix appended to the DB prefix (not inside it) when a database is deleted.
@@ -1777,7 +1793,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
             if (dbName.equals(e.getValue()) && !dir.equals(e.getKey())) {
                 log.info("Cloud DB {} reopened at {} (previously {}); resetting upload confirmations "
                          + "and published generation", dbName, dir, e.getKey());
-                // clearDb bumps the epoch, so in-flight confirmations from the old dir are dropped.
+                // clearDb bumps the epoch; in-flight publishes pinned to the old epoch can neither
+                // confirm SSTs nor record a generation.
                 syncTracker.clearDb(dbName);
                 lastPublishedMetadataGeneration.remove(dbName);
                 return;
@@ -1955,12 +1972,15 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
     boolean syncMetadataSnapshotInline(CloudStorageProvider provider, String dbName) {
         Object lock = metadataSyncLocks.computeIfAbsent(dbName, ignored -> new Object());
         synchronized (lock) {
+            // Captured before the snapshot so a reset between capture and publish fails safe: the
+            // publish's confirmations are dropped and the next drain retries.
+            long epoch = syncTracker.currentEpoch(dbName);
             MetadataSnapshot snapshot = captureMetadataSnapshot(dbName);
             if (snapshot == null) {
                 return false;
             }
             try {
-                return publishSnapshotWithGenerationCheck(provider, dbName, snapshot);
+                return publishSnapshotWithGenerationCheck(provider, dbName, snapshot, epoch);
             } finally {
                 snapshot.cleanup();
             }
@@ -1973,17 +1993,30 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
 
     private boolean publishSnapshotWithGenerationCheck(CloudStorageProvider provider,
                                                        String dbName,
-                                                       MetadataSnapshot snapshot) {
+                                                       MetadataSnapshot snapshot,
+                                                       long epoch) {
         long snapshotGeneration = snapshot.getGeneration();
-        long lastPublished = lastPublishedMetadataGeneration.getOrDefault(dbName, Long.MIN_VALUE);
+        PublishedGeneration record = lastPublishedMetadataGeneration.get(dbName);
+        // A record from another epoch belongs to a previous DB generation/dir and is not comparable.
+        long lastPublished = record != null && record.epoch == epoch ? record.generation
+                                                                     : Long.MIN_VALUE;
         if (snapshotGeneration >= 0L && snapshotGeneration < lastPublished) {
             log.warn("Cloud metadata-sync rejected stale snapshot: db={}, generation={}, lastPublished={}",
                      dbName, snapshotGeneration, lastPublished);
             return false;
         }
-        boolean published = uploadMetadataSnapshot(provider, dbName, snapshot);
+        boolean published = uploadMetadataSnapshot(provider, dbName, snapshot, epoch);
         if (published && snapshotGeneration >= 0L) {
-            lastPublishedMetadataGeneration.merge(dbName, snapshotGeneration, Math::max);
+            // The newer epoch always wins, so a late stale publish cannot overwrite the new DB's record.
+            lastPublishedMetadataGeneration.compute(dbName, (k, cur) -> {
+                if (cur == null || cur.epoch < epoch) {
+                    return new PublishedGeneration(epoch, snapshotGeneration);
+                }
+                if (cur.epoch == epoch) {
+                    return new PublishedGeneration(epoch, Math.max(cur.generation, snapshotGeneration));
+                }
+                return cur;
+            });
         }
         return published;
     }
@@ -2003,6 +2036,12 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
      */
     boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
                                    MetadataSnapshot snapshot) {
+        return uploadMetadataSnapshot(provider, dbName, snapshot, syncTracker.currentEpoch(dbName));
+    }
+
+    /** As above, with every SST confirmation pinned to {@code epoch} (captured before the snapshot). */
+    boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
+                                   MetadataSnapshot snapshot, long epoch) {
         String dbDir = snapshot.getDbDir();
         String tempDir = snapshot.getTempDir();
 
@@ -2019,7 +2058,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
         }
 
         // (1) Confirm every manifest-referenced SST is present in cloud.
-        if (!ensureSnapshotSstsUploaded(provider, dbName, snapshot)) {
+        if (!ensureSnapshotSstsUploaded(provider, dbName, snapshot, epoch)) {
             log.warn("Cloud metadata-sync: SST set not fully durable, holding metadata publish "
                      + "for db={}", dbName);
             return false;
@@ -2052,31 +2091,35 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
      * content even if compaction removed the original, so this cannot race a concurrent delete.
      */
     private boolean ensureSnapshotSstsUploaded(CloudStorageProvider provider, String dbName,
-                                               MetadataSnapshot snapshot) {
+                                               MetadataSnapshot snapshot, long epoch) {
         String dbDir = snapshot.getDbDir();
         String tempDir = snapshot.getTempDir();
         boolean allDurable = true;
         for (String sstName : snapshot.getSstFileNames()) {
             String realPath = joinPath(dbDir, sstName);
             String remoteKey = toRelativeKey(realPath);
-            long uploadEpoch = syncTracker.currentEpoch(dbName);
-            if (syncTracker.isConfirmed(dbName, realPath)) {
+            if (syncTracker.isConfirmedInEpoch(dbName, realPath, epoch)) {
                 continue;
+            }
+            if (syncTracker.currentEpoch(dbName) != epoch) {
+                // The DB was reset/reopened: no point uploading old-dir SSTs.
+                log.warn("Cloud metadata-sync: stale publish aborted, db={}, epoch={}", dbName, epoch);
+                return false;
             }
             try {
                 if (provider.fileExists(remoteKey)) {
-                    if (!syncTracker.markConfirmedIfEpoch(dbName, realPath, uploadEpoch)) {
+                    if (!syncTracker.markConfirmedIfEpoch(dbName, realPath, epoch)) {
                         allDurable = false;
                         log.warn("Cloud metadata-sync: stale SST confirmation dropped by epoch guard: "
-                                 + "db={}, key={}, epoch={}", dbName, remoteKey, uploadEpoch);
+                                 + "db={}, key={}, epoch={}", dbName, remoteKey, epoch);
                     }
                     continue;
                 }
                 provider.uploadFile(joinPath(tempDir, sstName), remoteKey);
-                if (!syncTracker.markConfirmedIfEpoch(dbName, realPath, uploadEpoch)) {
+                if (!syncTracker.markConfirmedIfEpoch(dbName, realPath, epoch)) {
                     allDurable = false;
                     log.warn("Cloud metadata-sync: stale SST upload confirmation dropped by epoch "
-                             + "guard: db={}, key={}, epoch={}", dbName, remoteKey, uploadEpoch);
+                             + "guard: db={}, key={}, epoch={}", dbName, remoteKey, epoch);
                 }
             } catch (Exception e) {
                 allDurable = false;
@@ -2088,7 +2131,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener, AutoCl
                     // callback (plain submit() uses epoch 0 → dropped). Skipped when a retry for
                     // this object is already queued, so every failed publish does not stack
                     // another retry chain.
-                    retryQueue.submit(dbName, null, realPath, remoteKey, uploadEpoch, e);
+                    retryQueue.submit(dbName, null, realPath, remoteKey, epoch, e);
                 }
             }
         }

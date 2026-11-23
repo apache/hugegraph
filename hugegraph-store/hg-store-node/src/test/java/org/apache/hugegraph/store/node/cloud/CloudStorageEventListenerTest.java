@@ -759,6 +759,134 @@ public class CloudStorageEventListenerTest {
         }
     }
 
+    @Test
+    public void syncMetadataSnapshotInline_staleDirPublishDoesNotConfirmSstsAfterReopenAtNewDir()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-stale-publish");
+        Path dirA = tmpRoot.resolve("db_0");
+        Path dirB = tmpRoot.resolve("db_1");
+        Files.createDirectories(dirA);
+        Files.createDirectories(dirB);
+        CountDownLatch firstUploadEntered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean blocked = new AtomicBoolean();
+        CapturingProvider provider = new CapturingProvider() {
+            @Override
+            public void uploadFile(String localPath, String remoteKey) throws IOException {
+                if (blocked.compareAndSet(false, true)) {
+                    firstUploadEntered.countDown();
+                    try {
+                        assertTrue(release.await(5, TimeUnit.SECONDS), "timed out waiting for release");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        fail("interrupted while waiting to release blocked upload");
+                    }
+                }
+                super.uploadFile(localPath, remoteKey);
+            }
+        };
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                provider, List.of(tmpRoot.toString()), false, 0L, null, tracker, null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS) {
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                try {
+                    Path temp = Files.createTempDirectory("hgstore-meta-stale-dirA");
+                    return new MetadataSnapshot(dirA.toString(), temp.toString(), "CURRENT",
+                                                "MANIFEST-000005", List.of(),
+                                                List.of("000010.sst", "000011.sst"), 5L);
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        };
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            l.onDBOpening("db0", dirA.toString());
+            Future<Boolean> publish = pool.submit(() -> l.syncMetadataSnapshotInline(provider, "db0"));
+            assertTrue(firstUploadEntered.await(5, TimeUnit.SECONDS));
+
+            l.onDBOpening("db0", dirB.toString());
+            release.countDown();
+
+            assertFalse(publish.get(5, TimeUnit.SECONDS),
+                        "publish pinned to the old dir's epoch must not succeed");
+            assertFalse(tracker.isConfirmed("db0", dirB.resolve("000010.sst").toString()));
+            assertFalse(tracker.isConfirmed("db0", dirB.resolve("000011.sst").toString()),
+                        "old-dir SST must not be confirmed under the reopened DB's epoch");
+            assertEquals(0L, tracker.confirmedCount("db0"));
+            for (String[] upload : provider.uploads) {
+                assertFalse(upload[1].contains("MANIFEST") || upload[1].endsWith("CURRENT"),
+                            "metadata must not be published for a stale dir: " + upload[1]);
+            }
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void syncMetadataSnapshotInline_staleDirGenerationDoesNotBlockReopenedDb()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-stale-generation");
+        Path dirA = tmpRoot.resolve("db_0");
+        Path dirB = tmpRoot.resolve("db_1");
+        Files.createDirectories(dirA);
+        Files.createDirectories(dirB);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<MetadataSnapshot> next = new AtomicReference<>();
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                new CapturingProvider(), List.of(tmpRoot.toString()), false, 0L, null,
+                new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS) {
+            @Override
+            MetadataSnapshot captureMetadataSnapshot(String dbName) {
+                return next.get();
+            }
+
+            @Override
+            boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
+                                           MetadataSnapshot snapshot, long epoch) {
+                if (snapshot.getGeneration() == 500L) {
+                    entered.countDown();
+                    try {
+                        assertTrue(release.await(5, TimeUnit.SECONDS), "timed out waiting for release");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        fail("interrupted while waiting to release blocked publish");
+                    }
+                }
+                return true;
+            }
+        };
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            l.onDBOpening("db0", dirA.toString());
+            next.set(generationSnapshot("hgstore-meta-stale-gen-old", 500L));
+            Future<Boolean> oldPublish =
+                    pool.submit(() -> l.syncMetadataSnapshotInline(new CapturingProvider(), "db0"));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+            l.onDBOpening("db0", dirB.toString());
+            release.countDown();
+            assertTrue(oldPublish.get(5, TimeUnit.SECONDS));
+
+            next.set(generationSnapshot("hgstore-meta-stale-gen-new", 100L));
+            assertTrue(l.syncMetadataSnapshotInline(new CapturingProvider(), "db0"),
+                       "old dir's late-recorded generation must not block the reopened DB");
+            next.set(generationSnapshot("hgstore-meta-stale-gen-older", 50L));
+            assertFalse(l.syncMetadataSnapshotInline(new CapturingProvider(), "db0"),
+                        "an older generation within the same epoch is still stale");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
     /** Listener whose metadata capture returns {@code next} and whose upload always succeeds. */
     private static CloudStorageEventListener metadataListener(Path root, CloudSyncTracker tracker,
                                                               AtomicReference<MetadataSnapshot> next) {
@@ -772,7 +900,7 @@ public class CloudStorageEventListenerTest {
 
             @Override
             boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
-                                           MetadataSnapshot snapshot) {
+                                           MetadataSnapshot snapshot, long epoch) {
                 return true;
             }
         };
@@ -841,7 +969,7 @@ public class CloudStorageEventListenerTest {
 
         @Override
         boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
-                                       MetadataSnapshot snapshot) {
+                                       MetadataSnapshot snapshot, long epoch) {
             publishedGenerations.add(snapshot.getGeneration());
             if (snapshot.getGeneration() == blockedGeneration && blockedEntered != null
                 && blockedRelease != null) {

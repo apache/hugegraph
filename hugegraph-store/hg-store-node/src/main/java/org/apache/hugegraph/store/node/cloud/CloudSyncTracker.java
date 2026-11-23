@@ -176,6 +176,23 @@ public final class CloudSyncTracker {
         return result[0];
     }
 
+    /**
+     * Like {@link #isConfirmed} but true only while the DB is still at {@code epoch}. A publish
+     * pinned to an old epoch must not treat a number confirmed by a reopened DB as its own.
+     */
+    public boolean isConfirmedInEpoch(String dbName, String filePath, long epoch) {
+        long number = parseSstFileNumber(filePath);
+        if (number < 0) {
+            return false;
+        }
+        boolean[] result = {false};
+        stateByDb.computeIfPresent(dbName, (k, state) -> {
+            result[0] = state.epoch == epoch && state.confirmed.contains(number);
+            return state;
+        });
+        return result[0];
+    }
+
     /** Clears the confirmed bit for a file (called after the cloud object is deleted). */
     public void clearConfirmed(String dbName, String filePath) {
         long number = parseSstFileNumber(filePath);

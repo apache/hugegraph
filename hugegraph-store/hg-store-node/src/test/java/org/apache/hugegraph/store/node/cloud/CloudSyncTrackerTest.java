@@ -57,6 +57,26 @@ public class CloudSyncTrackerTest {
     }
 
     @Test
+    public void isConfirmedInEpoch_matchesOnlyTheEpochThatConfirmed() {
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        String path = "0/000042.sst";
+        long oldEpoch = tracker.currentEpoch("0");
+        assertTrue(tracker.markConfirmedIfEpoch("0", path, oldEpoch));
+        assertTrue(tracker.isConfirmedInEpoch("0", path, oldEpoch));
+
+        tracker.clearDb("0");
+        long newEpoch = tracker.currentEpoch("0");
+        assertFalse(tracker.isConfirmedInEpoch("0", path, oldEpoch));
+        assertFalse(tracker.isConfirmedInEpoch("0", path, newEpoch));
+
+        // Re-marked under the new epoch: confirmed for the new epoch only.
+        assertTrue(tracker.markConfirmedIfEpoch("0", path, newEpoch));
+        assertTrue(tracker.isConfirmedInEpoch("0", path, newEpoch));
+        assertFalse(tracker.isConfirmedInEpoch("0", path, oldEpoch));
+        assertFalse(tracker.isConfirmedInEpoch("0", "0/CURRENT", newEpoch));
+    }
+
+    @Test
     public void confirmedBitmapsAreScopedPerDb() {
         CloudSyncTracker tracker = new CloudSyncTracker();
         tracker.markConfirmed("0", "0/000001.sst");
