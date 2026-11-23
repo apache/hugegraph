@@ -131,7 +131,10 @@ public class GraphsAPI extends API {
                                                HugePermission.READ);
             if (adminManager || sc.isUserInRole(role)) {
                 try {
-                    graph(manager, graphSpace, graph);
+                    HugeGraph g = graph(manager, graphSpace, graph);
+                    if (g instanceof HugeGraphAuthProxy) {
+                        ((HugeGraphAuthProxy) g).verifyReadPermission();
+                    }
                     filterGraphs.add(graph);
                 } catch (ForbiddenException ignored) {
                     // ignore

@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.apache.hugegraph</groupId>
+        <artifactId>hugegraph-server</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>hugegraph-ranger-plugin</artifactId>
+    <packaging>jar</packaging>
+
+    <name>${project.artifactId}</name>
+    <description>Apache Ranger authorization plugin for HugeGraph</description>
+
+    <properties>
+        <!-- Keep in step with the apache/ranger base image in
+             docker/hgRangerIntegration/Dockerfile.ranger. -->
+        <ranger.version>2.9.0</ranger.version>
+    </properties>
+
+    <dependencies>
+        <!-- HugeGraph internal dependencies: provided by the server's lib/ at runtime.
+             Declared provided so neither the modules nor their transitive tree
+             (guava, commons-configuration2, jctools, ...) end up in the shaded jar,
+             where unrelocated copies would shadow the server's own versions. -->
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hugegraph-core</artifactId>
+            <version>${revision}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hugegraph-api</artifactId>
+            <version>${revision}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Apache Ranger plugin SDK -->
+        <dependency>
+            <groupId>org.apache.ranger</groupId>
+            <artifactId>ranger-plugins-common</artifactId>
+            <version>${ranger.version}</version>
+            <exclusions>
+                <!-- avoid hadoop/hbase version conflicts -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-auth</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Since Ranger 2.7 the audit destinations are separate artifacts;
+             ranger-plugins-common only brings ranger-audit-core (file
+             destination). Needed for xasecure.audit.destination.solr. -->
+        <dependency>
+            <groupId>org.apache.ranger</groupId>
+            <artifactId>ranger-audit-dest-solr</artifactId>
+            <version>${ranger.version}</version>
+            <exclusions>
+                <!-- It declares slf4j-api 2.x directly, which would win over
+                     HugeGraph's 1.7 line and get shaded into lib/; SLF4J 2.x
+                     ignores the log4j-slf4j-impl binding and turns all server
+                     logging into NOP. solrj 8.x only needs the 1.7 API. -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- logging: shipped with the server, must bind to the server's copies -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Hadoop configuration is pulled in by ranger-plugins-common at runtime;
+             provided scope lets us compile against it without bundling it. -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>3.3.4</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- test -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <!--
+                              Produce a standalone "plugin" jar that Ranger's
+                              security-admin can pick up.  The HugeGraph modules
+                              and log4j are provided-scope, so they and their
+                              transitive trees are not shaded at all.
+                            -->
+                            <artifactSet>
+                                <excludes>
+                                    <!-- Jersey 3.x and Jakarta JAX-RS are provided by
+                                         HugeGraph's server classpath — exclude the whole
+                                         transitive tree so the shaded JAR doesn't override
+                                         HugeGraph's own jersey-server registration. -->
+                                    <exclude>org.glassfish.jersey.*:*</exclude>
+                                    <exclude>org.glassfish.hk2*:*</exclude>
+                                    <exclude>jakarta.ws.rs:jakarta.ws.rs-api</exclude>
+                                    <exclude>jakarta.inject:jakarta.inject-api</exclude>
+                                    <exclude>jakarta.annotation:jakarta.annotation-api</exclude>
+                                    <!-- Libraries that ship in the server's lib/ at the same
+                                         (or a patch-compatible) version.  Not bundled, so the
+                                         server's own copy is the only one on the classpath.
+                                         hugegraph*.jar (this one included) sorts first on the
+                                         server classpath, so anything bundled here shadows lib/. -->
+                                    <exclude>com.fasterxml.jackson.core:*</exclude>
+                                    <exclude>com.fasterxml.jackson.module:jackson-module-jaxb-annotations</exclude>
+                                    <exclude>com.github.stephenc.jcip:jcip-annotations</exclude>
+                                    <exclude>com.google.code.findbugs:jsr305</exclude>
+                                    <exclude>com.google.code.gson:gson</exclude>
+                                    <exclude>com.carrotsearch:hppc</exclude>
+                                    <exclude>com.sun.activation:jakarta.activation</exclude>
+                                    <exclude>com.sun.istack:istack-commons-runtime</exclude>
+                                    <exclude>com.sun.xml.bind:jaxb-core</exclude>
+                                    <exclude>com.sun.xml.bind:jaxb-impl</exclude>
+                                    <exclude>commons-codec:commons-codec</exclude>
+                                    <exclude>commons-collections:commons-collections</exclude>
+                                    <exclude>commons-lang:commons-lang</exclude>
+                                    <exclude>joda-time:joda-time</exclude>
+                                    <exclude>jakarta.activation:jakarta.activation-api</exclude>
+                                    <exclude>jakarta.xml.bind:jakarta.xml.bind-api</exclude>
+                                    <exclude>javax.activation:javax.activation-api</exclude>
+                                    <exclude>javax.xml.bind:jaxb-api</exclude>
+                                    <exclude>org.apache.commons:commons-compress</exclude>
+                                    <!-- Not relocated: the plugin passes HugeConfig (a
+                                         commons-configuration2 Configuration) to TinkerPop's
+                                         GraphFactory.open(), so it must be the server's class. -->
+                                    <exclude>org.apache.commons:commons-configuration2</exclude>
+                                    <exclude>org.apache.commons:commons-text</exclude>
+                                    <exclude>org.ow2.asm:asm</exclude>
+                                    <!-- Logging must bind to the server's slf4j/log4j, and
+                                         commons-logging calls must reach it via lib/. -->
+                                    <exclude>org.slf4j:*</exclude>
+                                    <exclude>commons-logging:commons-logging</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <!-- Strip signature files from bundled signed JARs to prevent
+                                 SecurityException: Invalid signature file digest.
+                                 Also strip any bundled persistence.xml — if this jar is ever
+                                 placed on the Ranger Admin classpath it would produce a
+                                 "Conflicting persistence unit definitions for name 'xa_server'"
+                                 error because ranger-plugins-audit already declares that unit.
+                                 Strip jakarta.ws.rs RuntimeDelegate registration — provided
+                                 by HugeGraph's own Jersey JAR. -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/DEPENDENCIES</exclude>
+                                        <exclude>META-INF/persistence.xml</exclude>
+                                        <exclude>META-INF/services/jakarta.ws.rs.*</exclude>
+                                        <exclude>META-INF/services/jakarta.xml.bind.*</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <!--
+                              Relocate com.sun.jersey (Jersey 1.x client bundled by
+                              ranger-plugins-common) and the javax.ws.rs API it relies
+                              on into private packages so they do not conflict with
+                              HugeGraph's Jakarta EE 3 / Jersey 3.x server classes.
+                            -->
+                            <relocations>
+                                <relocation>
+                                    <pattern>com.sun.jersey</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.com.sun.jersey</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>javax.ws.rs</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.javax.ws.rs</shadedPattern>
+                                </relocation>
+                                <!--
+                                  Jersey 1.x/2.x (bundled by ranger-plugins-common) repackages ASM as
+                                  jersey.repackaged.org.objectweb.asm.  Jersey 3.x (HugeGraph's server)
+                                  repackages a NEWER version under the same package.  Without relocation
+                                  the plugin JAR shadows Jersey 3.x's ASM, and ClassVisitor.<init>
+                                  throws IllegalArgumentException on an unknown API version.
+                                -->
+                                <relocation>
+                                    <pattern>jersey.repackaged</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.jersey.repackaged</shadedPattern>
+                                </relocation>
+                                <!--
+                                  Libraries bundled by Ranger that also exist in the server's
+                                  lib/ at a different version (the plugin jar is first on the
+                                  classpath, so unrelocated copies would replace lib/'s).
+                                  - commons-lang3 3.19.0: lib/ has 3.18.0
+                                  - httpclient/httpcore family: httpcore 4.4.14 vs 4.4.13; the
+                                    whole family is relocated together to stay consistent
+                                  - nimbus-jose-jwt 10.x vs 8.2.1, json-smart 2.4.x vs 2.3 and
+                                    accessors-smart 2.4.9 vs 1.2
+                                  - jackson-jaxrs-* are the javax.ws.rs flavour, bound to the
+                                    relocated javax.ws.rs above (databind/core come from lib/)
+                                  org.apache.hadoop is deliberately NOT relocated: Hadoop resolves
+                                  class names from core-default.xml at runtime, which relocation
+                                  cannot rewrite (UserGroupInformation then fails with
+                                  ClassNotFoundException).  Known remaining overlap: hadoop-client-api
+                                  vs the Hadoop classes embedded in lib/hbase-shaded-client (HBase
+                                  backend only).
+                                -->
+                                <relocation>
+                                    <pattern>org.apache.commons.lang3</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.org.apache.commons.lang3</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.http</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.org.apache.http</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.nimbusds</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.com.nimbusds</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>net.minidev</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.net.minidev</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson.jaxrs</pattern>
+                                    <shadedPattern>shaded.hugegraph.ranger.com.fasterxml.jackson.jaxrs</shadedPattern>
+                                </relocation>
+                            </relocations>
+                            <!--
+                              Update META-INF/services/* entries to use relocated
+                              class names (required for ServiceLoader-based JAX-RS
+                              RuntimeDelegate discovery in shaded javax.ws.rs).
+                            -->
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>plugin</shadedClassifierName>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
